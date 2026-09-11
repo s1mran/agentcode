@@ -781,12 +781,21 @@ export function PromptInputV2MicButton(props: { disabled?: boolean; onText: (tex
           const form = new FormData()
           form.append("file", blob, "speech.webm")
           const res = await fetch(TRANSCRIBE_URL, { method: "POST", body: form })
-          if (!res.ok) throw new Error(`transcriber returned ${res.status}`)
+          if (!res.ok) throw new Error(`Transcriber returned ${res.status}`)
           const text = ((await res.json()) as { text?: string }).text?.trim()
           if (text) props.onText(text)
-          else setError("nothing heard")
+          else setError("Nothing heard — try speaking closer to the mic.")
         } catch (e) {
-          setError(e instanceof Error ? e.message : "transcription failed")
+          // A dead gateway shows up here as a generic network failure, which tells
+          // the user nothing. Name the actual cause instead.
+          const offline = e instanceof TypeError || /fetch|network|load failed/i.test(String(e))
+          setError(
+            offline
+              ? "Can't reach the transcriber. Is the AgentCode gateway running on port 8399?"
+              : e instanceof Error
+                ? e.message
+                : "Transcription failed.",
+          )
         } finally {
           setStatus("idle")
         }
@@ -795,10 +804,18 @@ export function PromptInputV2MicButton(props: { disabled?: boolean; onText: (tex
       startMeter(stream)
       setStatus("recording")
     } catch {
-      setError("microphone unavailable")
+      setError("Microphone unavailable — check macOS mic permission for AgentCode.")
       setStatus("idle")
     }
   }
+
+  // Surface failures where they can actually be read. A tooltip only appears on
+  // hover, so a silent mic looked identical to a broken one.
+  createEffect(() => {
+    if (!error()) return
+    const id = setTimeout(() => setError(undefined), 6000)
+    onCleanup(() => clearTimeout(id))
+  })
 
   const mmss = () => {
     const s = seconds()
@@ -833,8 +850,19 @@ export function PromptInputV2MicButton(props: { disabled?: boolean; onText: (tex
   )
 
   return (
-    <Show when={status() !== "recording"} fallback={<Meter />}>
-      <TooltipV2 value={error() ?? "Dictate"}>
+    <>
+      <Show when={error()}>
+        {(message) => (
+          <div
+            role="status"
+            class="pointer-events-none absolute -top-7 right-2 z-20 max-w-[420px] truncate rounded-md bg-v2-background-bg-base px-2 py-1 text-[11px] text-v2-text-text-danger shadow-[var(--v2-elevation-raised)]"
+          >
+            {message()}
+          </div>
+        )}
+      </Show>
+      <Show when={status() !== "recording"} fallback={<Meter />}>
+        <TooltipV2 value="Dictate">
         <IconButtonV2
           type="button"
           data-action="prompt-mic"
@@ -874,8 +902,9 @@ export function PromptInputV2MicButton(props: { disabled?: boolean; onText: (tex
           </svg>
           </Show>
         </IconButtonV2>
-      </TooltipV2>
-    </Show>
+        </TooltipV2>
+      </Show>
+    </>
   )
 }
 

@@ -10,7 +10,6 @@ import {
 import { UPDATER_ENABLED } from "./constants"
 import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { openExternalURL } from "./windows"
-import { nativeT } from "./native-translations"
 
 type Deps = {
   trigger: (id: string) => void
@@ -22,9 +21,9 @@ export function createMenu(deps: Deps) {
   if (process.platform !== "darwin") return
 
   const template = DESKTOP_MENU.filter((menu) => desktopMenuVisible(menu, "macos")).map((menu) => {
-    if (menu.role) return { role: nativeRole(menu.role), label: nativeT(menu.labelKey) }
+    if (menu.role) return { role: nativeRole(menu.role), label: menu.label }
     return {
-      label: nativeT(menu.labelKey),
+      label: menu.label,
       submenu: menu.items
         ?.filter((entry) => desktopMenuVisible(entry, "macos"))
         .map((entry) => nativeItem(entry, deps)),
@@ -36,10 +35,10 @@ export function createMenu(deps: Deps) {
 
 function nativeItem(entry: DesktopMenuEntry, deps: Deps): MenuItemConstructorOptions {
   if (entry.type === "separator") return { type: "separator" }
-  if (entry.role) return { role: nativeRole(entry.role), label: entry.labelKey ? nativeT(entry.labelKey) : undefined }
+  if (entry.role) return { role: nativeRole(entry.role), label: entry.label }
 
   const item: MenuItemConstructorOptions = {
-    label: entry.labelKey ? nativeT(entry.labelKey) : undefined,
+    label: entry.label,
     accelerator: entry.accelerator?.macos,
     enabled: entry.enabled === "updater" ? UPDATER_ENABLED : undefined,
   }
