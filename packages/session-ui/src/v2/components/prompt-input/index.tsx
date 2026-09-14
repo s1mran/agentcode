@@ -52,6 +52,9 @@ export function PromptInputV2(props: PromptInputV2Props) {
   const view = props.controller.view
   let editor: HTMLDivElement | undefined
   let localInput = false
+  // Text present before dictation started, so live partials can be rewritten
+  // in place without eating what the user had already typed.
+  let dictationBase: string | undefined
   const updateCursor = () => {
     if (!editor || !window.getSelection()?.isCollapsed) return
     props.controller.onCursor(promptInputV2Cursor(editor))
@@ -256,8 +259,26 @@ export function PromptInputV2(props: PromptInputV2Props) {
           </div>
           <PromptInputV2MicButton
             disabled={props.disabled || props.readOnly || state.mode === "shell"}
+            onPartial={(text) => {
+              if (!editor) return
+              // Anything typed before recording began is kept; the live guess is
+              // rewritten in place each pass rather than appended.
+              if (dictationBase === undefined) dictationBase = editor.textContent ?? ""
+              const joiner = dictationBase && !/\s$/.test(dictationBase) ? " " : ""
+              editor.textContent = dictationBase + joiner + text
+              const cursor = promptInputV2Cursor(editor)
+              const prompt = parsePromptInputV2Editor(editor)
+              const images = props.controller.parts().filter((part) => part.type === "image")
+              localInput = true
+              props.controller.onInput(prompt.map((part) => part.content).join(""), [...prompt, ...images], cursor)
+            }}
             onText={(text) => {
               if (!editor) return
+              // The final pass is authoritative — drop the provisional guess first.
+              if (dictationBase !== undefined) {
+                editor.textContent = dictationBase
+                dictationBase = undefined
+              }
               editor.focus()
               // Put the caret at the end, then insert the way a paste would so the
               // controller's input handling stays in sync.
@@ -269,9 +290,17 @@ export function PromptInputV2(props: PromptInputV2Props) {
               selection?.addRange(range)
               const existing = editor.textContent ?? ""
               const value = existing && !/\s$/.test(existing) ? ` ${text}` : text
-              if (typeof document.execCommand === "function" && document.execCommand("insertText", false, value)) return
-              editor.textContent = existing + value
-              editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }))
+              if (!(typeof document.execCommand === "function" && document.execCommand("insertText", false, value))) {
+                editor.textContent = existing + value
+              }
+              // The controller drives canSubmit(), and it only learns about text
+              // through its own onInput. Without this the words are visible but
+              // the send button stays disabled and Enter does nothing.
+              const cursor = promptInputV2Cursor(editor)
+              const prompt = parsePromptInputV2Editor(editor)
+              const images = props.controller.parts().filter((part) => part.type === "image")
+              localInput = true
+              props.controller.onInput(prompt.map((part) => part.content).join(""), [...prompt, ...images], cursor)
             }}
           />
           <PromptInputV2SubmitButton
@@ -700,7 +729,16 @@ const TRANSCRIBE_URL =
 
 const MIC_BARS = 14
 
-export function PromptInputV2MicButton(props: { disabled?: boolean; onText: (text: string) => void }) {
+// How often the in-progress audio is re-transcribed so words show up while you
+// are still talking. Whisper re-reads the whole clip each pass, which keeps the
+// text accurate across word boundaries at the cost of a little repeated work.
+const MIC_PARTIAL_MS = 1200
+
+export function PromptInputV2MicButton(props: {
+  disabled?: boolean
+  onText: (text: string) => void
+  onPartial?: (text: string) => void
+}) {
   const [status, setStatus] = createSignal<"idle" | "recording" | "working">("idle")
   const [error, setError] = createSignal<string | undefined>()
   // Live mic amplitude per bar, 0..1 — this is what makes it visibly "listening"
@@ -713,12 +751,46 @@ export function PromptInputV2MicButton(props: { disabled?: boolean; onText: (tex
   let audioCtx: AudioContext | undefined
   let raf: number | undefined
   let timer: ReturnType<typeof setInterval> | undefined
+  let partialTimer: ReturnType<typeof setInterval> | undefined
+  let partialBusy = false
+
+  /**
+   * Transcribe what has been captured so far. `fast` picks a smaller model —
+   * used for live partials, where keeping up matters more than exactness.
+   */
+  const transcribe = async (blob: Blob, fast = false) => {
+    const form = new FormData()
+    form.append("file", blob, "speech.webm")
+    const res = await fetch(fast ? `${TRANSCRIBE_URL}?fast=1` : TRANSCRIBE_URL, { method: "POST", body: form })
+    if (!res.ok) throw new Error(`Transcriber returned ${res.status}`)
+    return ((await res.json()) as { text?: string }).text?.trim() ?? ""
+  }
+
+  const startPartials = () => {
+    if (!props.onPartial) return
+    partialTimer = setInterval(async () => {
+      // Skip a tick rather than queue: whisper is slower than the interval on
+      // longer clips, and piling requests up would only make the text lag more.
+      if (partialBusy || !chunks.length) return
+      partialBusy = true
+      try {
+        const text = await transcribe(new Blob(chunks, { type: chunks[0]?.type || "audio/webm" }), true)
+        if (text && recorder) props.onPartial?.(text)
+      } catch {
+        // a failed partial is not worth surfacing; the final pass still runs
+      } finally {
+        partialBusy = false
+      }
+    }, MIC_PARTIAL_MS)
+  }
 
   const teardownMeter = () => {
     if (raf !== undefined) cancelAnimationFrame(raf)
     raf = undefined
     if (timer) clearInterval(timer)
     timer = undefined
+    if (partialTimer) clearInterval(partialTimer)
+    partialTimer = undefined
     void audioCtx?.close().catch(() => {})
     audioCtx = undefined
     setLevels(new Array(MIC_BARS).fill(0))
@@ -778,11 +850,7 @@ export function PromptInputV2MicButton(props: { disabled?: boolean; onText: (tex
         if (!blob.size) return setStatus("idle")
         setStatus("working")
         try {
-          const form = new FormData()
-          form.append("file", blob, "speech.webm")
-          const res = await fetch(TRANSCRIBE_URL, { method: "POST", body: form })
-          if (!res.ok) throw new Error(`Transcriber returned ${res.status}`)
-          const text = ((await res.json()) as { text?: string }).text?.trim()
+          const text = await transcribe(blob)
           if (text) props.onText(text)
           else setError("Nothing heard — try speaking closer to the mic.")
         } catch (e) {
@@ -800,8 +868,11 @@ export function PromptInputV2MicButton(props: { disabled?: boolean; onText: (tex
           setStatus("idle")
         }
       }
-      recorder.start()
+      // A timeslice is required: without it ondataavailable only fires at stop,
+      // so there would be nothing to transcribe while the user is still talking.
+      recorder.start(1000)
       startMeter(stream)
+      startPartials()
       setStatus("recording")
     } catch {
       setError("Microphone unavailable — check macOS mic permission for AgentCode.")
@@ -908,6 +979,46 @@ export function PromptInputV2MicButton(props: { disabled?: boolean; onText: (tex
   )
 }
 
+/**
+ * Elapsed seconds while the agent is working, the way Claude Code shows them.
+ * Without it a long turn is indistinguishable from a hung one.
+ */
+function ElapsedTimer(props: { active: boolean }) {
+  const [seconds, setSeconds] = createSignal(0)
+  let timer: ReturnType<typeof setInterval> | undefined
+  let startedAt = 0
+
+  createEffect(() => {
+    if (props.active) {
+      startedAt = Date.now()
+      setSeconds(0)
+      timer = setInterval(() => setSeconds(Math.floor((Date.now() - startedAt) / 1000)), 1000)
+    } else {
+      if (timer) clearInterval(timer)
+      timer = undefined
+      setSeconds(0)
+    }
+  })
+  onCleanup(() => timer && clearInterval(timer))
+
+  const label = () => {
+    const s = seconds()
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`
+  }
+
+  return (
+    <Show when={props.active && seconds() > 0}>
+      <span
+        data-component="prompt-elapsed"
+        class="mr-2 tabular-nums text-[11px] text-v2-text-text-muted"
+        aria-live="off"
+      >
+        {label()}
+      </span>
+    </Show>
+  )
+}
+
 export function PromptInputV2SubmitButton(props: {
   mode: PromptInputV2Mode
   stopping: boolean
@@ -918,6 +1029,8 @@ export function PromptInputV2SubmitButton(props: {
   onStop: () => void
 }) {
   return (
+    <>
+      <ElapsedTimer active={props.stopping} />
     <TooltipV2
       placement="top"
       inactive={!props.stopping && props.disabled}
@@ -947,6 +1060,7 @@ export function PromptInputV2SubmitButton(props: {
         }}
       />
     </TooltipV2>
+    </>
   )
 }
 

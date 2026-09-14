@@ -1,5 +1,9 @@
 import { type ComponentProps } from "solid-js"
 
+/**
+ * AgentCode mark — a terminal window holding a `>_` prompt. Geometry is kept
+ * chunky on purpose so it survives a 16px favicon and a Dock icon equally well.
+ */
 export const Mark = (props: { class?: string }) => {
   return (
     <svg
@@ -9,8 +13,33 @@ export const Mark = (props: { class?: string }) => {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
-      <path data-slot="logo-logo-mark-shadow" d="M12 16H4V8H12V16Z" fill="var(--icon-weak-base)" />
-      <path data-slot="logo-logo-mark-o" d="M12 4H4V16H12V4ZM16 20H0V0H16V20Z" fill="var(--icon-strong-base)" />
+      <rect
+        data-slot="logo-mark-frame"
+        x="0.9"
+        y="1.9"
+        width="14.2"
+        height="16.2"
+        rx="3.4"
+        stroke="var(--icon-strong-base)"
+        stroke-width="1.8"
+      />
+      <path
+        data-slot="logo-mark-caret"
+        d="M4.9 7.1 L7.7 10 L4.9 12.9"
+        stroke="var(--icon-strong-base)"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <rect
+        data-slot="logo-mark-cursor"
+        x="8.9"
+        y="11.3"
+        width="3.3"
+        height="1.7"
+        rx="0.85"
+        fill="var(--icon-weak-base)"
+      />
     </svg>
   )
 }
@@ -25,12 +54,20 @@ export const Splash = (props: Pick<ComponentProps<"svg">, "ref" | "class">) => {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
-      <path d="M60 80H20V40H60V80Z" fill="var(--icon-base)" />
-      <path d="M60 20H20V80H60V20ZM80 100H0V0H80V100Z" fill="var(--icon-strong-base)" />
+      <rect x="4.5" y="9.5" width="71" height="81" rx="17" stroke="var(--icon-strong-base)" stroke-width="9" />
+      <path
+        d="M24.5 35.5 L38.5 50 L24.5 64.5"
+        stroke="var(--icon-strong-base)"
+        stroke-width="9"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <rect x="44.5" y="56.5" width="16.5" height="8.5" rx="4.25" fill="var(--icon-base)" />
     </svg>
   )
 }
 
+/** Mark plus wordmark, for headers and the about screen. */
 export const Logo = (props: { class?: string }) => {
   return (
     <svg
@@ -39,18 +76,26 @@ export const Logo = (props: { class?: string }) => {
       fill="none"
       classList={{ [props.class ?? ""]: !!props.class }}
     >
+      <rect x="1.4" y="6.4" width="27.2" height="29.2" rx="6.4" stroke="var(--icon-strong-base)" stroke-width="2.8" />
+      <path
+        d="M9.4 15.6 L15 21 L9.4 26.4"
+        stroke="var(--icon-strong-base)"
+        stroke-width="2.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <rect x="17.4" y="24.2" width="6.4" height="3" rx="1.5" fill="var(--icon-weak-base)" />
       <text
-        x="117"
+        x="42"
         y="21"
-        text-anchor="middle"
         dominant-baseline="central"
-        font-family="ui-monospace, monospace"
-        font-size="30"
-        font-weight="700"
-        letter-spacing="2"
+        font-family="ui-sans-serif, -apple-system, 'SF Pro Text', system-ui, sans-serif"
+        font-size="25"
+        font-weight="650"
+        letter-spacing="-0.4"
         fill="var(--icon-strong-base)"
       >
-        AGENTCODE
+        AgentCode
       </text>
     </svg>
   )

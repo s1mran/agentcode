@@ -1,5 +1,10 @@
 import { createUniqueId, type ComponentProps } from "solid-js"
 
+/**
+ * The faded AgentCode wordmark behind the new-session prompt: the `>_` terminal
+ * mark next to the name, dissolving toward the bottom via the same mask the
+ * upstream wordmark used.
+ */
 export function WordmarkV2(props: Pick<ComponentProps<"svg">, "class">) {
   const mask = createUniqueId()
   const maskGradient = createUniqueId()
@@ -14,20 +19,37 @@ export function WordmarkV2(props: Pick<ComponentProps<"svg">, "class">) {
       <g opacity="0.6">
         <g mask={`url(#${mask})`}>
           <g opacity="0.16">
+            <rect
+              x="94"
+              y="22"
+              width="80"
+              height="86"
+              rx="19"
+              stroke="currentColor"
+              stroke-width="9"
+              opacity="0.7"
+            />
+            <path
+              d="M117 48 L133 65 L117 82"
+              stroke="currentColor"
+              stroke-width="9"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              opacity="0.7"
+            />
+            <rect x="140" y="72" width="18" height="9" rx="4.5" fill="currentColor" opacity="0.7" />
             <text
-              x="360"
-              y="103"
-              text-anchor="middle"
-              textLength="700"
-              lengthAdjust="spacingAndGlyphs"
-              font-family="ui-monospace, 'SF Mono', Menlo, monospace"
-              font-size="108"
-              font-weight="700"
-              letter-spacing="6"
+              x="196"
+              y="65"
+              dominant-baseline="central"
+              font-family="ui-sans-serif, -apple-system, 'SF Pro Display', system-ui, sans-serif"
+              font-size="82"
+              font-weight="650"
+              letter-spacing="-1"
               opacity="0.7"
               fill="currentColor"
             >
-              AGENTCODE
+              AgentCode
             </text>
           </g>
         </g>
