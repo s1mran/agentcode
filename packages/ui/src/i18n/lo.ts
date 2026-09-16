@@ -71,7 +71,7 @@ export const dict = {
   "dialog.usageExceeded.freeTier.description":
     "ສະໝັກໃຊ້ OpenCode Go ເພື່ອເຂົ້າເຖິງຮູບແບບໂອເພນຊອດທີ່ດີທີ່ສຸດ, ເລີ່ມຕົ້ນທີ່ $5/ເດືອນ.",
   "dialog.usageExceeded.freeTier.actionLabel": "ຈອງ",
-  "dialog.usageExceeded.accountRateLimit.title": "ໄປຮອດຂີດຈຳກັດແລ້ວ",
+  "dialog.usageExceeded.accountRateLimit.title": "ຮອດຂີດຈຳກັດ Go ແລ້ວ",
   "dialog.usageExceeded.accountRateLimit.description":
     "ຮອດຂີດຈຳກັດການນຳໃຊ້ແລ້ວ. ເພື່ອສືບຕໍ່ນຳໃຊ້ຮູບແບບນີ້ໃນຕອນນີ້, ໃຫ້ເປີດການນຳໃຊ້ຈາກຍອດເງິນທີ່ມີຢູ່ຂອງທ່ານ",
   "dialog.usageExceeded.accountRateLimit.actionLabel": "ເປີດການຕັ້ງຄ່າ",

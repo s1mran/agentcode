@@ -1,8 +1,8 @@
 <!--
-  Built-in skill. Name and description are registered in code at
-  packages/core/src/plugin/skill.ts
-  and CUSTOMIZE_OPENCODE_SKILL_DESCRIPTION). The body below becomes the
-  skill's content.
+  Built-in skill. The name and description are registered in code at
+  packages/opencode/src/skill/index.ts (CUSTOMIZE_OPENCODE_SKILL_DESCRIPTION,
+  the engine the desktop app runs) and packages/core/src/plugin/skill.ts (v2).
+  The body below becomes the skill's content.
 -->
 
 # Customizing AgentCode
@@ -11,21 +11,32 @@ AgentCode validates its own config strictly and refuses to start when a field
 is wrong. The shapes below cover the common surface area, but they are a
 **summary, not the source of truth**.
 
-## Full schema reference
+## Schema reference
 
-The authoritative list of every config option — with field types, enums,
-defaults, and descriptions — lives in the published JSON Schema:
+AgentCode is built on OpenCode and reads the same `opencode.json` format. For
+fields this skill does not cover, the fullest reference (field types, enums,
+defaults, descriptions) is the upstream OpenCode JSON Schema:
 
 **<https://opencode.ai/config.json>**
 
-If a field is not documented in this skill, or you need to confirm an exact
-shape before writing config, **fetch that URL and read the schema directly**
-rather than guessing. AgentCode hard-fails on invalid config, so the cost of a
-wrong shape is a broken startup.
+That schema is published by OpenCode, not AgentCode, and it can differ from
+what AgentCode accepts. Fetch it to check a field's shape rather than guessing,
+but treat it as a guide. When they disagree, AgentCode's own validation is what
+counts. AgentCode reports a config it rejects as a `ConfigInvalidError`, and
+the wording depends on where it shows up: `Config file at <path> is invalid`
+in the app, `Configuration is invalid at <path>` from the `opencode` CLI or
+terminal UI (for example in bash output). Whatever the wording, if AgentCode
+says the config is invalid, the field paths and messages in that error win,
+even when the upstream schema allows the value. Known difference:
+`provider.<id>.options.chunkTimeout` must be a positive integer in AgentCode;
+the upstream schema also allows `false`, which AgentCode rejects.
 
-Independently, every `opencode.json` should declare
-`"$schema": "https://opencode.ai/config.json"` so the user's editor catches
-mistakes as they type.
+AgentCode hard-fails on invalid config, so a wrong shape means a broken
+startup; when you cannot confirm a field, leave it out.
+
+AgentCode adds `"$schema": "https://opencode.ai/config.json"` to a config file
+that lacks it when it loads the file, which gives editors completion from that
+same upstream schema. Keep the line, but treat editor hints as a guide too.
 
 ## Applying changes
 
@@ -440,9 +451,10 @@ When a user's config is broken and AgentCode won't start, these env vars help:
 
 ## When proposing edits
 
-- Validate against the schema before writing. If you are unsure of a field's
-  exact shape, or the field is not covered in this skill, fetch
-  `https://opencode.ai/config.json` and read the schema rather than guessing.
+- Check shapes before writing. If you are unsure of a field's exact shape, or
+  the field is not covered in this skill, read the upstream OpenCode schema at
+  `https://opencode.ai/config.json` rather than guessing, and remember that
+  AgentCode's own validation error overrides it when they disagree.
 - Preserve `$schema` and any existing fields the user did not ask to change.
 - For agent, command, skill, and plugin definitions, prefer creating new files
   in the correct location over inlining everything in `opencode.json`.

@@ -4,6 +4,7 @@ import { Logo } from "@opencode-ai/ui/logo"
 import { Button } from "@opencode-ai/ui/button"
 import { Component, createSignal, onMount, Show } from "solid-js"
 import { createStore } from "solid-js/store"
+import { AGENTCODE_ISSUES_URL } from "@/constants/links"
 import { usePlatform } from "@/context/platform"
 import { useLanguage } from "@/context/language"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -354,10 +355,10 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
             <button
               type="button"
               class="flex items-center text-text-interactive-base gap-1"
-              onClick={() => platform.openExternal("https://opencode.ai/desktop-feedback")}
+              onClick={() => platform.openExternal(AGENTCODE_ISSUES_URL)}
             >
               <div>{language.t("error.page.report.discord")}</div>
-              <Icon name="discord" class="text-text-interactive-base" />
+              <Icon name="github" class="text-text-interactive-base" />
             </button>
           </div>
           <Show when={platform.version}>

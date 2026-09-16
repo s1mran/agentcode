@@ -70,7 +70,7 @@ export const dict: Record<string, string> = {
   "dialog.usageExceeded.freeTier.title": "ነፃ ገደብ ላይ ደርሷል",
   "dialog.usageExceeded.freeTier.description": "ለOpenCode Go ለምርጥ ክፍት ምንጭ ሞዴሎች ታማኝ መዳረሻ ለማግኘት ይመዝገቡ፣ ከ$5 በወር ጀምሮ።",
   "dialog.usageExceeded.freeTier.actionLabel": "ለደንበኝነት ይመዝገቡ",
-  "dialog.usageExceeded.accountRateLimit.title": "የሂድ ገደብ ላይ ደርሷል",
+  "dialog.usageExceeded.accountRateLimit.title": "የGo ገደብ ላይ ደርሷል",
   "dialog.usageExceeded.accountRateLimit.description":
     "የአጠቃቀም ገደብ ላይ ደርሷል። ይህን ሞዴል አሁን መጠቀሙን ለመቀጠል ካለው ቀሪ ሒሳብ መጠቀምን ያንቁ",
   "dialog.usageExceeded.accountRateLimit.actionLabel": "ክፍት ቅንብሮች",

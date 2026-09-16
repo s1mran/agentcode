@@ -59,6 +59,13 @@ describe("McpOAuthProvider.clientMetadata", () => {
     const provider = makeProvider({})
     expect(provider.clientMetadata.token_endpoint_auth_method).toBe("none")
   })
+
+  test("identifies the client as AgentCode", () => {
+    const metadata = makeProvider({}).clientMetadata
+    expect(metadata.client_name).toBe("AgentCode")
+    expect(metadata.client_uri).toBe("https://github.com/s1mran/agentcode")
+    expect(JSON.stringify(metadata)).not.toMatch(/opencode/i)
+  })
 })
 
 describe("MCP OAuth scope selection", () => {

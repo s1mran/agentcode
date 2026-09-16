@@ -1,11 +1,12 @@
-import { expect } from "bun:test"
+import { expect, test } from "bun:test"
+import path from "path"
 import { Server } from "@modelcontextprotocol/sdk/server/index.js"
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
 import { ListResourcesRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { FSUtil } from "@opencode-ai/core/fs-util"
-import { Effect } from "effect"
+import { Deferred, Effect } from "effect"
 import { Config } from "../../src/config/config"
 import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { McpAuth } from "../../src/mcp/auth"
@@ -38,6 +39,7 @@ function serveOAuthMcp(options: OAuthMcpOptions = {}) {
       })
       let listToolsCalls = 0
       let requiresAuth = true
+      const registrations: Record<string, unknown>[] = []
 
       if (capabilities === "tools") {
         protocol.setRequestHandler(ListToolsRequestSchema, () => {
@@ -88,6 +90,7 @@ function serveOAuthMcp(options: OAuthMcpOptions = {}) {
           }
           if (url.pathname === "/register") {
             const metadata = (await request.json()) as Record<string, unknown>
+            registrations.push(metadata)
             return Response.json({ ...metadata, client_id: "replacement-client" }, { status: 201 })
           }
           if (url.pathname === "/token") {
@@ -121,6 +124,7 @@ function serveOAuthMcp(options: OAuthMcpOptions = {}) {
           requiresAuth = false
         },
         listToolsCalls: () => listToolsCalls,
+        registrations: () => registrations,
         close: async () => {
           await http.stop(true)
           await protocol.close()
@@ -146,6 +150,72 @@ mcpTest.instance("first connect to OAuth server shows needs_auth instead of fail
     const result = yield* mcp.add("test-oauth", remote(server.url))
 
     expect((result.status as Record<string, { status: string }>)["test-oauth"]).toEqual({ status: "needs_auth" })
+  }),
+)
+
+// tui.toast.show is rendered only by the terminal UI, so the toast wording is written for terminal users. If a desktop
+// package starts rendering it, the wording must be revisited (the desktop app authenticates from /mcp instead).
+test("tui.toast.show is rendered by the terminal UI and by no desktop package", async () => {
+  const packages = path.resolve(import.meta.dir, "../../..")
+  const tuiApp = await Bun.file(path.join(packages, "tui/src/app.tsx")).text()
+  expect(tuiApp).toContain(`event.on("tui.toast.show"`)
+
+  const desktopPackages = ["app", "desktop", "session-ui", "ui"]
+  const renderers: string[] = []
+  for (const pkg of desktopPackages) {
+    const glob = new Bun.Glob("src/**/*.{ts,tsx}")
+    for await (const file of glob.scan({ cwd: path.join(packages, pkg), onlyFiles: true })) {
+      const source = await Bun.file(path.join(packages, pkg, file)).text()
+      if (source.includes("tui.toast.show")) renderers.push(`${pkg}/${file}`)
+    }
+  }
+  expect(renderers).toEqual([])
+})
+
+mcpTest.instance("needs_auth toast gives terminal UI users the CLI sign-in command", () =>
+  Effect.gen(function* () {
+    const server = yield* serveOAuthMcp()
+    const events = yield* EventV2Bridge.Service
+    const toast = yield* Deferred.make<{ title?: string; message: string }>()
+    const unsub = yield* events.listen((event) => {
+      if (event.type === "tui.toast.show")
+        Deferred.doneUnsafe(toast, Effect.succeed(event.data as { title?: string; message: string }))
+      return Effect.void
+    })
+    yield* Effect.addFinalizer(() => unsub)
+
+    const mcp = yield* MCP.Service
+    yield* mcp.add("test-oauth", remote(server.url))
+    const shown = yield* Effect.race(
+      Deferred.await(toast),
+      Effect.sleep("2 seconds").pipe(Effect.flatMap(() => Effect.die(new Error("timed out waiting for toast")))),
+    )
+
+    expect(shown.title).toBe("MCP Authentication Required")
+    expect(shown.message).toBe(
+      'Server "test-oauth" requires authentication. In a separate terminal, run: opencode mcp auth test-oauth',
+    )
+    // The terminal UI's MCP command is /mcps and its toggle only reconnects, so no in-app sign-in pointer belongs here.
+    expect(shown.message).not.toMatch(/\/mcp\b|AgentCode app|OpenCode/)
+  }),
+)
+
+mcpTest.instance("dynamic client registration identifies the client as AgentCode", () =>
+  Effect.gen(function* () {
+    yield* stopOAuthCallback
+    const server = yield* serveOAuthMcp()
+    const mcp = yield* MCP.Service
+    const name = "test-oauth-registration"
+    yield* mcp.add(name, remote(server.url))
+    expect((yield* mcp.startAuth(name)).authorizationUrl).toContain("/authorize")
+
+    expect(server.registrations().length).toBeGreaterThan(0)
+    for (const metadata of server.registrations()) {
+      expect(metadata).toMatchObject({
+        client_name: "AgentCode",
+        client_uri: "https://github.com/s1mran/agentcode",
+      })
+    }
   }),
 )
 

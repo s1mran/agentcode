@@ -72,7 +72,7 @@ export const dict: Record<string, string> = {
   "dialog.usageExceeded.freeTier.description":
     "އެންމެ ރަނގަޅު އޮޕަން ސޯސް މޮޑެލްތަކަށް އިތުބާރުހުރި ގޮތެއްގައި އެކްސެސް ހޯދުމަށް OpenCode Go އަށް ސަބްސްކްރައިބް ކޮށްލައްވާ، މަހަކު 5 ޑޮލަރުން ފެށިގެންނެވެ.",
   "dialog.usageExceeded.freeTier.actionLabel": "ސަބްސްކްރައިބް ކޮށްލައްވާ",
-  "dialog.usageExceeded.accountRateLimit.title": "ގޯ ލިމިޓް އާދެވުނެވެ",
+  "dialog.usageExceeded.accountRateLimit.title": "Go ލިމިޓް އާދެވުނެވެ",
   "dialog.usageExceeded.accountRateLimit.description":
     "ބޭނުންކުރުމުގެ ލިމިޓަށް ވާސިލްވެއްޖެއެވެ. މިހާރު މި މޮޑެލް ބޭނުން ކުރަމުން ގެންދިއުމަށްޓަކައި، ލިބިފައިވާ ބެލެންސް އިން ބޭނުންކުރުން އެނެބަލް ކުރާށެވެ",
   "dialog.usageExceeded.accountRateLimit.actionLabel": "ސެޓިންގސް ހުޅުވާލާށެވެ",

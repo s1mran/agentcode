@@ -20,4 +20,13 @@ describe("desktop menu", () => {
     expect(windowMenu?.label).toBe("Window")
     expect(roleItems.length).toBeGreaterThan(0)
   })
+
+  test("names the app menu AgentCode and links nowhere on opencode.ai", () => {
+    const hrefs = DESKTOP_MENU.flatMap((menu) => menu.items ?? []).flatMap((item) =>
+      item.type === "item" && item.href ? [item.href] : [],
+    )
+
+    expect(DESKTOP_MENU.find((menu) => menu.id === "app")?.label).toBe("AgentCode")
+    expect(hrefs.filter((href) => href.includes("opencode.ai"))).toEqual([])
+  })
 })

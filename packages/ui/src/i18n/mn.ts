@@ -71,7 +71,7 @@ export const dict = {
   "dialog.usageExceeded.freeTier.description":
     "OpenCode Go-д бүртгүүлж, сард 5 доллараас эхлэн нээлттэй эхийн шилдэг загваруудад найдвартай хандах боломжтой.",
   "dialog.usageExceeded.freeTier.actionLabel": "Бүртгүүлэх",
-  "dialog.usageExceeded.accountRateLimit.title": "Явах хязгаарт хүрсэн",
+  "dialog.usageExceeded.accountRateLimit.title": "Go хязгаарт хүрсэн",
   "dialog.usageExceeded.accountRateLimit.description":
     "Хэрэглээний хязгаарт хүрсэн. Энэ загварыг одоо үргэлжлүүлэн ашиглахын тулд байгаа үлдэгдлээсээ ашиглалтыг идэвхжүүлнэ үү",
   "dialog.usageExceeded.accountRateLimit.actionLabel": "Тохиргоог нээх",

@@ -34,9 +34,15 @@ describe("CommandPlugin.Plugin", () => {
 
       expect(yield* command.get("init")).toMatchObject({
         name: "init",
-        description: "guided AGENTS.md setup",
+        description: "initialize project with a CLAUDE.md guide",
       })
-      expect((yield* command.get("init"))?.template).toContain("`/repo`")
+      const template = (yield* command.get("init"))?.template
+      expect(template).toContain("`/repo`")
+      expect(template).toContain("Create or update `CLAUDE.md` in the project root (`/repo`)")
+      expect(template).toContain("`@AGENTS.md`")
+      expect(template).not.toContain("OpenCode")
+      expect(template).not.toContain("${path}")
+      expect(template).not.toContain("Create or update `AGENTS.md`")
       expect(yield* command.get("review")).toMatchObject({
         name: "review",
         description: "review changes [commit|branch|pr], defaults to uncommitted",

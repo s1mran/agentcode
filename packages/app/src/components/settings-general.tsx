@@ -29,7 +29,6 @@ import {
 } from "@/context/settings"
 import { decode64 } from "@/utils/base64"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
-import { ExternalLink } from "./external-link"
 import { SettingsList } from "./settings-list"
 
 let demoSoundState = {
@@ -479,12 +478,7 @@ export const SettingsGeneral: Component = () => {
 
         <SettingsRow
           title={language.t("settings.general.row.theme.title")}
-          description={
-            <>
-              {language.t("settings.general.row.theme.description")}{" "}
-              <ExternalLink href="https://opencode.ai/docs/themes/">{language.t("common.learnMore")}</ExternalLink>
-            </>
-          }
+          description={language.t("settings.general.row.theme.description")}
         >
           <Select
             data-action="settings-theme"
@@ -676,18 +670,6 @@ export const SettingsGeneral: Component = () => {
       <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.updates")}</h3>
 
       <SettingsList>
-        <SettingsRow
-          title={language.t("settings.general.row.releaseNotes.title")}
-          description={language.t("settings.general.row.releaseNotes.description")}
-        >
-          <div data-action="settings-release-notes">
-            <Switch
-              checked={settings.general.releaseNotes()}
-              onChange={(checked) => settings.general.setReleaseNotes(checked)}
-            />
-          </div>
-        </SettingsRow>
-
         <SettingsRow
           title={language.t("settings.updates.row.check.title")}
           description={language.t("settings.updates.row.check.description")}

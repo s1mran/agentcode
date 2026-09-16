@@ -73,7 +73,7 @@ export const dict: Record<string, string> = {
   "dialog.usageExceeded.freeTier.description":
     "Oyiga $5 dan boshlab eng yaxshi ochiq kodli modellarga ishonchli kirish uchun OpenCode Go ga obuna bo'ling.",
   "dialog.usageExceeded.freeTier.actionLabel": "Obuna boʻling",
-  "dialog.usageExceeded.accountRateLimit.title": "Oʻtish chegarasiga yetdi",
+  "dialog.usageExceeded.accountRateLimit.title": "Go chegarasiga yetdi",
   "dialog.usageExceeded.accountRateLimit.description":
     "Foydalanish chegarasiga yetdi. Ushbu modeldan hozir foydalanishni davom ettirish uchun mavjud balansingizdan foydalanishni yoqing",
   "dialog.usageExceeded.accountRateLimit.actionLabel": "Sozlamalarni oching",

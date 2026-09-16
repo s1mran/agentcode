@@ -74,7 +74,7 @@ export const dict: Record<string, string> = {
   "dialog.usageExceeded.freeTier.description":
     "Naročite se na OpenCode Go za zanesljiv dostop do najboljših odprtokodnih modelov, že od 5 $/mesec.",
   "dialog.usageExceeded.freeTier.actionLabel": "Naročite se",
-  "dialog.usageExceeded.accountRateLimit.title": "Dosežena omejitev",
+  "dialog.usageExceeded.accountRateLimit.title": "Dosežena omejitev storitve Go",
   "dialog.usageExceeded.accountRateLimit.description":
     "Omejitev uporabe je dosežena. Če želite zdaj še naprej uporabljati ta model, omogočite uporabo iz razpoložljivega stanja",
   "dialog.usageExceeded.accountRateLimit.actionLabel": "Odprite nastavitve",

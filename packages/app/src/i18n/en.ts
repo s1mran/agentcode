@@ -148,11 +148,11 @@ export const dict = {
   "provider.connect.apiKey.placeholder": "API key",
   "provider.connect.apiKey.required": "API key is required",
   "provider.connect.opencodeZen.line1":
-    "AgentCode Zen gives you access to a curated set of reliable optimized models for coding agents.",
+    "OpenCode Zen gives you access to a curated set of reliable optimized models for coding agents.",
   "provider.connect.opencodeZen.line2":
     "With a single API key you'll get access to models such as Claude, GPT, Gemini, GLM and more.",
   "provider.connect.opencodeZen.visit.prefix": "Visit ",
-  "provider.connect.opencodeZen.visit.link": "agentcode.ai/zen",
+  "provider.connect.opencodeZen.visit.link": "opencode.ai/zen",
   "provider.connect.opencodeZen.visit.suffix": " to collect your API key.",
   "provider.connect.oauth.code.visit.prefix": "Visit ",
   "provider.connect.oauth.code.visit.link": "this link",
@@ -173,7 +173,7 @@ export const dict = {
   "provider.custom.title": "Custom provider",
   "provider.custom.unavailable": "Custom providers are unavailable on this server",
   "provider.custom.description.prefix": "Configure an OpenAI-compatible provider. See the ",
-  "provider.custom.description.link": "provider config docs",
+  "provider.custom.description.link": "OpenCode provider config docs",
   "provider.custom.description.suffix": ".",
   "provider.custom.field.providerID.label": "Provider ID",
   "provider.custom.field.providerID.placeholder": "myprovider",
@@ -598,7 +598,7 @@ export const dict = {
   "error.page.action.updateTo": "Update to {{version}}",
   "error.page.circular": "[Circular]",
   "error.page.report.prefix": "Please report this error to the AgentCode team",
-  "error.page.report.discord": "on Discord",
+  "error.page.report.discord": "on GitHub",
   "error.page.version": "Version: {{version}}",
 
   "error.dev.rootNotFound":

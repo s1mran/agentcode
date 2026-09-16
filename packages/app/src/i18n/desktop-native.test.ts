@@ -135,6 +135,22 @@ describe("desktop native locale detection", () => {
   })
 })
 
+describe("desktop native English brand", () => {
+  test("English native strings name AgentCode", async () => {
+    expect(DESKTOP_NATIVE_ENGLISH["desktop.menu.app"]).toBe("AgentCode")
+    expect(Object.entries(DESKTOP_NATIVE_ENGLISH).filter(([, value]) => value.includes("OpenCode"))).toEqual([])
+
+    const windows = await Bun.file(new URL("../../../desktop/src/main/windows.ts", import.meta.url)).text()
+    for (const key of [
+      "desktop.recovery.loadFailed",
+      "desktop.recovery.terminated",
+      "desktop.recovery.unresponsive",
+    ] as const) {
+      expect(windows, key).toContain(`"${DESKTOP_NATIVE_ENGLISH[key]}"`)
+    }
+  })
+})
+
 describe("desktop native ICU data", () => {
   test("accepts every locale in standard Intl formatters", () => {
     for (const locale of DESKTOP_NATIVE_LOCALES) {

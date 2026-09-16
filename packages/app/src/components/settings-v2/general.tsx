@@ -9,7 +9,6 @@ import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useUpdaterAction } from "../updater-action"
 import { useSettings } from "@/context/settings"
-import { ExternalLink } from "../external-link"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import { LayoutRetirementNotice, LayoutTransitionToggle } from "./interface-transition"
@@ -147,14 +146,7 @@ const AppearanceSection: Component<{ controller: AppearanceSettingsController }>
 
         <SettingsRowV2
           title={language.t("settings.general.row.theme.title")}
-          description={
-            <>
-              {language.t("settings.general.row.theme.description")}{" "}
-              <ExternalLink class="settings-v2-link" href="https://opencode.ai/docs/themes/">
-                {language.t("common.learnMore")}
-              </ExternalLink>
-            </>
-          }
+          description={language.t("settings.general.row.theme.description")}
         >
           <SelectV2
             appearance="inline"
@@ -491,18 +483,6 @@ export const SettingsGeneralV2: Component<{
       <h3 class="settings-v2-section-title">{language.t("settings.general.section.updates")}</h3>
 
       <SettingsListV2>
-        <SettingsRowV2
-          title={language.t("settings.general.row.releaseNotes.title")}
-          description={language.t("settings.general.row.releaseNotes.description")}
-        >
-          <div data-action="settings-release-notes">
-            <Switch
-              checked={settings.general.releaseNotes()}
-              onChange={(checked) => settings.general.setReleaseNotes(checked)}
-            />
-          </div>
-        </SettingsRowV2>
-
         <SettingsRowV2
           title={language.t("settings.updates.row.check.title")}
           description={language.t("settings.updates.row.check.description")}

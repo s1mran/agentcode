@@ -228,3 +228,112 @@ function pluralFamilies(dictionary: Record<string, string>) {
     )
     .map((key) => key.slice(0, -4))
 }
+
+// OpenCode's external paid services, which AgentCode can still connect to, keep their real names and URLs.
+const externalOpencodeNames = ["OpenCode Zen", "OpenCode Go", "opencode.ai/zen", "opencode.ai/go", "opencode.json"]
+// These messages name the real `opencode` executable, whose name does not change.
+const opencodeExecutableKeys = [
+  "desktop.wsl.error.opencodeMissing",
+  "desktop.wsl.error.opencodeCannotRun",
+  "desktop.cli.installed.message",
+]
+// Messages whose English names OpenCode Go by its short name alone, e.g. "Go limit reached".
+const goShortNameKeys = ["ui:dialog.usageExceeded.accountRateLimit.title"]
+// Translations that leave the product name out of a sentence whose English names it.
+const productNameOmitted = ["dv", "zht"]
+  .map((locale) => `app:${locale}:wsl.onboarding.wslNotInstalled.description`)
+  .concat("app:ja:wsl.onboarding.wslUnavailable.description")
+
+describe("i18n branding", () => {
+  // Feedback goes to AgentCode GitHub issues, so no locale may point users at Discord either.
+  test("non-English locales name AgentCode and keep only external OpenCode names", async () => {
+    const leftovers: string[] = []
+    for (const domain of domains) {
+      for (const locale of domain.locales) {
+        const target = await dictionary(domain.target(locale))
+        for (const key of Object.keys(target)) {
+          const text = externalOpencodeNames.reduce((value, name) => value.replaceAll(name, ""), target[key])
+          const rest = opencodeExecutableKeys.includes(key) ? text.replaceAll("opencode", "") : text
+          if (/opencode|agentcode\.ai|agentcode (?:zen|go)\b|discord/i.test(rest))
+            leftovers.push(`${domain.name}:${locale}:${key}`)
+        }
+      }
+    }
+    expect(leftovers).toEqual([])
+  })
+
+  test("non-English locales keep the product name wherever English uses it", async () => {
+    const missing: string[] = []
+    for (const domain of domains) {
+      const source = await dictionary(domain.source)
+      const named = Object.keys(source).filter((key) => /AgentCode(?! (?:Zen|Go)\b)/.test(source[key]))
+      for (const locale of domain.locales) {
+        const target = await dictionary(domain.target(locale))
+        for (const key of named) {
+          const id = `${domain.name}:${locale}:${key}`
+          if (!target[key].includes("AgentCode") && !productNameOmitted.includes(id)) missing.push(id)
+        }
+      }
+    }
+    expect(missing).toEqual([])
+  })
+
+  test("messages about the opencode executable keep its literal name", async () => {
+    const renamed: string[] = []
+    for (const domain of domains) {
+      const source = await dictionary(domain.source)
+      const keys = opencodeExecutableKeys.filter((key) => Object.hasOwn(source, key))
+      for (const locale of domain.locales) {
+        const target = await dictionary(domain.target(locale))
+        renamed.push(
+          ...keys.filter((key) => !target[key].includes("opencode")).map((key) => `${domain.name}:${locale}:${key}`),
+        )
+      }
+    }
+    expect(renamed).toEqual([])
+  })
+
+  test("OpenCode Zen keeps its product name and its real link text", async () => {
+    const wrong: string[] = []
+    for (const locale of appLocales) {
+      const target = await dictionary(`./${locale}.ts`)
+      if (!target["provider.connect.opencodeZen.line1"].includes("OpenCode Zen")) wrong.push(`${locale}:line1`)
+      if (target["provider.connect.opencodeZen.visit.link"] !== "opencode.ai/zen") wrong.push(`${locale}:visit.link`)
+    }
+    expect(wrong).toEqual([])
+  })
+
+  // "Go" is a product name here, not the verb "to go", so it must stay in Latin script and never be dropped.
+  test("OpenCode Go keeps its product name wherever English names it", async () => {
+    const wrong: string[] = []
+    for (const domain of domains) {
+      const source = await dictionary(domain.source)
+      const shortName = goShortNameKeys
+        .filter((id) => id.startsWith(`${domain.name}:`))
+        .map((id) => id.slice(domain.name.length + 1))
+      for (const key of shortName) expect(source[key]).toMatch(/(?<![A-Za-z])Go(?![A-Za-z])/)
+      const fullName = Object.keys(source).filter((key) => source[key].includes("OpenCode Go"))
+      for (const locale of domain.locales) {
+        const target = await dictionary(domain.target(locale))
+        for (const key of fullName) {
+          if (!target[key].includes("OpenCode Go")) wrong.push(`${domain.name}:${locale}:${key}`)
+        }
+        for (const key of shortName) {
+          if (!/(?<![A-Za-z])Go(?![A-Za-z])/.test(target[key])) wrong.push(`${domain.name}:${locale}:${key}`)
+        }
+      }
+    }
+    expect(wrong).toEqual([])
+  })
+
+  test("Hungarian puts az, not a, before AgentCode and OpenCode", async () => {
+    const wrong: string[] = []
+    for (const domain of domains) {
+      const target = await dictionary(domain.target("hu"))
+      for (const key of Object.keys(target)) {
+        if (/(?<!\p{L})a (?:AgentCode|OpenCode)/iu.test(target[key])) wrong.push(`${domain.name}:${key}`)
+      }
+    }
+    expect(wrong).toEqual([])
+  })
+})

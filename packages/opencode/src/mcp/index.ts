@@ -73,7 +73,8 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("MCP
 type MCPClient = Client
 
 function createClient(directory: string) {
-  const client = new Client({ name: "opencode", version: InstallationVersion }, CLIENT_OPTIONS)
+  // `name` stays "opencode" because servers may special-case that identifier; `title` is the display name.
+  const client = new Client({ name: "opencode", title: "AgentCode", version: InstallationVersion }, CLIENT_OPTIONS)
   client.setRequestHandler(ListRootsRequestSchema, () =>
     Promise.resolve({ roots: [{ uri: pathToFileURL(directory).href }] }),
   )
@@ -311,10 +312,13 @@ const layer = Layer.effect(
               } else {
                 pendingOAuthTransports.set(key, { transport })
                 lastStatus = { status: "needs_auth" as const }
+                // Only the terminal UI renders tui.toast.show (the desktop app shows needs_auth in its MCP status
+                // popover instead), and the terminal UI cannot start MCP sign-in (its /mcps toggle only reconnects),
+                // so this points at the CLI command rather than any in-app flow.
                 return events
                   .publish(TuiEvent.ToastShow, {
                     title: "MCP Authentication Required",
-                    message: `Server "${key}" requires authentication. Run: opencode mcp auth ${key}`,
+                    message: `Server "${key}" requires authentication. In a separate terminal, run: opencode mcp auth ${key}`,
                     variant: "warning",
                     duration: 8000,
                   })

@@ -71,7 +71,7 @@ export const dict: Record<string, string> = {
   "dialog.usageExceeded.freeTier.description":
     "برای دسترسی مطمئن به بهترین مدل های منبع باز، از 5 دلار در ماه، در OpenCode Go مشترک شوید.",
   "dialog.usageExceeded.freeTier.actionLabel": "مشترک شوید",
-  "dialog.usageExceeded.accountRateLimit.title": "به حد مجاز رفتن رسید",
+  "dialog.usageExceeded.accountRateLimit.title": "به حد مجاز Go رسیده است",
   "dialog.usageExceeded.accountRateLimit.description":
     "به حد مجاز استفاده رسیده است. برای ادامه استفاده از این مدل اکنون، استفاده را از موجودی موجود خود فعال کنید",
   "dialog.usageExceeded.accountRateLimit.actionLabel": "تنظیمات را باز کنید",
