@@ -1316,6 +1316,41 @@ export function fromModelsDevProvider(provider: ModelsDev.Provider): Info {
   }
 }
 
+// AgentCode's own gateway (agentcode-gateway/server.js) is not on models.dev, so it ships here. The
+// gateway rejects keyless calls, so like any catalog provider it loads once AGENTCODE_API_KEY or a stored
+// key exists, and a config `agentcode` block merges on top. Limits stay 0 (unknown) as for config-defined
+// models; reasoning and effort levels come from the gateway table in transform.ts.
+const AGENTCODE_GATEWAY_MODELS: Record<string, string> = {
+  "agentcode-free-fast": "AgentCode Free Fast (Qwen 35B)",
+  "agentcode-free": "AgentCode Free (Qwen 27B)",
+  "agentcode-fast": "AgentCode Fast (Kimi K2.7)",
+  "agentcode-max": "AgentCode Max (Kimi K3)",
+  "agentcode-claude": "Claude Code (your subscription)",
+}
+
+function agentcodeGatewayModel(id: string, name: string): ModelsDev.Model {
+  return {
+    id,
+    name,
+    release_date: "",
+    attachment: false,
+    reasoning: ProviderTransform.agentcodeGatewayReasoning(id),
+    temperature: false,
+    tool_call: true,
+    limit: { context: 0, output: 0 },
+    modalities: { input: ["text"], output: ["text"] },
+  }
+}
+
+const agentcodeGateway: ModelsDev.Provider = {
+  id: "agentcode",
+  name: "AgentCode Gateway",
+  env: ["AGENTCODE_API_KEY"],
+  npm: "@ai-sdk/openai-compatible",
+  api: "http://localhost:8399/v1",
+  models: mapValues(AGENTCODE_GATEWAY_MODELS, (name, id) => agentcodeGatewayModel(id, name)),
+}
+
 function modeOptions(model: Model, body: Record<string, unknown> | undefined) {
   if (!body) return model.options
   const options = Object.fromEntries(
@@ -1371,7 +1406,7 @@ const layer = Layer.effect(
       Effect.gen(function* () {
         const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
-        const modelsDev = yield* modelsDevSvc.get()
+        const modelsDev = { ...(yield* modelsDevSvc.get()), [agentcodeGateway.id]: agentcodeGateway }
         const catalog = mapValues(modelsDev, fromModelsDevProvider)
         const database = mapValues(catalog, toPublicInfo)
 
@@ -1489,7 +1524,10 @@ const layer = Layer.effect(
               providerID: ProviderV2.ID.make(providerID),
               capabilities: {
                 temperature: model.temperature ?? existingModel?.capabilities.temperature ?? false,
-                reasoning: model.reasoning ?? existingModel?.capabilities.reasoning ?? false,
+                reasoning:
+                  model.reasoning ??
+                  existingModel?.capabilities.reasoning ??
+                  ProviderTransform.agentcodeGatewayReasoning(apiID),
                 attachment: model.attachment ?? existingModel?.capabilities.attachment ?? false,
                 toolcall: model.tool_call ?? existingModel?.capabilities.toolcall ?? true,
                 input: {
@@ -1535,8 +1573,10 @@ const layer = Layer.effect(
               release_date: model.release_date ?? existingModel?.release_date ?? "",
               variants: {},
             }
+            // Catalog variants are only reusable while config leaves the transport and reasoning flag alone.
             const variants =
-              existingModel?.api.npm === parsedModel.api.npm
+              existingModel?.api.npm === parsedModel.api.npm &&
+              existingModel.capabilities.reasoning === parsedModel.capabilities.reasoning
                 ? (existingModel.variants ?? ProviderTransform.variants(parsedModel))
                 : ProviderTransform.variants(parsedModel)
             const merged = mergeDeep(variants, model.variants ?? {})

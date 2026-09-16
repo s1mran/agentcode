@@ -14,6 +14,10 @@ import { Agent as AgentSvc } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { Command } from "../../src/command"
 import { Config } from "@/config/config"
+import { ConfigMarkdown } from "../../src/config/markdown"
+import { InstructionFile } from "@opencode-ai/core/instruction-file"
+import { OpenApi } from "effect/unstable/httpapi"
+import { PublicApi } from "../../src/server/routes/instance/httpapi/public"
 import { LSP } from "@/lsp/lsp"
 import { MCP } from "../../src/mcp"
 import { Permission } from "../../src/permission"
@@ -208,12 +212,19 @@ const promptRoot = LayerNode.group([
   RuntimeFlags.node,
 ])
 
-function makePrompt(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
+function makePrompt(input?: {
+  mcpInstructions?: MCP.ServerInstructions[]
+  processor?: "blocking"
+  flags?: Partial<RuntimeFlags.Info>
+}) {
   const replacements = [
     [SessionSummary.node, summary],
     [LSP.node, lsp],
     [MCP.node, makeMcp(input?.mcpInstructions)],
-    [RuntimeFlags.node, runtimeFlags],
+    [
+      RuntimeFlags.node,
+      input?.flags ? RuntimeFlags.layer({ experimentalEventSystem: true, ...input.flags }) : runtimeFlags,
+    ],
   ] as const
   if (input?.processor === "blocking") {
     return LayerNode.compile(promptRoot, [...replacements, [SessionProcessor.node, blockingProcessor]])
@@ -235,12 +246,13 @@ function makeHttp(input?: { mcpInstructions?: MCP.ServerInstructions[]; processo
   return LayerNode.compile(root, replacements)
 }
 
-function makeHttpNoLLMServer(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
+function makeHttpNoLLMServer(input?: Parameters<typeof makePrompt>[0]) {
   return makePrompt(input)
 }
 
 const it = testEffect(makeHttp())
 const noLLMServer = testEffect(makeHttpNoLLMServer())
+const noClaudeCodePrompt = testEffect(makeHttpNoLLMServer({ flags: { disableClaudeCodePrompt: true } }))
 const raceNoLLMServer = testEffect(makeHttpNoLLMServer({ processor: "blocking" }))
 const withMcpInstructions = testEffect(
   makeHttp({
@@ -2439,4 +2451,136 @@ noLLMServer.instance(
       }
     }),
   30_000,
+)
+
+noLLMServer.instance(
+  "init command targets CLAUDE.md in a non-git project",
+  () =>
+    Effect.gen(function* () {
+      const { directory: dir } = yield* TestInstance
+      const cmd = yield* (yield* Command.Service).get(Command.Default.INIT)
+      expect(cmd).toBeDefined()
+      const template = yield* Effect.promise(async () => cmd!.template)
+
+      expect(cmd!.description).toBe("initialize project with a CLAUDE.md guide")
+      expect(cmd!.hints).toEqual(["$ARGUMENTS"])
+      expect(template).toContain("Create or update `CLAUDE.md`")
+      expect(template).toContain("`@AGENTS.md`")
+      expect(template).toContain("`question` tool")
+      expect(template).toContain("(`" + dir + "`)")
+      expect(template).not.toContain("${path}")
+      expect(template).not.toContain("OpenCode")
+      expect(template).not.toContain("Create or update `AGENTS.md`")
+      expect(template).not.toContain("(`/`)")
+      // A bare @file or !`cmd` in the template would attach files or run shell on every /init.
+      expect(ConfigMarkdown.files(template)).toHaveLength(0)
+      expect(ConfigMarkdown.shell(template)).toHaveLength(0)
+    }),
+  30_000,
+)
+
+noLLMServer.instance(
+  "init command targets CLAUDE.md at the git worktree",
+  () =>
+    Effect.gen(function* () {
+      const { directory: dir } = yield* TestInstance
+      const cmd = yield* (yield* Command.Service).get(Command.Default.INIT)
+      expect(cmd).toBeDefined()
+      const template = yield* Effect.promise(async () => cmd!.template)
+
+      expect(template).toContain("Create or update `CLAUDE.md` in the project root (`" + dir + "`)")
+      expect(template).not.toContain("${path}")
+    }),
+  { git: true },
+  30_000,
+)
+
+noLLMServer.instance(
+  "init command never imports into or edits AGENTS.md through a CLAUDE.md symlink",
+  () =>
+    Effect.gen(function* () {
+      const cmd = yield* (yield* Command.Service).get(Command.Default.INIT)
+      expect(cmd).toBeDefined()
+      const template = yield* Effect.promise(async () => cmd!.template)
+      const existing = template.slice(
+        template.indexOf("## Existing instruction files"),
+        template.indexOf("## How to investigate"),
+      )
+      const cases = existing.split("\n").filter((line) => /^\d+\. /.test(line))
+
+      // CLAUDE.md -> AGENTS.md is one file: an `@AGENTS.md` line would land inside AGENTS.md as a self-import.
+      expect(cases[0]).toContain("same file")
+      expect(cases[0]).toContain("do not add an import line")
+      expect(cases[0]).toContain("approves")
+      expect(existing).toContain("Except in case 1, if `AGENTS.md` exists")
+      expect(existing).toContain("This rule wins over every other rule")
+    }),
+  30_000,
+)
+
+noLLMServer.instance(
+  "init command writes AGENTS.md imports relative to the CLAUDE.md it edits",
+  () =>
+    Effect.gen(function* () {
+      const { directory: dir } = yield* TestInstance
+      const cmd = yield* (yield* Command.Service).get(Command.Default.INIT)
+      expect(cmd).toBeDefined()
+      const template = yield* Effect.promise(async () => cmd!.template)
+
+      // Imports resolve against the importing file's folder, so `.claude/CLAUDE.md` must use `@../AGENTS.md`.
+      const imports = Array.from(template.matchAll(/`@([^`\s]+)` in (?:a root )?`([^`]+)`/g), (match) => ({
+        ref: match[1],
+        file: match[2],
+      }))
+      expect(imports.map((item) => item.file)).toEqual(["CLAUDE.md", ".claude/CLAUDE.md"])
+      for (const item of imports) {
+        const from = path.dirname(path.join(dir, item.file))
+        expect(InstructionFile.target(item.ref, from, path.join(dir, "home"))).toBe(path.join(dir, "AGENTS.md"))
+      }
+    }),
+  30_000,
+)
+
+noClaudeCodePrompt.instance(
+  "init command targets AGENTS.md when CLAUDE.md loading is disabled",
+  () =>
+    Effect.gen(function* () {
+      const { directory: dir } = yield* TestInstance
+      const cmd = yield* (yield* Command.Service).get(Command.Default.INIT)
+      expect(cmd).toBeDefined()
+      const template = yield* Effect.promise(async () => cmd!.template)
+
+      // With the flag on the loader reads AGENTS.md only, so a CLAUDE.md written by /init would never load.
+      expect(InstructionFile.names({ claude: false })).toEqual(["AGENTS.md"])
+      expect(cmd!.description).toBe("initialize project with an AGENTS.md guide")
+      expect(cmd!.hints).toEqual(["$ARGUMENTS"])
+      expect(template).toContain("Create or update `AGENTS.md` in the project root (`" + dir + "`)")
+      expect(template).not.toContain("Create or update `CLAUDE.md`")
+      expect(template).not.toContain("${path}")
+      expect(template).not.toContain("OpenCode")
+      expect(ConfigMarkdown.files(template)).toHaveLength(0)
+      expect(ConfigMarkdown.shell(template)).toHaveLength(0)
+    }),
+  30_000,
+)
+
+noLLMServer.effect("session init endpoint documents the CLAUDE.md target", () =>
+  Effect.gen(function* () {
+    type Spec = { paths: Record<string, Record<string, { operationId?: string; description?: string }>> }
+    const find = (spec: Spec) =>
+      Object.values(spec.paths)
+        .flatMap((item) => Object.values(item))
+        .find((operation) => operation.operationId === "session.init")
+    const generated = find(OpenApi.fromApi(PublicApi) as unknown as Spec)
+    const committed = find(
+      yield* Effect.promise(
+        () => Bun.file(fileURLToPath(new URL("../../../sdk/openapi.json", import.meta.url))).json() as Promise<Spec>,
+      ),
+    )
+
+    expect(generated?.description).toContain("CLAUDE.md")
+    expect(generated?.description).not.toContain("create an AGENTS.md file")
+    // The SDK spec is generated from the route annotations; keep the committed copy in step.
+    expect(committed?.description).toBe(generated?.description)
+  }),
 )

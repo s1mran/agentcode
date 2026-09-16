@@ -33,6 +33,7 @@ import { NamedError } from "@opencode-ai/core/util/error"
 import { SessionProcessor } from "./processor"
 import { Tool } from "@/tool/tool"
 import { Permission } from "@/permission"
+import { assertExternalDirectoryEffect } from "@/tool/external-directory"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
 import { Shell } from "@opencode-ai/core/shell"
@@ -1254,10 +1255,33 @@ const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
+            // Imports in project instruction files that point outside the project go through the same
+            // external_directory permission as the Read tool; Instruction remembers decisions per session and agent.
+            const askImport: Instruction.Ask = {
+              scope: `${sessionID}\0${agent.name}`,
+              ask: (filepath) =>
+                assertExternalDirectoryEffect(
+                  {
+                    ask: (req) =>
+                      permission
+                        .ask({
+                          ...req,
+                          sessionID,
+                          ruleset: Permission.merge(agent.permission, session.permission ?? []),
+                        })
+                        .pipe(Effect.orDie),
+                  },
+                  filepath,
+                ).pipe(
+                  Effect.as(true),
+                  Effect.catchDefect(() => Effect.succeed(false)),
+                ),
+            }
+
             const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model),
-              instruction.system().pipe(Effect.orDie),
+              instruction.system(askImport).pipe(Effect.orDie),
               sys.mcp(agent, session.permission),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])

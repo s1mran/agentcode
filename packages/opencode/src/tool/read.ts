@@ -3,6 +3,7 @@ import { NonNegativeInt } from "@opencode-ai/core/schema"
 import * as path from "path"
 import * as Tool from "./tool"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { LSP } from "@/lsp/lsp"
 import DESCRIPTION from "./read.txt"
 import { InstanceState } from "@/effect/instance-state"
@@ -297,7 +298,18 @@ export const ReadTool = Tool.define<
         }
       }
 
-      const loaded = yield* instruction.resolve(ctx.messages, filepath, ctx.messageID)
+      const loaded = yield* instruction.resolve(ctx.messages, filepath, ctx.messageID, {
+        scope: `${ctx.sessionID}\0${ctx.agent}`,
+        // Like any reject, declining this prompt also rejects the session's other pending asks (Permission.reply).
+        // A reject with feedback fails the read so the feedback reaches the model; a plain reject skips the import.
+        ask: (target) =>
+          assertExternalDirectoryEffect(ctx, target).pipe(
+            Effect.as(true),
+            Effect.catchDefect((defect) =>
+              defect instanceof PermissionV1.CorrectedError ? Effect.die(defect) : Effect.succeed(false),
+            ),
+          ),
+      })
       const sample = yield* readSample(filepath, Number(stat.size), SAMPLE_BYTES)
 
       const mime = sniffAttachmentMime(sample, FSUtil.mimeType(filepath))

@@ -7,8 +7,10 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/
 import { Config } from "@/config/config"
 import { InstanceState } from "@/effect/instance-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { containsPath } from "@/project/instance-context"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { FSUtil } from "@opencode-ai/core/fs-util"
+import { InstructionFile } from "@opencode-ai/core/instruction-file"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { Global } from "@opencode-ai/core/global"
 import type { MessageV2 } from "./message-v2"
@@ -31,15 +33,23 @@ function extract(messages: SessionV1.WithParts[]) {
   return paths
 }
 
+/** Decides whether a project instruction file may import a file outside the project. */
+export interface Ask {
+  // Decisions are remembered per scope (a session and its agent), never across sessions or agents.
+  readonly scope: string
+  readonly ask: (filepath: string) => Effect.Effect<boolean>
+}
+
 export interface Interface {
   readonly clear: (messageID: MessageID) => Effect.Effect<void>
   readonly systemPaths: () => Effect.Effect<Set<string>, FSUtil.Error>
-  readonly system: () => Effect.Effect<string[], FSUtil.Error>
-  readonly find: (dir: string) => Effect.Effect<string | undefined, FSUtil.Error>
+  readonly system: (ask?: Ask) => Effect.Effect<string[], FSUtil.Error>
+  readonly find: (dir: string) => Effect.Effect<string[], FSUtil.Error>
   readonly resolve: (
     messages: SessionV1.WithParts[],
     filepath: string,
     messageID: MessageID,
+    ask?: Ask,
   ) => Effect.Effect<{ filepath: string; content: string }[], FSUtil.Error>
 }
 
@@ -61,17 +71,21 @@ const layer: Layer.Layer<
       path.join(global.config, "AGENTS.md"),
       ...(!flags.disableClaudeCodePrompt ? [path.join(global.home, ".claude", "CLAUDE.md")] : []),
     ]
-    const instructionFiles = [
-      "AGENTS.md",
-      ...(!flags.disableClaudeCodePrompt ? ["CLAUDE.md"] : []),
-      "CONTEXT.md", // deprecated
-    ]
+    const globals = new Set(globalFiles.map((file) => path.resolve(file)))
+    const instructionFiles = InstructionFile.names({ claude: !flags.disableClaudeCodePrompt })
+    const legacy = "CONTEXT.md" // deprecated
 
     const state = yield* InstanceState.make(
       Effect.fn("Instruction.state")(() =>
         Effect.succeed({
           // Track which instruction files have already been attached for a given assistant message.
           claims: new Map<MessageID, Set<string>>(),
+          // Decisions on imports that point outside the project, keyed by Ask scope and realpath, so each one is
+          // asked about once per session and agent.
+          external: new Map<string, boolean>(),
+          // Realpaths loaded by the last system() call per Ask scope, including imports, so nested reads don't
+          // attach them again.
+          system: new Map<string, Set<string>>(),
         }),
       ),
     )
@@ -88,9 +102,28 @@ const layer: Layer.Layer<
         .pipe(Effect.catch(() => Effect.succeed([] as string[])))
     })
 
-    const read = Effect.fnUntraced(function* (filepath: string) {
-      return yield* fs.readFileString(filepath).pipe(Effect.catch(() => Effect.succeed("")))
+    const present = Effect.fnUntraced(function* (dir: string, files: ReadonlyArray<string>) {
+      const result: string[] = []
+      for (const file of files) {
+        const filepath = path.resolve(path.join(dir, file))
+        if (yield* fs.existsSafe(filepath)) result.push(filepath)
+      }
+      return result
     })
+
+    const gate = (ask?: Ask) =>
+      Effect.fnUntraced(function* (filepath: string) {
+        if (containsPath(filepath, yield* InstanceState.context)) return true
+        // Without a way to ask, skip the import but leave it undecided so a later call can still prompt.
+        if (!ask) return false
+        const s = yield* InstanceState.get(state)
+        const key = `${ask.scope}\0${filepath}`
+        const decided = s.external.get(key)
+        if (decided !== undefined) return decided
+        const ok = yield* ask.ask(filepath)
+        s.external.set(key, ok)
+        return ok
+      })
 
     const fetch = Effect.fnUntraced(function* (url: string) {
       const res = yield* http.execute(HttpClientRequest.get(url)).pipe(
@@ -107,37 +140,45 @@ const layer: Layer.Layer<
       s.claims.delete(messageID)
     })
 
-    const systemPaths = Effect.fn("Instruction.systemPaths")(function* () {
+    // Local instruction files in load order. Global files and absolute or ~/ config entries are user scope and
+    // import freely; files from the project tree ask before importing from outside the project.
+    const roots = Effect.fnUntraced(function* () {
       const config = yield* cfg.get()
       const ctx = yield* InstanceState.context
-      const paths = new Set<string>()
+      const result: InstructionFile.Root[] = []
 
       for (const file of globalFiles) {
-        if (yield* fs.existsSafe(file)) {
-          paths.add(path.resolve(file))
-          break
-        }
+        if (yield* fs.existsSafe(file)) result.push({ path: path.resolve(file), trusted: true })
       }
 
-      // The first project-level match wins so we don't stack AGENTS.md/CLAUDE.md from every ancestor.
+      // Claude Code loads instruction files from every directory between the filesystem root and the working
+      // directory, root first; files add up and never hide each other.
       if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
-        for (const file of instructionFiles) {
-          const matches = yield* fs
-            .findUp(file, ctx.directory, ctx.worktree)
-            .pipe(Effect.catch(() => Effect.succeed([])))
-          if (matches.length > 0) {
-            matches.forEach((item) => paths.add(path.resolve(item)))
-            break
-          }
-        }
+        // Global files already load as user scope; in $HOME, ~/.claude/CLAUDE.md would also match .claude/CLAUDE.md.
+        const found = (yield* Effect.forEach(InstructionFile.ancestors(ctx.directory), (dir) =>
+          present(dir, instructionFiles),
+        ))
+          .flat()
+          .filter((item) => !globals.has(item))
+        // The legacy CONTEXT.md only yields to instruction files inside the project, the old findUp boundary.
+        const project = found.some((item) => FSUtil.contains(ctx.worktree, item))
+          ? found
+          : [
+              ...found,
+              ...(yield* fs
+                .findUp(legacy, ctx.directory, ctx.worktree)
+                .pipe(Effect.catch(() => Effect.succeed([] as string[])))),
+            ]
+        project.forEach((item) => result.push({ path: path.resolve(item), trusted: false }))
       }
 
       if (config.instructions) {
         for (const raw of config.instructions) {
           if (raw.startsWith("https://") || raw.startsWith("http://")) continue
           const instruction = raw.startsWith("~/") ? path.join(global.home, raw.slice(2)) : raw
+          const trusted = path.isAbsolute(instruction)
           const matches = yield* (
-            path.isAbsolute(instruction)
+            trusted
               ? fs.glob(path.basename(instruction), {
                   cwd: path.dirname(instruction),
                   absolute: true,
@@ -145,79 +186,93 @@ const layer: Layer.Layer<
                 })
               : relative(instruction)
           ).pipe(Effect.catch(() => Effect.succeed([] as string[])))
-          matches.forEach((item) => paths.add(path.resolve(item)))
+          matches.forEach((item) => result.push({ path: path.resolve(item), trusted }))
         }
       }
 
-      return paths
+      return result
     })
 
-    const system = Effect.fn("Instruction.system")(function* () {
+    const systemPaths = Effect.fn("Instruction.systemPaths")(function* () {
+      return new Set((yield* roots()).map((item) => item.path))
+    })
+
+    const system = Effect.fn("Instruction.system")(function* (ask?: Ask) {
       const config = yield* cfg.get()
-      const paths = yield* systemPaths()
+      const s = yield* InstanceState.get(state)
+      const seen = new Set<string>()
+      const entries = yield* InstructionFile.expand(fs, {
+        roots: yield* roots(),
+        home: global.home,
+        seen,
+        authorize: gate(ask),
+      })
+      s.system.set(ask?.scope ?? "", seen)
+
       const urls = (config.instructions ?? []).filter(
         (item) => item.startsWith("https://") || item.startsWith("http://"),
       )
-
-      const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
       const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
 
       return [
-        ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
+        ...entries.flatMap((item) => (item.content ? [`Instructions from: ${item.path}\n${item.content}`] : [])),
         ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
       ]
     })
 
     const find = Effect.fn("Instruction.find")(function* (dir: string) {
-      for (const file of instructionFiles) {
-        const filepath = path.resolve(path.join(dir, file))
-        if (yield* fs.existsSafe(filepath)) return filepath
-      }
-      return undefined
+      const found = yield* present(dir, instructionFiles)
+      return found.length > 0 ? found : yield* present(dir, [legacy])
     })
 
     const resolve = Effect.fn("Instruction.resolve")(function* (
       messages: SessionV1.WithParts[],
       filepath: string,
       messageID: MessageID,
+      ask?: Ask,
     ) {
-      const sys = yield* systemPaths()
       const already = extract(messages)
-      const results: { filepath: string; content: string }[] = []
       const s = yield* InstanceState.get(state)
       const root = path.resolve(yield* InstanceState.directory)
 
       const target = path.resolve(filepath)
+      let set = s.claims.get(messageID)
+      if (!set) {
+        set = new Set()
+        s.claims.set(messageID, set)
+      }
+      const claimed = set
+
+      // Walk upward from the file being read, then attach nearby instruction files outermost first so the ones
+      // closest to the file come last, once per message.
+      const dirs: string[] = []
       let current = path.dirname(target)
-
-      // Walk upward from the file being read and attach nearby instruction files once per message.
       while (current.startsWith(root) && current !== root) {
-        const found = yield* find(current)
-        if (!found || found === target || sys.has(found) || already.has(found)) {
-          current = path.dirname(current)
-          continue
-        }
-
-        let set = s.claims.get(messageID)
-        if (!set) {
-          set = new Set()
-          s.claims.set(messageID, set)
-        }
-        if (set.has(found)) {
-          current = path.dirname(current)
-          continue
-        }
-
-        set.add(found)
-        const content = yield* read(found)
-        if (content) {
-          results.push({ filepath: found, content: `Instructions from: ${found}\n${content}` })
-        }
-
+        dirs.unshift(current)
         current = path.dirname(current)
       }
 
-      return results
+      const roots: InstructionFile.Root[] = []
+      for (const dir of dirs) {
+        for (const found of yield* find(dir)) {
+          // System roots below the working directory are skipped by expand() through the realpaths in `seen`.
+          if (found === target || already.has(found) || claimed.has(found)) continue
+          roots.push({ path: found, trusted: false })
+        }
+      }
+      if (roots.length === 0) return []
+
+      const seen = new Set([
+        ...(s.system.get(ask?.scope ?? "") ?? []),
+        ...(yield* Effect.forEach([...already, ...claimed], (item) => InstructionFile.realpath(fs, item))),
+      ])
+      const entries = yield* InstructionFile.expand(fs, { roots, home: global.home, seen, authorize: gate(ask) })
+      // Imports are claimed too, so later reads in this message don't attach them again.
+      entries.forEach((item) => claimed.add(item.path))
+
+      return entries.flatMap((item) =>
+        item.content ? [{ filepath: item.path, content: `Instructions from: ${item.path}\n${item.content}` }] : [],
+      )
     })
 
     return Service.of({ clear, systemPaths, system, find, resolve })

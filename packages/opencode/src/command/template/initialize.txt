@@ -1,9 +1,24 @@
-Create or update `AGENTS.md` for this repository.
+Create or update `CLAUDE.md` in the project root (`${path}`).
 
-The goal is a compact instruction file that helps future OpenCode sessions avoid mistakes and ramp up quickly. Every line should answer: "Would an agent likely miss this without help?" If not, leave it out.
+`CLAUDE.md` is the instruction file AgentCode loads at the start of every session, and other agents that read `CLAUDE.md` (such as Claude Code) use it too. The goal is a compact file that helps future sessions avoid mistakes and ramp up quickly. Every line should answer: "Would an agent likely miss this without help?" If not, leave it out.
 
 User-provided focus or constraints (honor these):
 $ARGUMENTS
+
+## Existing instruction files
+
+Check the project root before writing anything, including whether `CLAUDE.md` or `AGENTS.md` is a symlink (for example with `ls -la`). Use the first case that matches:
+1. `CLAUDE.md` and `AGENTS.md` are the same file (one is a symlink to the other): they already share one source of truth, so keep the link and do not add an import line. Any edit would change `AGENTS.md`, so the `AGENTS.md` rule below applies: unless the user already asked for it above, propose your changes in the question batch and edit only if the user approves. If you cannot ask, change nothing and list the proposed changes in your final reply.
+2. `CLAUDE.md` is a symlink to another file: keep the link and improve the file it points to.
+3. `CLAUDE.md` exists: improve it in place rather than rewriting blindly. Preserve verified useful guidance, delete fluff or stale claims, and reconcile it with the current codebase.
+4. `.claude/CLAUDE.md` exists: improve that file and do not create a root `CLAUDE.md`.
+5. None of the above: create `CLAUDE.md` in the project root. Start it with the heading `# CLAUDE.md` and one sentence saying it gives coding agents guidance for working in this repository.
+
+Except in case 1, if `AGENTS.md` exists:
+- Do not copy its content. Put an import line near the top of the file you edit, on its own line as plain text (no backticks or code fence). Write the path relative to that file's folder: `@AGENTS.md` in a root `CLAUDE.md`, `@../AGENTS.md` in `.claude/CLAUDE.md`. Then add only guidance that `AGENTS.md` is missing.
+- If the file already repeats large parts of `AGENTS.md`, ask before replacing the repeated parts with the import.
+
+Never create, overwrite or edit `AGENTS.md` unless the user asked for it above or approved it in your question batch. This rule wins over every other rule in this prompt.
 
 ## How to investigate
 
@@ -11,8 +26,8 @@ Read the highest-value sources first:
 - `README*`, root manifests, workspace config, lockfiles
 - build, test, lint, formatter, typecheck, and codegen config
 - CI workflows and pre-commit / task runner config
-- existing instruction files (`AGENTS.md`, `CLAUDE.md`, `.cursor/rules/`, `.cursorrules`, `.github/copilot-instructions.md`)
-- repo-local OpenCode config such as `opencode.json`
+- existing instruction files (`CLAUDE.md`, `.claude/CLAUDE.md`, `AGENTS.md`, `.cursor/rules/`, `.cursorrules`, `.github/copilot-instructions.md`)
+- repo-local AgentCode config such as `opencode.json`
 
 If architecture is still unclear after reading config and docs, inspect a small number of representative code files to find the real entrypoints, package boundaries, and execution flow. Prefer reading the files that explain how the system is wired together over random leaf files.
 
@@ -30,18 +45,18 @@ Look for the highest-signal facts for an agent working in this repo:
 - testing quirks: fixtures, integration test prerequisites, snapshot workflows, required services, flaky or expensive suites
 - important constraints from existing instruction files worth preserving
 
-Good `AGENTS.md` content is usually hard-earned context that took reading multiple files to infer.
+Good `CLAUDE.md` content is usually hard-earned context that took reading multiple files to infer.
 
 ## Questions
 
-Only ask the user questions if the repo cannot answer something important. Use the `question` tool for one short batch at most.
+Only ask the user questions if the repo cannot answer something important. Use the `question` tool for one short batch at most, and put every question (including whether to replace content repeated from `AGENTS.md`, or whether to edit `AGENTS.md` in case 1) in that batch.
 
 Good questions:
 - undocumented team conventions
 - branch / PR / release expectations
 - missing setup or test prerequisites that are known but not written down
 
-Do not ask about anything the repo already makes clear.
+Do not ask about anything the repo already makes clear. If the `question` tool is not available, do not wait for answers: make the conservative choice (keep existing content, use the import, leave `AGENTS.md` unchanged) and list the open questions in your final reply.
 
 ## Writing rules
 
@@ -63,4 +78,6 @@ When in doubt, omit.
 
 Prefer short sections and bullets. If the repo is simple, keep the file simple. If the repo is large, summarize the few structural facts that actually change how an agent should work.
 
-If `AGENTS.md` already exists at `${path}`, improve it in place rather than rewriting blindly. Preserve verified useful guidance, delete fluff or stale claims, and reconcile it with the current codebase.
+Keep the file well under 200 lines.
+
+If you cannot write files in this session, reply with the complete proposed `CLAUDE.md` content instead. Finish with a short summary: the file you wrote or changed, whether it imports `AGENTS.md`, and any open questions.

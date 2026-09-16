@@ -7,7 +7,9 @@ import { Effect, Layer, Context, Schema } from "effect"
 import { Config } from "@/config/config"
 import { MCP } from "../mcp"
 import { Skill } from "../skill"
+import { RuntimeFlags } from "@/effect/runtime-flags"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
+import PROMPT_INITIALIZE_AGENTS from "./template/initialize-agents.txt"
 import PROMPT_REVIEW from "./template/review.txt"
 import { LegacyEvent } from "@opencode-ai/schema/legacy-event"
 
@@ -61,6 +63,11 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const mcp = yield* MCP.Service
     const skill = yield* Skill.Service
+    const flags = yield* RuntimeFlags.Service
+    // CLAUDE.md files are not loaded when the Claude Code prompt is disabled, so /init writes AGENTS.md instead.
+    const initialize = flags.disableClaudeCodePrompt
+      ? { template: PROMPT_INITIALIZE_AGENTS, description: "initialize project with an AGENTS.md guide" }
+      : { template: PROMPT_INITIALIZE, description: "initialize project with a CLAUDE.md guide" }
 
     const init = Effect.fn("Command.state")(function* (ctx: InstanceContext) {
       const cfg = yield* config.get()
@@ -69,12 +76,13 @@ const layer = Layer.effect(
 
       commands[Default.INIT] = {
         name: Default.INIT,
-        description: "guided AGENTS.md setup",
+        description: initialize.description,
         source: "command",
         get template() {
-          return PROMPT_INITIALIZE.replace("${path}", ctx.worktree)
+          // Non-git projects set worktree to "/"; point /init at the opened directory instead.
+          return initialize.template.replace("${path}", ctx.worktree === "/" ? ctx.directory : ctx.worktree)
         },
-        hints: hints(PROMPT_INITIALIZE),
+        hints: hints(initialize.template),
       }
       commands[Default.REVIEW] = {
         name: Default.REVIEW,
@@ -172,6 +180,10 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [Config.node, MCP.node, Skill.node] })
+export const node = LayerNode.make({
+  service: Service,
+  layer: layer,
+  deps: [Config.node, MCP.node, Skill.node, RuntimeFlags.node],
+})
 
 export * as Command from "."

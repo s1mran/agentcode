@@ -724,8 +724,32 @@ function googleThinkingVariants(model: Provider.Model): Record<string, Record<st
   )
 }
 
+// AgentCode gateway models (agentcode-gateway/server.js MODELS). Matched on the exact gateway id
+// because the gateway hides the upstream model. Levels go out as plain reasoning_effort and the
+// gateway maps them to the upstream control. An empty list means the model always thinks with no
+// control upstream, so no selector is shown.
+const AGENTCODE_GATEWAY_MODELS: Record<string, { efforts: string[]; thinksByDefault: boolean }> = {
+  // Kimi K3: always thinks; Moonshot accepts low/high/max and defaults to max.
+  "agentcode-max": { efforts: ["low", "high", "max"], thinksByDefault: true },
+  // Kimi K2.7 Code: always thinks; Moonshot has no effort or off switch for it.
+  "agentcode-fast": { efforts: [], thinksByDefault: true },
+  // Qwen on Hetzner: thinking stays off unless a level is picked.
+  "agentcode-free-fast": { efforts: WIDELY_SUPPORTED_EFFORTS, thinksByDefault: false },
+  "agentcode-free": { efforts: WIDELY_SUPPORTED_EFFORTS, thinksByDefault: false },
+}
+
+function agentcodeGatewayModel(apiID: string) {
+  return Object.hasOwn(AGENTCODE_GATEWAY_MODELS, apiID) ? AGENTCODE_GATEWAY_MODELS[apiID] : undefined
+}
+
+export function agentcodeGatewayReasoning(apiID: string) {
+  return agentcodeGatewayModel(apiID) !== undefined
+}
+
 export function variants(model: Provider.Model): Record<string, Record<string, any>> {
   if (!model.capabilities.reasoning) return {}
+  const gateway = agentcodeGatewayModel(model.api.id)
+  if (gateway) return Object.fromEntries(gateway.efforts.map((effort) => [effort, { reasoningEffort: effort }]))
 
   const id = model.id.toLowerCase()
   const glm52 = ["glm-5.2", "glm-5-2", "glm-5p2"].some(
@@ -1325,6 +1349,8 @@ export function options(input: {
 }
 
 export function smallOptions(model: Provider.Model) {
+  // Gateway Qwen thinks only when a level is picked; small calls (titles) must not opt in via the first variant.
+  if (agentcodeGatewayModel(model.api.id)?.thinksByDefault === false) return {}
   const small = Object.values(model.variants ?? {})[0] ?? {}
   if (
     model.providerID === "openai" ||

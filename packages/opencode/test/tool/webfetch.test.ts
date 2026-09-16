@@ -116,4 +116,24 @@ describe("tool.webfetch", () => {
         }),
     ),
   )
+
+  it.instance("retries a Cloudflare challenge with the AgentCode User-Agent", () => {
+    const agents: (string | null)[] = []
+    return withFetch(
+      (req) => {
+        const agent = req.headers.get("user-agent")
+        agents.push(agent)
+        if (agent !== "AgentCode")
+          return new Response("challenge", { status: 403, headers: { "cf-mitigated": "challenge" } })
+        return new Response("hello", { status: 200, headers: { "content-type": "text/plain" } })
+      },
+      (url) =>
+        Effect.gen(function* () {
+          const result = yield* exec({ url: new URL("/page", url).toString(), format: "text" })
+          expect(result.output).toContain("hello")
+          expect(agents).toHaveLength(2)
+          expect(agents[1]).toBe("AgentCode")
+        }),
+    )
+  })
 })

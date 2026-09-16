@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import path from "path"
+import { mkdir, symlink } from "fs/promises"
 import { Effect, FileSystem, Layer } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 
@@ -71,6 +72,43 @@ const tmpWithFiles = (files: Record<string, string>) =>
     yield* writeFiles(dir, files)
     return dir
   })
+
+const header = "Instructions from: "
+
+// Source files of system rules inside the given fixture directories; the walk also checks every directory above them.
+const sources = (rules: string[], ...dirs: string[]) =>
+  rules
+    .map((rule) => rule.slice(header.length).split("\n")[0])
+    .filter((item) => dirs.some((dir) => item.startsWith(dir + path.sep)))
+
+const ruleFor = (rules: string[], filepath: string) => rules.find((rule) => rule.startsWith(`${header}${filepath}\n`))
+
+// Separate global and project directories, so project .claude/CLAUDE.md is never also ~/.claude/CLAUDE.md.
+const withProject = <A, E, R>(
+  input: { global?: Record<string, string>; project: Record<string, string>; cwd?: string },
+  self: (dirs: { global: string; project: string }) => Effect.Effect<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    const globalTmp = yield* tmpWithFiles(input.global ?? {})
+    const projectTmp = yield* tmpWithFiles(input.project)
+    return yield* self({ global: globalTmp, project: projectTmp }).pipe(
+      provideInstance(input.cwd ? path.join(projectTmp, input.cwd) : projectTmp),
+      provideInstruction({ home: globalTmp, config: globalTmp }),
+    )
+  })
+
+const counter = (answer: boolean, scope = "ses_test\0build") => {
+  const calls: string[] = []
+  const ask: Instruction.Ask = {
+    scope,
+    ask: (filepath) =>
+      Effect.sync(() => {
+        calls.push(filepath)
+        return answer
+      }),
+  }
+  return { calls, ask }
+}
 
 function loaded(filepath: string): SessionV1.WithParts[] {
   const sessionID = SessionID.make("session-loaded-1")
@@ -206,6 +244,77 @@ describe("Instruction.resolve", () => {
     ),
   )
 
+  it.live("attaches CLAUDE.md and CLAUDE.local.md next to AGENTS.md", () =>
+    withFiles(
+      {
+        "subdir/AGENTS.md": "# Subdir Agents",
+        "subdir/CLAUDE.md": "# Subdir Claude",
+        "subdir/CLAUDE.local.md": "# Subdir Local",
+        "subdir/nested/file.ts": "const x = 1",
+      },
+      (dir) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const results = yield* svc.resolve(
+            [],
+            path.join(dir, "subdir", "nested", "file.ts"),
+            MessageID.make("msg_message-claude-1"),
+          )
+          expect(results.map((item) => item.filepath)).toEqual([
+            path.join(dir, "subdir", "AGENTS.md"),
+            path.join(dir, "subdir", "CLAUDE.md"),
+            path.join(dir, "subdir", "CLAUDE.local.md"),
+          ])
+        }),
+    ),
+  )
+
+  it.live("orders nested instructions outermost first", () =>
+    withFiles({ "a/CLAUDE.md": "# A", "a/b/CLAUDE.md": "# B", "a/b/file.ts": "const x = 1" }, (dir) =>
+      Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const results = yield* svc.resolve(
+          [],
+          path.join(dir, "a", "b", "file.ts"),
+          MessageID.make("msg_message-order-1"),
+        )
+        expect(results.map((item) => item.filepath)).toEqual([
+          path.join(dir, "a", "CLAUDE.md"),
+          path.join(dir, "a", "b", "CLAUDE.md"),
+        ])
+      }),
+    ),
+  )
+
+  it.live("expands imports in nested files and claims them", () =>
+    withFiles({ "sub/CLAUDE.md": "@notes.md", "sub/notes.md": "n", "sub/x.ts": "const x = 1" }, (dir) =>
+      Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const filepath = path.join(dir, "sub", "x.ts")
+        const id = MessageID.make("msg_message-import-1")
+
+        const first = yield* svc.resolve([], filepath, id)
+        expect(first.map((item) => item.filepath)).toEqual([
+          path.join(dir, "sub", "notes.md"),
+          path.join(dir, "sub", "CLAUDE.md"),
+        ])
+        expect(first[0].content).toBe(`Instructions from: ${path.join(dir, "sub", "notes.md")}\nn`)
+        expect(yield* svc.resolve([], filepath, id)).toEqual([])
+      }),
+    ),
+  )
+
+  it.live("does not reattach a nested file already imported at system level", () =>
+    withFiles({ "CLAUDE.md": "@sub/CLAUDE.md", "sub/CLAUDE.md": "s", "sub/x.ts": "const x = 1" }, (dir) =>
+      Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        yield* svc.system()
+        const results = yield* svc.resolve([], path.join(dir, "sub", "x.ts"), MessageID.make("msg_message-import-2"))
+        expect(results).toEqual([])
+      }),
+    ),
+  )
+
   test.todo("fetches remote instructions from config URLs via HttpClient", () => {})
 })
 
@@ -232,17 +341,357 @@ describe("Instruction.system", () => {
   it.live("skips project and global CLAUDE.md when Claude Code prompt is disabled", () =>
     Effect.gen(function* () {
       const globalTmp = yield* tmpWithFiles({ ".claude/CLAUDE.md": "# Global Claude" })
-      const projectTmp = yield* tmpWithFiles({ "CLAUDE.md": "# Project Claude" })
+      const projectTmp = yield* tmpWithFiles({
+        "CLAUDE.md": "# Project Claude",
+        "CLAUDE.local.md": "# Project Local",
+        ".claude/CLAUDE.md": "# Project Dot Claude",
+      })
 
       yield* Effect.gen(function* () {
         const svc = yield* Instruction.Service
         const paths = yield* svc.systemPaths()
         expect(paths.has(path.join(globalTmp, ".claude", "CLAUDE.md"))).toBe(false)
         expect(paths.has(path.join(projectTmp, "CLAUDE.md"))).toBe(false)
+        expect(paths.has(path.join(projectTmp, "CLAUDE.local.md"))).toBe(false)
+        expect(paths.has(path.join(projectTmp, ".claude", "CLAUDE.md"))).toBe(false)
         expect(yield* svc.system()).toEqual([])
       }).pipe(
         provideInstance(projectTmp),
         provideInstruction({ home: globalTmp, config: globalTmp }, { disableClaudeCodePrompt: true }),
+      )
+    }),
+  )
+
+  it.live("loads CLAUDE.md and AGENTS.md from the same directory", () =>
+    withProject({ project: { "AGENTS.md": "agents", "CLAUDE.md": "claude" } }, (dirs) =>
+      Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const rules = yield* svc.system()
+        expect(sources(rules, dirs.project)).toEqual([
+          path.join(dirs.project, "AGENTS.md"),
+          path.join(dirs.project, "CLAUDE.md"),
+        ])
+        expect(ruleFor(rules, path.join(dirs.project, "AGENTS.md"))).toBe(
+          `${header}${path.join(dirs.project, "AGENTS.md")}\nagents`,
+        )
+        expect(ruleFor(rules, path.join(dirs.project, "CLAUDE.md"))).toBe(
+          `${header}${path.join(dirs.project, "CLAUDE.md")}\nclaude`,
+        )
+      }),
+    ),
+  )
+
+  it.live("orders ancestors root-first with CLAUDE.local.md after CLAUDE.md", () =>
+    withProject(
+      {
+        project: {
+          "CLAUDE.md": "root",
+          "CLAUDE.local.md": "root local",
+          "packages/app/AGENTS.md": "app agents",
+          "packages/app/CLAUDE.md": "app",
+        },
+        cwd: path.join("packages", "app"),
+      },
+      (dirs) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const app = path.join(dirs.project, "packages", "app")
+          expect(sources(yield* svc.system(), dirs.project)).toEqual([
+            path.join(dirs.project, "CLAUDE.md"),
+            path.join(dirs.project, "CLAUDE.local.md"),
+            path.join(app, "AGENTS.md"),
+            path.join(app, "CLAUDE.md"),
+          ])
+        }),
+    ),
+  )
+
+  it.live("recognises .claude/CLAUDE.md", () =>
+    withProject({ project: { ".claude/CLAUDE.md": "dot" } }, (dirs) =>
+      Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const filepath = path.join(dirs.project, ".claude", "CLAUDE.md")
+        const rules = yield* svc.system()
+        expect(sources(rules, dirs.project)).toEqual([filepath])
+        expect(ruleFor(rules, filepath)).toBe(`${header}${filepath}\ndot`)
+      }),
+    ),
+  )
+
+  it.live("loads ~/.claude/CLAUDE.md alongside the global AGENTS.md", () =>
+    withProject({ global: { "AGENTS.md": "g", ".claude/CLAUDE.md": "gc" }, project: {} }, (dirs) =>
+      Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        expect(sources(yield* svc.system(), dirs.global)).toEqual([
+          path.join(dirs.global, "AGENTS.md"),
+          path.join(dirs.global, ".claude", "CLAUDE.md"),
+        ])
+      }),
+    ),
+  )
+
+  it.live("expands a relative import before the importing file", () =>
+    withProject({ project: { "CLAUDE.md": "@docs/guide.md\nroot", "docs/guide.md": "guide" } }, (dirs) =>
+      Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const guide = path.join(dirs.project, "docs", "guide.md")
+        const claude = path.join(dirs.project, "CLAUDE.md")
+        const rules = yield* svc.system()
+        expect(sources(rules, dirs.project)).toEqual([guide, claude])
+        expect(ruleFor(rules, guide)).toBe(`${header}${guide}\nguide`)
+        expect(ruleFor(rules, claude)).toBe(`${header}${claude}\n@docs/guide.md\nroot`)
+      }),
+    ),
+  )
+
+  it.live("resolves nested imports relative to the importing file", () =>
+    withProject(
+      { project: { "CLAUDE.md": "@docs/a.md", "docs/a.md": "@b.md", "docs/b.md": "b", "b.md": "WRONG" } },
+      (dirs) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const rules = yield* svc.system()
+          expect(sources(rules, dirs.project)).toEqual([
+            path.join(dirs.project, "docs", "b.md"),
+            path.join(dirs.project, "docs", "a.md"),
+            path.join(dirs.project, "CLAUDE.md"),
+          ])
+          expect(rules.some((rule) => rule.includes("WRONG"))).toBe(false)
+        }),
+    ),
+  )
+
+  it.live("stops following imports after four hops", () =>
+    withProject(
+      {
+        project: {
+          "CLAUDE.md": "@h1.md",
+          "h1.md": "@h2.md",
+          "h2.md": "@h3.md",
+          "h3.md": "@h4.md",
+          "h4.md": "@h5.md",
+          "h5.md": "h5",
+        },
+      },
+      (dirs) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          expect(sources(yield* svc.system(), dirs.project)).toEqual([
+            path.join(dirs.project, "h4.md"),
+            path.join(dirs.project, "h3.md"),
+            path.join(dirs.project, "h2.md"),
+            path.join(dirs.project, "h1.md"),
+            path.join(dirs.project, "CLAUDE.md"),
+          ])
+        }),
+    ),
+  )
+
+  it.live("survives import cycles", () =>
+    withProject({ project: { "CLAUDE.md": "@a.md\nroot", "a.md": "@CLAUDE.md\na" } }, (dirs) =>
+      Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        expect(sources(yield* svc.system(), dirs.project)).toEqual([
+          path.join(dirs.project, "a.md"),
+          path.join(dirs.project, "CLAUDE.md"),
+        ])
+      }),
+    ),
+  )
+
+  it.live("skips imports inside code fences and code spans", () =>
+    withProject(
+      {
+        project: {
+          "CLAUDE.md": "```\n@fenced.md\n```\n`@span.md`\n@real.md",
+          "fenced.md": "fenced",
+          "span.md": "span",
+          "real.md": "real",
+        },
+      },
+      (dirs) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          expect(sources(yield* svc.system(), dirs.project)).toEqual([
+            path.join(dirs.project, "real.md"),
+            path.join(dirs.project, "CLAUDE.md"),
+          ])
+        }),
+    ),
+  )
+
+  it.live("@AGENTS.md bridge does not duplicate AGENTS.md", () =>
+    withProject({ project: { "AGENTS.md": "agents", "CLAUDE.md": "@AGENTS.md\nclaude" } }, (dirs) =>
+      Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        expect(sources(yield* svc.system(), dirs.project)).toEqual([
+          path.join(dirs.project, "AGENTS.md"),
+          path.join(dirs.project, "CLAUDE.md"),
+        ])
+      }),
+    ),
+  )
+
+  it.live("gates external imports from project files", () =>
+    Effect.gen(function* () {
+      const external = yield* tmpWithFiles({ "notes.md": "external notes" })
+      const imported = path.join(external, "notes.md")
+      const project = { "CLAUDE.md": `@${imported}\nproject` }
+
+      yield* withProject({ project }, () =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          expect(sources(yield* svc.system(), external)).toEqual([])
+
+          const allow = counter(true)
+          expect(sources(yield* svc.system(allow.ask), external)).toEqual([imported])
+          expect(sources(yield* svc.system(allow.ask), external)).toEqual([imported])
+          expect(allow.calls).toEqual([imported])
+        }),
+      )
+
+      yield* withProject({ project }, () =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const reject = counter(false)
+          expect(sources(yield* svc.system(reject.ask), external)).toEqual([])
+          expect(sources(yield* svc.system(reject.ask), external)).toEqual([])
+          expect(reject.calls).toEqual([imported])
+        }),
+      )
+    }),
+  )
+
+  it.live("remembers external import decisions per session and agent, not per instance", () =>
+    Effect.gen(function* () {
+      const external = yield* tmpWithFiles({ "notes.md": "external notes" })
+      const imported = path.join(external, "notes.md")
+
+      yield* withProject({ project: { "CLAUDE.md": `@${imported}\nproject` } }, () =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const once = counter(true, "ses_a\0build")
+          expect(sources(yield* svc.system(once.ask), external)).toEqual([imported])
+
+          // Another session, or another agent in the same session, is asked again with its own rules.
+          const other = counter(false, "ses_b\0build")
+          expect(sources(yield* svc.system(other.ask), external)).toEqual([])
+          const plan = counter(false, "ses_a\0plan")
+          expect(sources(yield* svc.system(plan.ask), external)).toEqual([])
+          expect(other.calls).toEqual([imported])
+          expect(plan.calls).toEqual([imported])
+
+          // A reject in one scope does not block the import elsewhere.
+          const later = counter(true, "ses_c\0build")
+          expect(sources(yield* svc.system(later.ask), external)).toEqual([imported])
+          expect(later.calls).toEqual([imported])
+        }),
+      )
+    }),
+  )
+
+  it.live("gates an import through an in-project symlink that points outside the project", () =>
+    Effect.gen(function* () {
+      const external = yield* tmpWithFiles({ "secret.md": "TOP-SECRET-VALUE" })
+      const secret = path.join(external, "secret.md")
+      const link = (project: string) =>
+        Effect.promise(async () => {
+          await mkdir(path.join(project, "docs"), { recursive: true })
+          await symlink(secret, path.join(project, "docs", "link.md"))
+        })
+
+      yield* withProject({ project: { "CLAUDE.md": "@docs/link.md\nproject" } }, (dirs) =>
+        Effect.gen(function* () {
+          yield* link(dirs.project)
+          const svc = yield* Instruction.Service
+          expect((yield* svc.system()).some((rule) => rule.includes("TOP-SECRET-VALUE"))).toBe(false)
+
+          const reject = counter(false)
+          expect((yield* svc.system(reject.ask)).some((rule) => rule.includes("TOP-SECRET-VALUE"))).toBe(false)
+          expect(reject.calls).toEqual([secret])
+        }),
+      )
+
+      yield* withProject({ project: { "CLAUDE.md": "@docs/link.md\nproject" } }, (dirs) =>
+        Effect.gen(function* () {
+          yield* link(dirs.project)
+          const svc = yield* Instruction.Service
+          const allow = counter(true)
+          expect((yield* svc.system(allow.ask)).some((rule) => rule.includes("TOP-SECRET-VALUE"))).toBe(true)
+          expect(allow.calls).toEqual([secret])
+        }),
+      )
+    }),
+  )
+
+  it.live("loads CONTEXT.md when the only instruction file above it is the global one", () =>
+    Effect.gen(function* () {
+      const home = yield* tmpWithFiles({ ".claude/CLAUDE.md": "global claude", "proj/CONTEXT.md": "legacy" })
+
+      yield* Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const rules = yield* svc.system()
+        expect(sources(rules, home)).toEqual([
+          path.join(home, ".claude", "CLAUDE.md"),
+          path.join(home, "proj", "CONTEXT.md"),
+        ])
+      }).pipe(provideInstance(path.join(home, "proj")), provideInstruction({ home, config: home }))
+    }),
+  )
+
+  it.live("trusts imports from user-scope files", () =>
+    Effect.gen(function* () {
+      const external = yield* tmpWithFiles({ "shared.md": "shared" })
+      const shared = path.join(external, "shared.md")
+
+      yield* withProject(
+        { global: { ".claude/CLAUDE.md": `@~/notes.md\n@${shared}\nuser`, "notes.md": "notes" }, project: {} },
+        (dirs) =>
+          Effect.gen(function* () {
+            const svc = yield* Instruction.Service
+            const spy = counter(false)
+            expect(sources(yield* svc.system(spy.ask), dirs.global, external)).toEqual([
+              path.join(dirs.global, "notes.md"),
+              shared,
+              path.join(dirs.global, ".claude", "CLAUDE.md"),
+            ])
+            expect(spy.calls).toEqual([])
+          }),
+      )
+    }),
+  )
+
+  it.live("strips block-level HTML comments", () =>
+    withProject(
+      { project: { "CLAUDE.md": "<!-- hidden -->\nkeep\n<!--\nmulti\n-->\n```\n<!-- fenced -->\n```" } },
+      (dirs) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const filepath = path.join(dirs.project, "CLAUDE.md")
+          const rule = ruleFor(yield* svc.system(), filepath)
+          expect(rule).toBe(`${header}${filepath}\nkeep\n\`\`\`\n<!-- fenced -->\n\`\`\``)
+          expect(rule).not.toContain("hidden")
+          expect(rule).not.toContain("multi")
+        }),
+    ),
+  )
+
+  it.live("skips instruction files and imports over 4 MiB", () =>
+    Effect.gen(function* () {
+      const big = "a".repeat(4 * 1024 * 1024 + 1)
+
+      yield* withProject({ project: { "CLAUDE.md": big } }, (dirs) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          expect(sources(yield* svc.system(), dirs.project)).toEqual([])
+        }),
+      )
+
+      yield* withProject({ project: { "CLAUDE.md": "@big.md\nsmall", "big.md": big } }, (dirs) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          expect(sources(yield* svc.system(), dirs.project)).toEqual([path.join(dirs.project, "CLAUDE.md")])
+        }),
       )
     }),
   )

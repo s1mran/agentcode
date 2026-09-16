@@ -3940,7 +3940,7 @@ export class Session2 extends HeyApiClient {
   /**
    * Initialize session
    *
-   * Analyze the current application and create an AGENTS.md file with project-specific agent configurations.
+   * Analyze the current application and create or update a CLAUDE.md file with project-specific agent instructions (AGENTS.md when CLAUDE.md loading is disabled).
    */
   public init<ThrowOnError extends boolean = false>(
     parameters: {

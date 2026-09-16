@@ -526,6 +526,96 @@ it.instance(
   },
 )
 
+const agentcodeGatewayProvider = (models: Record<string, Record<string, unknown>>, providerID = "agentcode") => ({
+  provider: {
+    [providerID]: {
+      name: "AgentCode Gateway",
+      npm: "@ai-sdk/openai-compatible",
+      api: "http://localhost:8399/v1",
+      env: [],
+      options: { apiKey: "test-key" },
+      models,
+    },
+  },
+})
+
+const expectAgentcodeGatewayDefaults = (models: Record<string, Provider.Model>) => {
+  for (const id of ["agentcode-free-fast", "agentcode-free", "agentcode-max", "agentcode-fast"]) {
+    expect(models[id].capabilities.reasoning).toBe(true)
+  }
+  expect(models["agentcode-claude"].capabilities.reasoning).toBe(false)
+  expect(Object.keys(models["agentcode-free-fast"].variants ?? {})).toEqual(["low", "medium", "high"])
+  expect(Object.keys(models["agentcode-free"].variants ?? {})).toEqual(["low", "medium", "high"])
+  expect(Object.keys(models["agentcode-max"].variants ?? {})).toEqual(["low", "high", "max"])
+  expect(models["agentcode-fast"].variants).toEqual({})
+  expect(models["agentcode-claude"].variants).toEqual({})
+}
+
+it.instance("agentcode gateway ships built in and loads from its key with no config", () =>
+  Effect.gen(function* () {
+    yield* setProcessEnv("AGENTCODE_API_KEY", "test-key")
+    const providers = yield* list
+    const provider = providers[ProviderV2.ID.make("agentcode")]
+    expect(provider).toBeDefined()
+    expect(provider.source).toBe("env")
+    expect(Object.keys(provider.models).sort()).toEqual(
+      ["agentcode-claude", "agentcode-fast", "agentcode-free", "agentcode-free-fast", "agentcode-max"].sort(),
+    )
+    for (const model of Object.values(provider.models)) {
+      expect(model.api.url).toBe("http://localhost:8399/v1")
+      expect(model.api.npm).toBe("@ai-sdk/openai-compatible")
+      expect(model.capabilities.input.text).toBe(true)
+      expect(model.capabilities.output.text).toBe(true)
+    }
+    expectAgentcodeGatewayDefaults(provider.models)
+  }),
+)
+
+it.instance("agentcode gateway is not listed without a key", () =>
+  Effect.gen(function* () {
+    yield* remove("AGENTCODE_API_KEY")
+    const providers = yield* list
+    expect(providers[ProviderV2.ID.make("agentcode")]).toBeUndefined()
+  }),
+)
+
+it.instance(
+  "gateway models defined in config under another provider id get reasoning defaults without flags",
+  Effect.gen(function* () {
+    const providers = yield* list
+    expectAgentcodeGatewayDefaults(providers[ProviderV2.ID.make("my-gateway")].models)
+  }),
+  {
+    config: agentcodeGatewayProvider(
+      {
+        "agentcode-free-fast": { name: "AgentCode Free Fast" },
+        "agentcode-free": { name: "AgentCode Free" },
+        "agentcode-max": { name: "AgentCode Max" },
+        "agentcode-fast": { name: "AgentCode Fast" },
+        "agentcode-claude": { name: "Claude Code" },
+      },
+      "my-gateway",
+    ),
+  },
+)
+
+it.instance(
+  "agentcode gateway reasoning defaults yield to explicit config",
+  Effect.gen(function* () {
+    const providers = yield* list
+    const models = providers[ProviderV2.ID.make("agentcode")].models
+    expect(models["agentcode-free"].capabilities.reasoning).toBe(false)
+    expect(models["agentcode-free"].variants).toEqual({})
+    expect(Object.keys(models["agentcode-max"].variants ?? {})).toEqual(["low", "high"])
+  }),
+  {
+    config: agentcodeGatewayProvider({
+      "agentcode-free": { name: "AgentCode Free", reasoning: false },
+      "agentcode-max": { name: "AgentCode Max", variants: { max: { disabled: true } } },
+    }),
+  },
+)
+
 it.instance(
   "explicit baseURL overrides api field",
   Effect.gen(function* () {

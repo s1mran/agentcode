@@ -37,6 +37,12 @@ const layer = Layer.effectDiscard(
         removed: () => "Previously loaded instructions no longer apply.",
       })
 
+    // NOTE(agentcode): this v2 loader still reads AGENTS.md only, nearest-first, and stops at the project root.
+    // The v1 engine the desktop app runs (packages/opencode/src/session/instruction.ts) uses InstructionFile
+    // (./instruction-file) for CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md, root-first order, @imports,
+    // comment stripping and the 4 MiB cap. Port observe() to InstructionFile.ancestors/names/expand (keeping the
+    // Unavailable-on-read-race contract) before prompts use the v2 session.prompt route; external imports need a
+    // session-scoped permission path, which SystemContext.load does not have, so skip them until then.
     const observe = Effect.fn("InstructionContext.observe")(function* () {
       const start = yield* fs.resolve(location.directory)
       const stop = yield* fs.resolve(location.project.directory)

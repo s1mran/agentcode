@@ -518,7 +518,7 @@ class Session extends _HeyApiClient {
   }
 
   /**
-   * Analyze the app and create an AGENTS.md file
+   * Analyze the app and create or update a CLAUDE.md file
    */
   public init<ThrowOnError extends boolean = false>(options: Options<SessionInitData, ThrowOnError>) {
     return (options.client ?? this._client).post<SessionInitResponses, SessionInitErrors, ThrowOnError>({

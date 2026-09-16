@@ -5410,6 +5410,56 @@ describe("ProviderTransform.variants", () => {
       })
     })
   })
+  describe("agentcode gateway", () => {
+    const gatewayModel = (apiID: string, overrides: Partial<any> = {}) =>
+      createMockModel({
+        id: `agentcode/${apiID}`,
+        providerID: "agentcode",
+        api: { id: apiID, url: "http://localhost:8399/v1", npm: "@ai-sdk/openai-compatible" },
+        ...overrides,
+      })
+
+    for (const apiID of ["agentcode-free-fast", "agentcode-free"]) {
+      test(`${apiID} maps low/medium/high to reasoningEffort`, () => {
+        expect(ProviderTransform.variants(gatewayModel(apiID))).toEqual({
+          low: { reasoningEffort: "low" },
+          medium: { reasoningEffort: "medium" },
+          high: { reasoningEffort: "high" },
+        })
+      })
+    }
+
+    test("agentcode-max offers the Kimi K3 levels low/high/max", () => {
+      expect(ProviderTransform.variants(gatewayModel("agentcode-max"))).toEqual({
+        low: { reasoningEffort: "low" },
+        high: { reasoningEffort: "high" },
+        max: { reasoningEffort: "max" },
+      })
+    })
+
+    test("agentcode-fast has no upstream control so returns no variants", () => {
+      expect(ProviderTransform.variants(gatewayModel("agentcode-fast"))).toEqual({})
+    })
+
+    test("agentcode-claude without reasoning returns no variants", () => {
+      expect(
+        ProviderTransform.variants(gatewayModel("agentcode-claude", { capabilities: { reasoning: false } })),
+      ).toEqual({})
+    })
+
+    test("gateway id wins over the qwen id early return", () => {
+      expect(ProviderTransform.variants(gatewayModel("agentcode-free", { id: "agentcode/qwen-free" }))).toEqual({
+        low: { reasoningEffort: "low" },
+        medium: { reasoningEffort: "medium" },
+        high: { reasoningEffort: "high" },
+      })
+    })
+
+    test("prototype keys are not gateway models", () => {
+      expect(ProviderTransform.agentcodeGatewayReasoning("constructor")).toBe(false)
+      expect(ProviderTransform.agentcodeGatewayReasoning("agentcode-max")).toBe(true)
+    })
+  })
 })
 
 describe("ProviderTransform.smallOptions - gpt-5 chat/search", () => {
@@ -5530,6 +5580,38 @@ describe("ProviderTransform.smallOptions - google thinking controls", () => {
 
   test("does not synthesize thinking options when variants are empty", () => {
     expect(ProviderTransform.smallOptions({ ...createGoogleModel("gemini-2.5-pro"), variants: {} })).toEqual({})
+  })
+})
+
+describe("ProviderTransform.smallOptions - agentcode gateway", () => {
+  const createGatewayModel = (apiID: string) => {
+    const model = {
+      id: `agentcode/${apiID}`,
+      providerID: "agentcode",
+      api: { id: apiID, url: "http://localhost:8399/v1", npm: "@ai-sdk/openai-compatible" },
+      capabilities: { reasoning: true },
+      limit: { output: 0 },
+    } as any
+    model.variants = ProviderTransform.variants(model)
+    return model
+  }
+
+  for (const apiID of ["agentcode-free-fast", "agentcode-free"]) {
+    test(`${apiID} keeps thinking off for small calls even with variants`, () => {
+      const model = createGatewayModel(apiID)
+      expect(Object.keys(model.variants)).toEqual(["low", "medium", "high"])
+      expect(ProviderTransform.smallOptions(model)).toEqual({})
+    })
+  }
+
+  test("agentcode-max uses its first variant", () => {
+    expect(ProviderTransform.smallOptions(createGatewayModel("agentcode-max"))).toEqual({ reasoningEffort: "low" })
+  })
+
+  test("effort is routed under the agentcode provider key", () => {
+    expect(
+      ProviderTransform.providerOptions(createGatewayModel("agentcode-free-fast"), { reasoningEffort: "low" }),
+    ).toEqual({ agentcode: { reasoningEffort: "low" } })
   })
 })
 

@@ -88,7 +88,6 @@ describe("session.system", () => {
     for (const id of ["meta/muse-spark-preview", "muse-spark-1.1", "muse-spark-1.2"]) {
       const prompt = SystemPrompt.provider({ api: { id } } as Provider.Model)[0]
       expect(prompt).toContain("powered by Muse Spark,")
-      expect(prompt).toContain("using Meta Muse Spark.")
       expect(prompt).not.toContain("{{MODEL_NAME}}")
     }
   })
@@ -97,8 +96,62 @@ describe("session.system", () => {
     for (const id of ["meta/muse-glimmer", "meta/muse-glimmer-30b", "muse-glimmer-30b"]) {
       const prompt = SystemPrompt.provider({ api: { id } } as Provider.Model)[0]
       expect(prompt).toContain("powered by Muse Glimmer,")
-      expect(prompt).toContain("using Meta Muse Glimmer.")
       expect(prompt).not.toContain("{{MODEL_NAME}}")
+    }
+  })
+
+  test("every provider prompt identifies as AgentCode and never points at upstream opencode", () => {
+    const models = [
+      { providerID: "agentcode", api: { id: "agentcode-free" } },
+      { api: { id: "claude-sonnet-4-6" } },
+      { api: { id: "gpt-5" } },
+      { api: { id: "gpt-5-codex" } },
+      { api: { id: "gpt-4o" } },
+      { api: { id: "gemini-2.5-pro" } },
+      { api: { id: "kimi-k2" } },
+      { api: { id: "trinity-large" } },
+      { api: { id: "meta/muse-spark-preview" } },
+    ]
+    for (const model of models) {
+      const prompt = SystemPrompt.provider(model as Provider.Model)[0]
+      expect(prompt).toMatch(/^You are AgentCode/)
+      expect(prompt).not.toMatch(/opencode\.ai|anomalyco/)
+      expect(prompt.replaceAll("customize-opencode", "")).not.toMatch(/opencode/i)
+    }
+  })
+
+  test("help text names the desktop command palette shortcut, not only the TUI's ctrl+p", () => {
+    // The desktop palette is mod+k / mod+shift+p (packages/app/src/context/command.tsx); mod+p opens the file picker.
+    for (const id of ["agentcode-free", "claude-sonnet-4-6"]) {
+      const prompt = SystemPrompt.provider({ providerID: "agentcode", api: { id } } as Provider.Model)[0]
+      const help = prompt.slice(
+        prompt.indexOf("If the user asks for help"),
+        prompt.indexOf("When the user directly asks"),
+      )
+      expect(help).toContain("command palette")
+      expect(help).toContain("cmd+k")
+      expect(help).toContain("ctrl+k")
+      expect(help).not.toMatch(/^- ctrl\+p to list available actions$/m)
+    }
+  })
+
+  test("instruction file suggestions always name AGENTS.md, which loads even with Claude Code compat disabled", () => {
+    const models = [
+      { providerID: "agentcode", api: { id: "agentcode-free" } },
+      { api: { id: "claude-sonnet-4-6" } },
+      { api: { id: "gpt-5" } },
+      { api: { id: "gpt-5-codex" } },
+      { api: { id: "gpt-4o" } },
+      { api: { id: "gemini-2.5-pro" } },
+      { api: { id: "kimi-k2" } },
+      { api: { id: "trinity-large" } },
+      { api: { id: "meta/muse-spark-preview" } },
+    ]
+    for (const model of models) {
+      const prompt = SystemPrompt.provider(model as Provider.Model)[0]
+      for (const line of prompt.split("\n").filter((line) => line.includes("CLAUDE.md"))) {
+        expect(line).toContain("AGENTS.md")
+      }
     }
   })
 

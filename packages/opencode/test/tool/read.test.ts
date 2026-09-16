@@ -582,6 +582,61 @@ describe("tool.read loaded instructions", () => {
       expect(result.metadata.loaded).toContain(path.join(dir, "subdir", "AGENTS.md"))
     }),
   )
+
+  it.live("loads CLAUDE.md alongside AGENTS.md from a parent directory", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      yield* put(path.join(dir, "subdir", "AGENTS.md"), "# Agents Instructions")
+      yield* put(path.join(dir, "subdir", "CLAUDE.md"), "# Claude Instructions")
+      yield* put(path.join(dir, "subdir", "nested", "test.txt"), "test content")
+
+      const result = yield* exec(dir, { filePath: path.join(dir, "subdir", "nested", "test.txt") })
+      expect(result.output).toContain("Agents Instructions")
+      expect(result.output).toContain("Claude Instructions")
+      expect(result.metadata.loaded).toContain(path.join(dir, "subdir", "AGENTS.md"))
+      expect(result.metadata.loaded).toContain(path.join(dir, "subdir", "CLAUDE.md"))
+    }),
+  )
+
+  const importing = Effect.fn("ReadToolTest.importing")(function* () {
+    const dir = yield* tmpdirScoped()
+    const outside = yield* tmpdirScoped()
+    yield* put(path.join(outside, "notes.md"), "EXTERNAL-NOTES")
+    yield* put(path.join(dir, "sub", "CLAUDE.md"), `@${path.join(outside, "notes.md")}\n# Sub Instructions`)
+    yield* put(path.join(dir, "sub", "a.txt"), "file content")
+    return dir
+  })
+  const rejecting = (error: PermissionV1.RejectedError | PermissionV1.CorrectedError) => ({
+    ...ctx,
+    ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+      req.permission === "external_directory" ? Effect.die(error) : Effect.void,
+  })
+
+  it.live("skips an external import when its prompt is rejected", () =>
+    Effect.gen(function* () {
+      const dir = yield* importing()
+      const result = yield* exec(
+        dir,
+        { filePath: path.join(dir, "sub", "a.txt") },
+        rejecting(new PermissionV1.RejectedError()),
+      )
+      expect(result.output).toContain("file content")
+      expect(result.output).toContain("Sub Instructions")
+      expect(result.output).not.toContain("EXTERNAL-NOTES")
+    }),
+  )
+
+  it.live("surfaces feedback given when rejecting an external import", () =>
+    Effect.gen(function* () {
+      const dir = yield* importing()
+      const err = yield* fail(
+        dir,
+        { filePath: path.join(dir, "sub", "a.txt") },
+        rejecting(new PermissionV1.CorrectedError({ feedback: "keep my notes private" })),
+      )
+      expect(err.message).toContain("keep my notes private")
+    }),
+  )
 })
 
 describe("tool.read binary detection", () => {

@@ -6799,7 +6799,7 @@
             }
           }
         },
-        "description": "Analyze the current application and create an AGENTS.md file with project-specific agent configurations.",
+        "description": "Analyze the current application and create or update a CLAUDE.md file with project-specific agent instructions (AGENTS.md when CLAUDE.md loading is disabled).",
         "summary": "Initialize session",
         "requestBody": {
           "content": {
