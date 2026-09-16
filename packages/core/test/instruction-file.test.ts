@@ -48,6 +48,18 @@ describe("InstructionFile.stripComments", () => {
   test("keeps a comment followed by text on the closing line", () => {
     expect(InstructionFile.stripComments("<!-- a --> trailing\nnext")).toBe("<!-- a --> trailing\nnext")
   })
+
+  test("finds a later closing line after an earlier one had trailing text", () => {
+    expect(InstructionFile.stripComments("<!--\nx\n--> t\n<!--\nhidden\n-->\nend")).toBe("<!--\nx\n--> t\nend")
+  })
+
+  test("stays linear on many unclosed comment openers", () => {
+    for (const text of ["<!--\n".repeat(40_000), "<!--\n".repeat(40_000) + "--> trailing"]) {
+      const start = performance.now()
+      expect(InstructionFile.stripComments(text)).toBe(text)
+      expect(performance.now() - start).toBeLessThan(200)
+    }
+  })
 })
 
 describe("InstructionFile.references", () => {

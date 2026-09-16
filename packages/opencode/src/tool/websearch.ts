@@ -51,8 +51,8 @@ export function webSearchModelName(extra: Tool.Context["extra"]) {
   return (apiID ?? id)?.slice(0, 100)
 }
 
-function parallelAuthHeaders() {
-  const headers = { "User-Agent": `opencode/${InstallationVersion}` }
+export function parallelAuthHeaders() {
+  const headers = { "User-Agent": `AgentCode/${InstallationVersion}` }
   if (!process.env.PARALLEL_API_KEY) return headers
   return { ...headers, Authorization: `Bearer ${process.env.PARALLEL_API_KEY}` }
 }

@@ -2,19 +2,26 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import path from "path"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { Effect, Layer, Context } from "effect"
+import { Deferred, Effect, Exit, Layer, Context } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Config } from "@/config/config"
+import { ConfigManaged } from "@/config/managed"
+import { ConfigParse } from "@/config/parse"
+import { ConfigPaths } from "@/config/paths"
+import { ConfigVariable } from "@/config/variable"
 import { InstanceState } from "@/effect/instance-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { containsPath } from "@/project/instance-context"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { InstructionFile } from "@opencode-ai/core/instruction-file"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { Global } from "@opencode-ai/core/global"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { Permission } from "@/permission"
+import { assertExternalDirectoryEffect } from "@/tool/external-directory"
+import type * as Tool from "@/tool/tool"
 import type { MessageV2 } from "./message-v2"
-import type { MessageID } from "./schema"
+import type { MessageID, SessionID } from "./schema"
 
 function extract(messages: SessionV1.WithParts[]) {
   const paths = new Set<string>()
@@ -33,12 +40,57 @@ function extract(messages: SessionV1.WithParts[]) {
   return paths
 }
 
-/** Decides whether a project instruction file may import a file outside the project. */
+/** How imports in project instruction files are checked: like a Read of the imported file by the asking agent. */
 export interface Ask {
-  // Decisions are remembered per scope (a session and its agent), never across sessions or agents.
-  readonly scope: string
-  readonly ask: (filepath: string) => Effect.Effect<boolean>
+  readonly sessionID: SessionID
+  // The asking agent's permission rules followed by the session's, as the Read tool applies them.
+  readonly ruleset: Effect.Effect<PermissionV1.Ruleset>
+  // Prompts for an import the rules leave to the user: true to load, false when declined, undefined when the rules
+  // deny it after all. Without it, such an import only loads when the user already allowed it in this instance.
+  readonly prompt?: (filepath: string) => Effect.Effect<boolean | undefined>
 }
+
+type Request = Omit<PermissionV1.Request, "id" | "sessionID" | "tool">
+
+// The Read tool's permission requests for a file: external_directory outside the project, then read, so files like
+// .env ask first.
+const requests = Effect.fnUntraced(function* (filepath: string) {
+  const instance = yield* InstanceState.context
+  const result: Request[] = []
+  yield* assertExternalDirectoryEffect(
+    {
+      ask: (req) =>
+        Effect.sync(() => {
+          result.push(req)
+        }),
+    },
+    filepath,
+  )
+  result.push({
+    permission: "read",
+    patterns: [path.relative(instance.worktree, filepath)],
+    always: ["*"],
+    metadata: {},
+  })
+  return result
+})
+
+/**
+ * Asks through `ctx.ask` for the Read tool's permission checks on an import. True once allowed, false when declined,
+ * undefined when the rules deny it. A reject with feedback fails so the feedback reaches the model.
+ */
+export const check = Effect.fnUntraced(function* (ctx: Pick<Tool.Context, "ask">, filepath: string) {
+  return yield* Effect.gen(function* () {
+    for (const req of yield* requests(filepath)) yield* ctx.ask(req)
+    return true as boolean | undefined
+  }).pipe(
+    Effect.catchDefect((defect) => {
+      if (defect instanceof PermissionV1.DeniedError) return Effect.succeed(undefined)
+      if (defect instanceof PermissionV1.CorrectedError) return Effect.die(defect)
+      return Effect.succeed(false)
+    }),
+  )
+})
 
 export interface Interface {
   readonly clear: (messageID: MessageID) => Effect.Effect<void>
@@ -58,7 +110,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/In
 const layer: Layer.Layer<
   Service,
   never,
-  FSUtil.Service | Config.Service | Global.Service | HttpClient.HttpClient | RuntimeFlags.Service
+  FSUtil.Service | Config.Service | Global.Service | HttpClient.HttpClient | RuntimeFlags.Service | Permission.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -66,6 +118,7 @@ const layer: Layer.Layer<
     const fs = yield* FSUtil.Service
     const global = yield* Global.Service
     const flags = yield* RuntimeFlags.Service
+    const permission = yield* Permission.Service
     const http = HttpClient.filterStatusOk(withTransientReadRetry(yield* HttpClient.HttpClient))
     const globalFiles = [
       path.join(global.config, "AGENTS.md"),
@@ -78,14 +131,15 @@ const layer: Layer.Layer<
     const state = yield* InstanceState.make(
       Effect.fn("Instruction.state")(() =>
         Effect.succeed({
-          // Track which instruction files have already been attached for a given assistant message.
+          // Realpaths of the instruction files attached for a given assistant message, shared by its parallel reads.
           claims: new Map<MessageID, Set<string>>(),
-          // Decisions on imports that point outside the project, keyed by Ask scope and realpath, so each one is
-          // asked about once per session and agent.
-          external: new Map<string, boolean>(),
-          // Realpaths loaded by the last system() call per Ask scope, including imports, so nested reads don't
-          // attach them again.
-          system: new Map<string, Set<string>>(),
+          // The user's answers on imports by realpath, shared by every session and agent in the instance like Claude
+          // Code's per-project approval, so new sessions and subagents are not asked again.
+          imports: new Map<string, boolean>(),
+          // Import prompts in flight by session and realpath, so parallel loads in a session wait for one prompt.
+          asking: new Map<string, Deferred.Deferred<void>>(),
+          // Realpaths loaded by the last system() call, including imports, so nested reads don't attach them again.
+          system: new Set<string>(),
         }),
       ),
     )
@@ -111,18 +165,76 @@ const layer: Layer.Layer<
       return result
     })
 
-    const gate = (ask?: Ask) =>
-      Effect.fnUntraced(function* (filepath: string) {
-        if (containsPath(filepath, yield* InstanceState.context)) return true
-        // Without a way to ask, skip the import but leave it undecided so a later call can still prompt.
+    // Whether an "always" answer allows the pattern. Permission.ask checks those answers after the ruleset it is given,
+    // so asking with a ruleset that denies everything else never prompts.
+    const approved = (sessionID: SessionID, name: string, pattern: string) =>
+      permission
+        .ask({
+          sessionID,
+          permission: name,
+          patterns: [pattern],
+          always: [],
+          metadata: {},
+          ruleset: [{ permission: "*", pattern: "*", action: "deny" }],
+        })
+        .pipe(
+          Effect.as(true),
+          Effect.catch(() => Effect.succeed(false)),
+        )
+
+    // What the asking agent's rules and the user's "always" answers say about importing `filepath`, without prompting.
+    const verdict = Effect.fnUntraced(function* (ask: Ask, filepath: string) {
+      const ruleset = yield* ask.ruleset
+      let result: "allow" | "ask" = "allow"
+      for (const req of yield* requests(filepath)) {
+        for (const pattern of req.patterns) {
+          const action = Permission.evaluate(req.permission, pattern, ruleset).action
+          if (action === "allow" || (yield* approved(ask.sessionID, req.permission, pattern))) continue
+          if (action === "deny") return "deny" as const
+          result = "ask"
+        }
+      }
+      return result
+    })
+
+    // The user's answer on an import. Only answers are remembered, since rules differ between agents. Parallel loads in
+    // one session wait for its prompt; another session asks for itself rather than wait on a prompt the user may never
+    // see there, and the latest answer wins. The prompt is registered and cleaned up with interruption masked, so an
+    // abort can't leave a pending entry behind.
+    const answer = (ask: Ask, filepath: string): Effect.Effect<boolean> =>
+      InstanceState.useEffect(state, (s) =>
+        Effect.uninterruptibleMask((restore) => {
+          const decided = s.imports.get(filepath)
+          if (decided !== undefined) return Effect.succeed(decided)
+          if (!ask.prompt) return Effect.succeed(false)
+          const key = `${ask.sessionID}\0${filepath}`
+          const pending = s.asking.get(key)
+          if (pending) return restore(Deferred.await(pending).pipe(Effect.andThen(answer(ask, filepath))))
+          const done = Deferred.makeUnsafe<void>()
+          s.asking.set(key, done)
+          return restore(ask.prompt(filepath)).pipe(
+            Effect.onExit((exit) =>
+              Effect.sync(() => {
+                // A reject with feedback fails the asker but is still a reject; an interrupted prompt decides nothing.
+                if (Exit.isSuccess(exit) && exit.value !== undefined) s.imports.set(filepath, exit.value)
+                if (Exit.isFailure(exit) && !Exit.hasInterrupts(exit)) s.imports.set(filepath, false)
+                s.asking.delete(key)
+                Deferred.doneUnsafe(done, Exit.void)
+              }),
+            ),
+            Effect.map((ok) => ok === true),
+          )
+        }),
+      )
+
+    // Whether a project instruction file may import `filepath`, a realpath: the asking agent's rules first, then the
+    // user for what they leave open. Without an asking agent there are no rules to check it against.
+    const decide = (ask: Ask | undefined, filepath: string): Effect.Effect<boolean> =>
+      Effect.gen(function* () {
         if (!ask) return false
-        const s = yield* InstanceState.get(state)
-        const key = `${ask.scope}\0${filepath}`
-        const decided = s.external.get(key)
-        if (decided !== undefined) return decided
-        const ok = yield* ask.ask(filepath)
-        s.external.set(key, ok)
-        return ok
+        const rule = yield* verdict(ask, filepath)
+        if (rule !== "ask") return rule === "allow"
+        return yield* answer(ask, filepath)
       })
 
     const fetch = Effect.fnUntraced(function* (url: string) {
@@ -140,8 +252,47 @@ const layer: Layer.Layer<
       s.claims.delete(messageID)
     })
 
-    // Local instruction files in load order. Global files and absolute or ~/ config entries are user scope and
-    // import freely; files from the project tree ask before importing from outside the project.
+    // The instructions entries in a config source, after the {env:} and {file:} substitution Config applies. A source
+    // that can't be read or parsed adds nothing, which only leaves its entries untrusted.
+    const declared = (
+      text: string,
+      source: { type: "path"; path: string } | { type: "virtual"; source: string; dir: string },
+    ) =>
+      Effect.tryPromise(async () => {
+        const data = ConfigParse.jsonc(
+          await ConfigVariable.substitute({ ...source, text }),
+          source.type === "path" ? source.path : source.source,
+        )
+        const list = data && typeof data === "object" ? (data as { instructions?: unknown }).instructions : undefined
+        return Array.isArray(list) ? list.filter((item): item is string => typeof item === "string") : []
+      }).pipe(Effect.catch(() => Effect.succeed([] as string[])))
+
+    // Instructions entries from config the user controls: the global config, OPENCODE_CONFIG, OPENCODE_CONFIG_DIR,
+    // ~/.opencode, OPENCODE_CONFIG_CONTENT and the managed config directory. Project config files are left out, since a
+    // cloned repo controls them, and so are remote configs, which can't be read here; their entries only lose trust.
+    const userInstructions = Effect.fnUntraced(function* () {
+      const ctx = yield* InstanceState.context
+      const result = new Set((yield* cfg.getGlobal()).instructions ?? [])
+      const dirs = [path.join(global.home, ".opencode"), Flag.OPENCODE_CONFIG_DIR, ConfigManaged.managedConfigDir()]
+      const files = [
+        ...(Flag.OPENCODE_CONFIG ? [Flag.OPENCODE_CONFIG] : []),
+        ...dirs.flatMap((dir) => (dir ? ConfigPaths.fileInDirectory(dir, "opencode") : [])),
+      ]
+      for (const file of files) {
+        const text = yield* fs.readFileStringSafe(file).pipe(Effect.catch(() => Effect.void))
+        if (!text) continue
+        for (const item of yield* declared(text, { type: "path", path: file })) result.add(item)
+      }
+      const content = process.env.OPENCODE_CONFIG_CONTENT
+      if (content) {
+        const source = { type: "virtual" as const, source: "OPENCODE_CONFIG_CONTENT", dir: ctx.directory }
+        for (const item of yield* declared(content, source)) result.add(item)
+      }
+      return result
+    })
+
+    // Local instruction files in load order. Global files and absolute or ~/ entries from config the user controls are
+    // user scope and import freely; project files and entries a project config declares check their imports.
     const roots = Effect.fnUntraced(function* () {
       const config = yield* cfg.get()
       const ctx = yield* InstanceState.context
@@ -173,12 +324,15 @@ const layer: Layer.Layer<
       }
 
       if (config.instructions) {
+        // A cloned repo's config can name any absolute path, so only entries the user declared are trusted.
+        let user: Set<string> | undefined
         for (const raw of config.instructions) {
           if (raw.startsWith("https://") || raw.startsWith("http://")) continue
           const instruction = raw.startsWith("~/") ? path.join(global.home, raw.slice(2)) : raw
-          const trusted = path.isAbsolute(instruction)
+          const absolute = path.isAbsolute(instruction)
+          const trusted = absolute && (user ??= yield* userInstructions()).has(raw)
           const matches = yield* (
-            trusted
+            absolute
               ? fs.glob(path.basename(instruction), {
                   cwd: path.dirname(instruction),
                   absolute: true,
@@ -205,9 +359,9 @@ const layer: Layer.Layer<
         roots: yield* roots(),
         home: global.home,
         seen,
-        authorize: gate(ask),
+        authorize: (filepath) => decide(ask, filepath),
       })
-      s.system.set(ask?.scope ?? "", seen)
+      s.system = seen
 
       const urls = (config.instructions ?? []).filter(
         (item) => item.startsWith("https://") || item.startsWith("http://"),
@@ -255,20 +409,33 @@ const layer: Layer.Layer<
       const roots: InstructionFile.Root[] = []
       for (const dir of dirs) {
         for (const found of yield* find(dir)) {
-          // System roots below the working directory are skipped by expand() through the realpaths in `seen`.
-          if (found === target || already.has(found) || claimed.has(found)) continue
+          // System roots below the working directory and claimed files are skipped by expand() through `seen`.
+          if (found === target || already.has(found)) continue
           roots.push({ path: found, trusted: false })
         }
       }
       if (roots.length === 0) return []
 
-      const seen = new Set([
-        ...(s.system.get(ask?.scope ?? "") ?? []),
-        ...(yield* Effect.forEach([...already, ...claimed], (item) => InstructionFile.realpath(fs, item))),
+      const known = new Set([
+        ...s.system,
+        ...(yield* Effect.forEach(already, (item) => InstructionFile.realpath(fs, item))),
       ])
-      const entries = yield* InstructionFile.expand(fs, { roots, home: global.home, seen, authorize: gate(ask) })
-      // Imports are claimed too, so later reads in this message don't attach them again.
-      entries.forEach((item) => claimed.add(item.path))
+      // expand() claims each file, imports included, in the message's shared set before its next yield, so parallel
+      // reads attach it once. A resolve that fails gives its claims back for a later read in the message.
+      const mine: string[] = []
+      const seen = {
+        has: (key: string) => known.has(key) || claimed.has(key),
+        add: (key: string) => {
+          mine.push(key)
+          return claimed.add(key)
+        },
+      }
+      const entries = yield* InstructionFile.expand(fs, {
+        roots,
+        home: global.home,
+        seen,
+        authorize: (item) => decide(ask, item),
+      }).pipe(Effect.onError(() => Effect.sync(() => mine.forEach((key) => claimed.delete(key)))))
 
       return entries.flatMap((item) =>
         item.content ? [{ filepath: item.path, content: `Instructions from: ${item.path}\n${item.content}` }] : [],
@@ -286,7 +453,7 @@ export function loaded(messages: SessionV1.WithParts[]) {
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Config.node, FSUtil.node, Global.node, RuntimeFlags.node, httpClient],
+  deps: [Config.node, FSUtil.node, Global.node, RuntimeFlags.node, Permission.node, httpClient],
 })
 
 export * as Instruction from "./instruction"

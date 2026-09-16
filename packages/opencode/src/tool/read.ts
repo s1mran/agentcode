@@ -3,12 +3,14 @@ import { NonNegativeInt } from "@opencode-ai/core/schema"
 import * as path from "path"
 import * as Tool from "./tool"
 import { FSUtil } from "@opencode-ai/core/fs-util"
-import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { LSP } from "@/lsp/lsp"
 import DESCRIPTION from "./read.txt"
 import { InstanceState } from "@/effect/instance-state"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { Instruction } from "../session/instruction"
+import { Session } from "../session/session"
+import { Agent } from "@/agent/agent"
+import { Permission } from "@/permission"
 import { isPdfAttachment, sniffAttachmentMime } from "@/util/media"
 
 const DEFAULT_READ_LIMIT = 2000
@@ -65,13 +67,15 @@ type Metadata = {
 export const ReadTool = Tool.define<
   typeof Parameters,
   Metadata,
-  FSUtil.Service | Instruction.Service | LSP.Service | Scope.Scope
+  FSUtil.Service | Instruction.Service | LSP.Service | Agent.Service | Session.Service | Scope.Scope
 >(
   "read",
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const instruction = yield* Instruction.Service
     const lsp = yield* LSP.Service
+    const agents = yield* Agent.Service
+    const sessions = yield* Session.Service
     const scope = yield* Scope.Scope
 
     const miss = Effect.fn("ReadTool.miss")(function* (filepath: string) {
@@ -298,18 +302,24 @@ export const ReadTool = Tool.define<
         }
       }
 
-      const loaded = yield* instruction.resolve(ctx.messages, filepath, ctx.messageID, {
-        scope: `${ctx.sessionID}\0${ctx.agent}`,
-        // Like any reject, declining this prompt also rejects the session's other pending asks (Permission.reply).
-        // A reject with feedback fails the read so the feedback reaches the model; a plain reject skips the import.
-        ask: (target) =>
-          assertExternalDirectoryEffect(ctx, target).pipe(
-            Effect.as(true),
-            Effect.catchDefect((defect) =>
-              defect instanceof PermissionV1.CorrectedError ? Effect.die(defect) : Effect.succeed(false),
-            ),
-          ),
-      })
+      // Nearby instruction files are claimed only once the read is known to succeed, so a failed read leaves them for a
+      // later one. Imports are checked like reads by this agent. A file the user attached (bypassCwdCheck) has every
+      // ask pre-approved, so its imports never prompt: they load when the rules or an earlier answer allow them. Like
+      // any reject, declining an import also rejects the session's other pending asks (Permission.reply), and a reject
+      // with feedback fails the read.
+      const ruleset = yield* Effect.cached(
+        Effect.gen(function* () {
+          const agent = yield* agents.get(ctx.agent)
+          const session = yield* sessions.get(ctx.sessionID).pipe(Effect.catch(() => Effect.void))
+          return Permission.merge(agent?.permission ?? [], session?.permission ?? [])
+        }),
+      )
+      const nearby = () =>
+        instruction.resolve(ctx.messages, filepath, ctx.messageID, {
+          sessionID: ctx.sessionID,
+          ruleset,
+          prompt: ctx.extra?.["bypassCwdCheck"] ? undefined : (target) => Instruction.check(ctx, target),
+        })
       const sample = yield* readSample(filepath, Number(stat.size), SAMPLE_BYTES)
 
       const mime = sniffAttachmentMime(sample, FSUtil.mimeType(filepath))
@@ -317,6 +327,7 @@ export const ReadTool = Tool.define<
 
       if (isImage || isPdfAttachment(mime)) {
         const bytes = yield* fs.readFile(filepath)
+        const loaded = yield* nearby()
         const msg = isPdfAttachment(mime) ? "PDF read successfully" : "Image read successfully"
         return {
           title,
@@ -347,6 +358,7 @@ export const ReadTool = Tool.define<
         )
       }
 
+      const loaded = yield* nearby()
       let output = [`<path>${filepath}</path>`, `<type>file</type>`, "<content>\n"].join("\n")
       output += file.raw.map((line, i) => `${i + file.offset}: ${line}`).join("\n")
 

@@ -14,6 +14,7 @@ import { LSP } from "@/lsp/lsp"
 import { Permission } from "../../src/permission"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { Instruction } from "../../src/session/instruction"
+import { Session } from "../../src/session/session"
 import { ReadTool } from "../../src/tool/read"
 import { Truncate } from "@/tool/truncate"
 import { Tool } from "@/tool/tool"
@@ -53,6 +54,7 @@ const readLayer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       Instruction.node,
       LSP.node,
       Ripgrep.node,
+      Session.node,
       Truncate.node,
     ]),
   )
@@ -635,6 +637,153 @@ describe("tool.read loaded instructions", () => {
         rejecting(new PermissionV1.CorrectedError({ feedback: "keep my notes private" })),
       )
       expect(err.message).toContain("keep my notes private")
+    }),
+  )
+})
+
+describe("tool.read nested instruction claims", () => {
+  const nested = Effect.fn("ReadToolTest.nested")(function* () {
+    const dir = yield* tmpdirScoped()
+    yield* put(path.join(dir, "sub", "CLAUDE.md"), "# Sub Rules")
+    yield* put(path.join(dir, "sub", "bin.txt"), Buffer.from([0x68, 0x00, 0x69]))
+    yield* put(path.join(dir, "sub", "short.txt"), "one")
+    yield* put(path.join(dir, "sub", "ok.txt"), "fine")
+    return dir
+  })
+
+  it.live("a binary file that fails to read leaves nested instructions for the next read", () =>
+    Effect.gen(function* () {
+      const dir = yield* nested()
+      yield* fail(dir, { filePath: path.join(dir, "sub", "bin.txt") })
+      const result = yield* exec(dir, { filePath: path.join(dir, "sub", "ok.txt") })
+      expect(result.output).toContain("# Sub Rules")
+      expect(result.metadata.loaded).toEqual([path.join(dir, "sub", "CLAUDE.md")])
+    }),
+  )
+
+  it.live("an out-of-range offset leaves nested instructions for the next read", () =>
+    Effect.gen(function* () {
+      const dir = yield* nested()
+      yield* fail(dir, { filePath: path.join(dir, "sub", "short.txt"), offset: 9 })
+      const result = yield* exec(dir, { filePath: path.join(dir, "sub", "ok.txt") })
+      expect(result.output).toContain("# Sub Rules")
+    }),
+  )
+})
+
+describe("tool.read instruction imports and read rules", () => {
+  const envImport = Effect.fn("ReadToolTest.envImport")(function* () {
+    const dir = yield* tmpdirScoped()
+    yield* put(path.join(dir, "sub", "CLAUDE.md"), "@.env\n@.env.example\n# Sub Instructions")
+    yield* put(path.join(dir, "sub", ".env"), "ENVSECRET-9401")
+    yield* put(path.join(dir, "sub", ".env.example"), "EXAMPLE-OK")
+    yield* put(path.join(dir, "sub", "a.txt"), "file content")
+    return dir
+  })
+  // Evaluates asks with the build agent's rules and declines anything they ask about.
+  const declining = Effect.fn("ReadToolTest.declining")(function* (asked: string[]) {
+    const info = yield* (yield* Agent.Service).get("build")
+    return {
+      ...ctx,
+      ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+        Effect.gen(function* () {
+          for (const pattern of req.patterns) {
+            const rule = Permission.evaluate(req.permission, pattern, info.permission)
+            if (rule.action === "deny") return yield* Effect.die(new PermissionV1.DeniedError({ ruleset: [] }))
+            if (rule.action !== "ask") continue
+            asked.push(`${req.permission} ${pattern}`)
+            return yield* Effect.die(new PermissionV1.RejectedError())
+          }
+        }),
+    }
+  })
+
+  it.live("asks before importing .env and skips it when declined", () =>
+    Effect.gen(function* () {
+      const dir = yield* envImport()
+      const asked: string[] = []
+      const result = yield* provideInstance(dir)(
+        Effect.gen(function* () {
+          return yield* run({ filePath: path.join(dir, "sub", "a.txt") }, yield* declining(asked))
+        }),
+      )
+      expect(result.output).toContain("Sub Instructions")
+      expect(result.output).toContain("EXAMPLE-OK")
+      expect(result.output).not.toContain("ENVSECRET-9401")
+      expect(asked).toHaveLength(1)
+      expect(asked[0]).toStartWith("read ")
+      expect(asked[0]).toEndWith(path.join("sub", ".env"))
+    }),
+  )
+
+  it.live("a user-attached file does not approve its nested .env import", () =>
+    Effect.gen(function* () {
+      const dir = yield* envImport()
+      const result = yield* exec(
+        dir,
+        { filePath: path.join(dir, "sub", "a.txt") },
+        { ...ctx, extra: { bypassCwdCheck: true } },
+      )
+      expect(result.output).toContain("Sub Instructions")
+      expect(result.output).toContain("EXAMPLE-OK")
+      expect(result.output).not.toContain("ENVSECRET-9401")
+    }),
+  )
+
+  it.live("a user-attached file still loads in-project imports of its nested instructions", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      yield* put(path.join(dir, "packages", "web", "CLAUDE.md"), "@docs/web-style.md\n# Web Rules")
+      yield* put(path.join(dir, "packages", "web", "docs", "web-style.md"), "WEB-STYLE-GUIDE")
+      yield* put(path.join(dir, "packages", "web", "src", "app.tsx"), "export {}")
+      const result = yield* exec(
+        dir,
+        { filePath: path.join(dir, "packages", "web", "src", "app.tsx") },
+        { ...ctx, extra: { bypassCwdCheck: true } },
+      )
+      expect(result.output).toContain("# Web Rules")
+      expect(result.output).toContain("WEB-STYLE-GUIDE")
+      expect(result.metadata.loaded).toContain(path.join(dir, "packages", "web", "docs", "web-style.md"))
+    }),
+  )
+
+  it.live("an import the agent's rules allow loads without asking, even where another agent would ask", () =>
+    Effect.gen(function* () {
+      const dir = yield* envImport()
+      const asked: string[] = []
+      const result = yield* exec(
+        dir,
+        { filePath: path.join(dir, "sub", "a.txt") },
+        {
+          ...ctx,
+          agent: "explore",
+          ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+            Effect.sync(() => {
+              asked.push(req.permission)
+            }),
+        },
+      )
+      // explore's read: allow covers .env, so only the read of a.txt itself went through ask.
+      expect(result.output).toContain("ENVSECRET-9401")
+      expect(asked).toEqual(["read"])
+    }),
+  )
+
+  it.live("another agent's rule allow does not approve the import for the build agent", () =>
+    Effect.gen(function* () {
+      const dir = yield* envImport()
+      const asked: string[] = []
+      const output = yield* provideInstance(dir)(
+        Effect.gen(function* () {
+          yield* run({ filePath: path.join(dir, "sub", "a.txt") }, { ...ctx, agent: "explore" })
+          const next = { ...(yield* declining(asked)), messageID: MessageID.make("msg_test-build") }
+          return (yield* run({ filePath: path.join(dir, "sub", "a.txt") }, next)).output
+        }),
+      )
+      expect(output).toContain("Sub Instructions")
+      expect(output).not.toContain("ENVSECRET-9401")
+      expect(asked).toHaveLength(1)
+      expect(asked[0]).toEndWith(path.join("sub", ".env"))
     }),
   )
 })

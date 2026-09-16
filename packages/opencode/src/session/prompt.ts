@@ -33,7 +33,6 @@ import { NamedError } from "@opencode-ai/core/util/error"
 import { SessionProcessor } from "./processor"
 import { Tool } from "@/tool/tool"
 import { Permission } from "@/permission"
-import { assertExternalDirectoryEffect } from "@/tool/external-directory"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
 import { Shell } from "@opencode-ai/core/shell"
@@ -218,7 +217,7 @@ const layer = Layer.effect(
       if (!ag) return
       const mdl = ag.model
         ? yield* provider.getModel(ag.model.providerID, ag.model.modelID)
-        : ((yield* provider.getSmallModel(input.providerID)) ??
+        : ((yield* provider.getSmallModel(input.providerID, input.modelID)) ??
           (yield* provider.getModel(input.providerID, input.modelID)))
       const msgs = onlySubtasks
         ? [{ role: "user" as const, content: subtasks.map((p) => p.prompt).join("\n") }]
@@ -1255,27 +1254,17 @@ const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-            // Imports in project instruction files that point outside the project go through the same
-            // external_directory permission as the Read tool; Instruction remembers decisions per session and agent.
+            // Imports in project instruction files are checked like reads by this agent. Instruction remembers the
+            // user's answers for the instance, so other sessions and subagents are not asked again.
+            const ruleset = Permission.merge(agent.permission, session.permission ?? [])
             const askImport: Instruction.Ask = {
-              scope: `${sessionID}\0${agent.name}`,
-              ask: (filepath) =>
-                assertExternalDirectoryEffect(
-                  {
-                    ask: (req) =>
-                      permission
-                        .ask({
-                          ...req,
-                          sessionID,
-                          ruleset: Permission.merge(agent.permission, session.permission ?? []),
-                        })
-                        .pipe(Effect.orDie),
-                  },
+              sessionID,
+              ruleset: Effect.succeed(ruleset),
+              prompt: (filepath) =>
+                Instruction.check(
+                  { ask: (req) => permission.ask({ ...req, sessionID, ruleset }).pipe(Effect.orDie) },
                   filepath,
-                ).pipe(
-                  Effect.as(true),
-                  Effect.catchDefect(() => Effect.succeed(false)),
-                ),
+                ).pipe(Effect.catchDefect(() => Effect.succeed(false))),
             }
 
             const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([

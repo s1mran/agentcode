@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { parseResponse } from "../../src/tool/mcp-websearch"
-import { selectWebSearchProvider, webSearchModelName, webSearchProviderLabel } from "../../src/tool/websearch"
+import {
+  parallelAuthHeaders,
+  selectWebSearchProvider,
+  webSearchModelName,
+  webSearchProviderLabel,
+} from "../../src/tool/websearch"
+import { InstallationVersion } from "@opencode-ai/core/installation/version"
 
 import { webSearchEnabled } from "../../src/tool/registry"
 import { it } from "../lib/effect"
@@ -60,6 +66,24 @@ describe("websearch provider", () => {
         },
       }),
     ).toBe("claude-opus-4.7")
+  })
+
+  test("sends the AgentCode User-Agent to Parallel", () => {
+    const original = process.env.PARALLEL_API_KEY
+
+    try {
+      delete process.env.PARALLEL_API_KEY
+      expect(parallelAuthHeaders()).toEqual({ "User-Agent": `AgentCode/${InstallationVersion}` })
+
+      process.env.PARALLEL_API_KEY = "test-key"
+      expect(parallelAuthHeaders()).toEqual({
+        "User-Agent": `AgentCode/${InstallationVersion}`,
+        Authorization: "Bearer test-key",
+      })
+    } finally {
+      if (original === undefined) delete process.env.PARALLEL_API_KEY
+      else process.env.PARALLEL_API_KEY = original
+    }
   })
 })
 

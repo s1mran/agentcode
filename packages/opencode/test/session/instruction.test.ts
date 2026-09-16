@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import path from "path"
 import { mkdir, symlink } from "fs/promises"
-import { Effect, FileSystem, Layer } from "effect"
+import { Deferred, Effect, Exit, Fiber, FileSystem, Layer } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 
 import { Instruction } from "../../src/session/instruction"
@@ -21,6 +21,8 @@ import { LayerNodePlatform } from "@opencode-ai/core/effect/app-node-platform"
 import { InstanceStore } from "@/project/instance-store"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { Config } from "@/config/config"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { Permission } from "../../src/permission"
 
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([CrossSpawnSpawner.node, LayerNodePlatform.filesystem, InstanceStore.node]), [
@@ -31,19 +33,21 @@ const it = testEffect(
   ]),
 )
 
-const configLayer = Layer.succeed(Config.Service, TestConfig.make())
-
-const instructionLayer = (global: Partial<Global.Interface>, flags: Partial<RuntimeFlags.Info> = {}) =>
-  AppNodeBuilder.build(Instruction.node, [
-    [Config.node, configLayer],
+const instructionLayer = (
+  global: Partial<Global.Interface>,
+  flags: Partial<RuntimeFlags.Info> = {},
+  config: Partial<Config.Interface> = {},
+) =>
+  AppNodeBuilder.build(LayerNode.group([Instruction.node, Permission.node]), [
+    [Config.node, Layer.succeed(Config.Service, TestConfig.make(config))],
     [Global.node, Global.layerWith(global)],
     [RuntimeFlags.node, RuntimeFlags.layer(flags)],
   ])
 
 const provideInstruction =
-  (global: Partial<Global.Interface>, flags?: Partial<RuntimeFlags.Info>) =>
+  (global: Partial<Global.Interface>, flags?: Partial<RuntimeFlags.Info>, config?: Partial<Config.Interface>) =>
   <A, E, R>(self: Effect.Effect<A, E, R>) =>
-    self.pipe(Effect.provide(instructionLayer(global, flags)))
+    self.pipe(Effect.provide(instructionLayer(global, flags, config)))
 
 const write = (filepath: string, content: string) =>
   Effect.gen(function* () {
@@ -85,28 +89,52 @@ const ruleFor = (rules: string[], filepath: string) => rules.find((rule) => rule
 
 // Separate global and project directories, so project .claude/CLAUDE.md is never also ~/.claude/CLAUDE.md.
 const withProject = <A, E, R>(
-  input: { global?: Record<string, string>; project: Record<string, string>; cwd?: string },
+  input: {
+    global?: Record<string, string>
+    project: Record<string, string>
+    cwd?: string
+    config?: (dirs: { global: string; project: string }) => Partial<Config.Interface>
+  },
   self: (dirs: { global: string; project: string }) => Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
     const globalTmp = yield* tmpWithFiles(input.global ?? {})
     const projectTmp = yield* tmpWithFiles(input.project)
-    return yield* self({ global: globalTmp, project: projectTmp }).pipe(
+    const dirs = { global: globalTmp, project: projectTmp }
+    return yield* self(dirs).pipe(
       provideInstance(input.cwd ? path.join(projectTmp, input.cwd) : projectTmp),
-      provideInstruction({ home: globalTmp, config: globalTmp }),
+      provideInstruction({ home: globalTmp, config: globalTmp }, {}, input.config?.(dirs)),
     )
   })
 
-const counter = (answer: boolean, scope = "ses_test\0build") => {
+const sessionA = SessionID.make("ses_import-a")
+const sessionB = SessionID.make("ses_import-b")
+
+// Rules like the build agent's: files inside the project load, while files outside it and .env files ask first.
+const build = Permission.fromConfig({ external_directory: "ask", read: { "*": "allow", "*.env": "ask" } })
+
+const asker = (
+  prompt?: Instruction.Ask["prompt"],
+  input: { sessionID?: SessionID; ruleset?: PermissionV1.Ruleset } = {},
+): Instruction.Ask => ({
+  sessionID: input.sessionID ?? sessionA,
+  ruleset: Effect.succeed(input.ruleset ?? build),
+  prompt,
+})
+
+// Allows every import: the rules allow files inside the project, and the prompt allows the rest.
+const allow = asker(() => Effect.succeed(true))
+
+const counter = (answer: boolean | undefined, input?: { sessionID?: SessionID; ruleset?: PermissionV1.Ruleset }) => {
   const calls: string[] = []
-  const ask: Instruction.Ask = {
-    scope,
-    ask: (filepath) =>
+  const ask = asker(
+    (filepath) =>
       Effect.sync(() => {
         calls.push(filepath)
         return answer
       }),
-  }
+    input,
+  )
   return { calls, ask }
 }
 
@@ -293,13 +321,13 @@ describe("Instruction.resolve", () => {
         const filepath = path.join(dir, "sub", "x.ts")
         const id = MessageID.make("msg_message-import-1")
 
-        const first = yield* svc.resolve([], filepath, id)
+        const first = yield* svc.resolve([], filepath, id, allow)
         expect(first.map((item) => item.filepath)).toEqual([
           path.join(dir, "sub", "notes.md"),
           path.join(dir, "sub", "CLAUDE.md"),
         ])
         expect(first[0].content).toBe(`Instructions from: ${path.join(dir, "sub", "notes.md")}\nn`)
-        expect(yield* svc.resolve([], filepath, id)).toEqual([])
+        expect(yield* svc.resolve([], filepath, id, allow)).toEqual([])
       }),
     ),
   )
@@ -308,11 +336,66 @@ describe("Instruction.resolve", () => {
     withFiles({ "CLAUDE.md": "@sub/CLAUDE.md", "sub/CLAUDE.md": "s", "sub/x.ts": "const x = 1" }, (dir) =>
       Effect.gen(function* () {
         const svc = yield* Instruction.Service
-        yield* svc.system()
+        yield* svc.system(allow)
         const results = yield* svc.resolve([], path.join(dir, "sub", "x.ts"), MessageID.make("msg_message-import-2"))
         expect(results).toEqual([])
       }),
     ),
+  )
+
+  it.live("attaches each file once across parallel reads in one message", () =>
+    withFiles(
+      {
+        "sub/CLAUDE.md": "@notes.md\nsub",
+        "sub/notes.md": "n",
+        "sub/a.ts": "a",
+        "sub/b.ts": "b",
+        "s1/CLAUDE.md": "@../shared.md",
+        "s2/CLAUDE.md": "@../shared.md",
+        "shared.md": "shared",
+        "s1/x.ts": "x",
+        "s2/y.ts": "y",
+      },
+      (dir) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const read = (id: string, ...files: string[]) =>
+            Effect.all(
+              files.map((file) => svc.resolve([], path.join(dir, file), MessageID.make(id), allow)),
+              { concurrency: "unbounded" },
+            ).pipe(
+              Effect.map((all) =>
+                all
+                  .flat()
+                  .map((item) => item.filepath)
+                  .sort(),
+              ),
+            )
+
+          expect(yield* read("msg_message-race-1", "sub/a.ts", "sub/b.ts")).toEqual(
+            [path.join(dir, "sub", "CLAUDE.md"), path.join(dir, "sub", "notes.md")].sort(),
+          )
+          const shared = yield* read("msg_message-race-2", "s1/x.ts", "s2/y.ts")
+          expect(shared.filter((item) => item === path.join(dir, "shared.md"))).toHaveLength(1)
+        }),
+    ),
+  )
+
+  it.live("gives claims back when resolve fails", () =>
+    Effect.gen(function* () {
+      const external = yield* tmpWithFiles({ "notes.md": "external notes" })
+      yield* withFiles({ "sub/CLAUDE.md": `@${path.join(external, "notes.md")}\nsub`, "sub/x.ts": "x" }, (dir) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const filepath = path.join(dir, "sub", "x.ts")
+          const id = MessageID.make("msg_message-release-1")
+          const feedback = asker(() => Effect.die(new PermissionV1.CorrectedError({ feedback: "no" })))
+          expect(Exit.isFailure(yield* svc.resolve([], filepath, id, feedback).pipe(Effect.exit))).toBe(true)
+          const results = yield* svc.resolve([], filepath, id, feedback)
+          expect(results.map((item) => item.filepath)).toEqual([path.join(dir, "sub", "CLAUDE.md")])
+        }),
+      )
+    }),
   )
 
   test.todo("fetches remote instructions from config URLs via HttpClient", () => {})
@@ -436,7 +519,7 @@ describe("Instruction.system", () => {
         const svc = yield* Instruction.Service
         const guide = path.join(dirs.project, "docs", "guide.md")
         const claude = path.join(dirs.project, "CLAUDE.md")
-        const rules = yield* svc.system()
+        const rules = yield* svc.system(allow)
         expect(sources(rules, dirs.project)).toEqual([guide, claude])
         expect(ruleFor(rules, guide)).toBe(`${header}${guide}\nguide`)
         expect(ruleFor(rules, claude)).toBe(`${header}${claude}\n@docs/guide.md\nroot`)
@@ -450,7 +533,7 @@ describe("Instruction.system", () => {
       (dirs) =>
         Effect.gen(function* () {
           const svc = yield* Instruction.Service
-          const rules = yield* svc.system()
+          const rules = yield* svc.system(allow)
           expect(sources(rules, dirs.project)).toEqual([
             path.join(dirs.project, "docs", "b.md"),
             path.join(dirs.project, "docs", "a.md"),
@@ -476,7 +559,7 @@ describe("Instruction.system", () => {
       (dirs) =>
         Effect.gen(function* () {
           const svc = yield* Instruction.Service
-          expect(sources(yield* svc.system(), dirs.project)).toEqual([
+          expect(sources(yield* svc.system(allow), dirs.project)).toEqual([
             path.join(dirs.project, "h4.md"),
             path.join(dirs.project, "h3.md"),
             path.join(dirs.project, "h2.md"),
@@ -491,7 +574,7 @@ describe("Instruction.system", () => {
     withProject({ project: { "CLAUDE.md": "@a.md\nroot", "a.md": "@CLAUDE.md\na" } }, (dirs) =>
       Effect.gen(function* () {
         const svc = yield* Instruction.Service
-        expect(sources(yield* svc.system(), dirs.project)).toEqual([
+        expect(sources(yield* svc.system(allow), dirs.project)).toEqual([
           path.join(dirs.project, "a.md"),
           path.join(dirs.project, "CLAUDE.md"),
         ])
@@ -512,7 +595,7 @@ describe("Instruction.system", () => {
       (dirs) =>
         Effect.gen(function* () {
           const svc = yield* Instruction.Service
-          expect(sources(yield* svc.system(), dirs.project)).toEqual([
+          expect(sources(yield* svc.system(allow), dirs.project)).toEqual([
             path.join(dirs.project, "real.md"),
             path.join(dirs.project, "CLAUDE.md"),
           ])
@@ -547,6 +630,8 @@ describe("Instruction.system", () => {
           expect(sources(yield* svc.system(allow.ask), external)).toEqual([imported])
           expect(sources(yield* svc.system(allow.ask), external)).toEqual([imported])
           expect(allow.calls).toEqual([imported])
+          // A caller that can't prompt, like a read of a file the user attached, still follows the answer.
+          expect(sources(yield* svc.system(asker()), external)).toEqual([imported])
         }),
       )
 
@@ -562,7 +647,7 @@ describe("Instruction.system", () => {
     }),
   )
 
-  it.live("remembers external import decisions per session and agent, not per instance", () =>
+  it.live("remembers import decisions for the whole instance, including rejections", () =>
     Effect.gen(function* () {
       const external = yield* tmpWithFiles({ "notes.md": "external notes" })
       const imported = path.join(external, "notes.md")
@@ -570,21 +655,331 @@ describe("Instruction.system", () => {
       yield* withProject({ project: { "CLAUDE.md": `@${imported}\nproject` } }, () =>
         Effect.gen(function* () {
           const svc = yield* Instruction.Service
-          const once = counter(true, "ses_a\0build")
-          expect(sources(yield* svc.system(once.ask), external)).toEqual([imported])
+          const reject = counter(false)
+          expect(sources(yield* svc.system(reject.ask), external)).toEqual([])
+          // A new session, a subagent or another agent is not asked again.
+          const later = counter(true, { sessionID: sessionB })
+          expect(sources(yield* svc.system(later.ask), external)).toEqual([])
+          expect(later.calls).toEqual([])
+          expect(reject.calls).toEqual([imported])
+        }),
+      )
+    }),
+  )
 
-          // Another session, or another agent in the same session, is asked again with its own rules.
-          const other = counter(false, "ses_b\0build")
-          expect(sources(yield* svc.system(other.ask), external)).toEqual([])
-          const plan = counter(false, "ses_a\0plan")
-          expect(sources(yield* svc.system(plan.ask), external)).toEqual([])
+  it.live("does not remember an import the asking agent's rules deny", () =>
+    Effect.gen(function* () {
+      const external = yield* tmpWithFiles({ "notes.md": "external notes" })
+      const imported = path.join(external, "notes.md")
+
+      yield* withProject({ project: { "CLAUDE.md": `@${imported}\nproject` } }, () =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const denied = counter(true, { ruleset: Permission.fromConfig({ external_directory: "deny" }) })
+          expect(sources(yield* svc.system(denied.ask), external)).toEqual([])
+          const other = counter(true)
+          expect(sources(yield* svc.system(other.ask), external)).toEqual([imported])
+          expect(denied.calls).toEqual([])
           expect(other.calls).toEqual([imported])
-          expect(plan.calls).toEqual([imported])
+        }),
+      )
+    }),
+  )
 
-          // A reject in one scope does not block the import elsewhere.
-          const later = counter(true, "ses_c\0build")
+  it.live("checks each agent's own rules before remembered answers, and remembers only answers", () =>
+    withProject({ project: { "CLAUDE.md": "@.env\nproject", ".env": "ENVSECRET" } }, () =>
+      Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const secret = (rules: string[]) => rules.some((rule) => rule.includes("ENVSECRET"))
+
+        // Like the explore subagent, whose read: allow covers .env: it loads without a prompt, and that is no answer.
+        const explore = counter(false, { ruleset: Permission.fromConfig({ external_directory: "ask", read: "allow" }) })
+        expect(secret(yield* svc.system(explore.ask))).toBe(true)
+        expect(explore.calls).toEqual([])
+
+        // The build agent's rules ask about .env, so it still prompts and a reject keeps the secret out.
+        const reject = counter(false, { sessionID: sessionB })
+        expect(secret(yield* svc.system(reject.ask))).toBe(false)
+        expect(reject.calls).toHaveLength(1)
+
+        // Rules that allow still load after that reject, and rules that deny never do.
+        expect(secret(yield* svc.system(explore.ask))).toBe(true)
+        const denied = counter(true, { ruleset: Permission.fromConfig({ read: { "*": "allow", "*.env": "deny" } }) })
+        expect(secret(yield* svc.system(denied.ask))).toBe(false)
+        expect(denied.calls).toEqual([])
+      }),
+    ),
+  )
+
+  it.live("a remembered allow does not override an agent whose rules deny the import", () =>
+    withProject({ project: { "CLAUDE.md": "@.env\nproject", ".env": "ENVSECRET" } }, () =>
+      Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        const secret = (rules: string[]) => rules.some((rule) => rule.includes("ENVSECRET"))
+        const approve = counter(true)
+        expect(secret(yield* svc.system(approve.ask))).toBe(true)
+        expect(approve.calls).toHaveLength(1)
+
+        const denied = counter(true, { ruleset: Permission.fromConfig({ read: { "*": "allow", "*.env": "deny" } }) })
+        expect(secret(yield* svc.system(denied.ask))).toBe(false)
+        // Another session with the same rules follows the answer without asking again.
+        const later = counter(false, { sessionID: sessionB })
+        expect(secret(yield* svc.system(later.ask))).toBe(true)
+        expect(later.calls).toEqual([])
+      }),
+    ),
+  )
+
+  it.live("an always answer lifts a remembered reject", () =>
+    Effect.gen(function* () {
+      const external = yield* tmpWithFiles({ "notes.md": "external notes" })
+      const imported = path.join(external, "notes.md")
+
+      yield* withProject({ project: { "CLAUDE.md": `@${imported}\nproject` } }, () =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const permission = yield* Permission.Service
+          const reject = counter(false)
+          expect(sources(yield* svc.system(reject.ask), external)).toEqual([])
+
+          // In another session the user answers "always" for the folder, as when a Read there asks.
+          const folder = path.join(external, "*")
+          const read = yield* permission
+            .ask({
+              sessionID: sessionB,
+              permission: "external_directory",
+              patterns: [folder],
+              always: [folder],
+              metadata: {},
+              ruleset: [],
+            })
+            .pipe(Effect.forkChild)
+          let pending = yield* permission.list()
+          while (pending.length === 0) {
+            yield* Effect.sleep("5 millis")
+            pending = yield* permission.list()
+          }
+          yield* permission.reply({ requestID: pending[0].id, reply: "always" })
+          yield* Fiber.join(read)
+
+          const later = counter(false)
+          expect(sources(yield* svc.system(later.ask), external)).toEqual([imported])
+          expect(later.calls).toEqual([])
+        }),
+      )
+    }),
+  )
+
+  it.live("asks once when parallel loads reach the same import", () =>
+    Effect.gen(function* () {
+      const external = yield* tmpWithFiles({ "notes.md": "external notes" })
+      const imported = path.join(external, "notes.md")
+
+      yield* withProject({ project: { "CLAUDE.md": `@${imported}\nproject` } }, () =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const answer = yield* Deferred.make<boolean>()
+          const calls: string[] = []
+          const slow = asker((filepath) =>
+            Effect.sync(() => calls.push(filepath)).pipe(Effect.andThen(Deferred.await(answer))),
+          )
+          const fiber = Effect.all([svc.system(slow), svc.system(slow)], { concurrency: "unbounded" })
+          const [both] = yield* Effect.all(
+            [fiber, Effect.sleep("20 millis").pipe(Effect.andThen(Deferred.succeed(answer, true)))],
+            {
+              concurrency: "unbounded",
+            },
+          )
+          expect(both.map((rules) => sources(rules, external))).toEqual([[imported], [imported]])
+          expect(calls).toEqual([imported])
+        }),
+      )
+    }),
+  )
+
+  it.live("asks again after an interrupted prompt", () =>
+    Effect.gen(function* () {
+      const external = yield* tmpWithFiles({ "notes.md": "external notes" })
+      const imported = path.join(external, "notes.md")
+
+      yield* withProject({ project: { "CLAUDE.md": `@${imported}\nproject` } }, () =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const hang = asker(() => Effect.never)
+          expect(Exit.isFailure(yield* svc.system(hang).pipe(Effect.timeout("20 millis"), Effect.exit))).toBe(true)
+          const later = counter(true)
           expect(sources(yield* svc.system(later.ask), external)).toEqual([imported])
           expect(later.calls).toEqual([imported])
+        }),
+      )
+    }),
+  )
+
+  it.live("another session prompts for itself while a prompt is unanswered", () =>
+    Effect.gen(function* () {
+      const external = yield* tmpWithFiles({ "notes.md": "external notes" })
+      const imported = path.join(external, "notes.md")
+
+      yield* withProject({ project: { "CLAUDE.md": `@${imported}\nproject` } }, () =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const shown = yield* Deferred.make<void>()
+          const unanswered = asker(() => Deferred.succeed(shown, undefined).pipe(Effect.andThen(Effect.never)))
+          const first = yield* svc.system(unanswered).pipe(Effect.forkChild)
+          yield* Deferred.await(shown)
+
+          const other = counter(true, { sessionID: sessionB })
+          const rules = yield* svc.system(other.ask).pipe(Effect.timeout("2 seconds"))
+          expect(sources(rules, external)).toEqual([imported])
+          expect(other.calls).toEqual([imported])
+          yield* Fiber.interrupt(first)
+        }),
+      )
+    }),
+  )
+
+  it.live("an interrupt that lands as the prompt starts leaves nothing pending", () =>
+    Effect.gen(function* () {
+      const external = yield* tmpWithFiles({ "notes.md": "external notes" })
+      const imported = path.join(external, "notes.md")
+
+      yield* withProject({ project: { "CLAUDE.md": `@${imported}\nproject` } }, () =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          // Interrupts the asking fiber before the prompt effect runs.
+          const abort = asker(() => {
+            Fiber.getCurrent()?.interruptUnsafe()
+            return Effect.never
+          })
+          const exit = yield* svc.system(abort).pipe(Effect.forkChild, Effect.flatMap(Fiber.await))
+          expect(Exit.hasInterrupts(exit)).toBe(true)
+
+          const later = counter(true)
+          const rules = yield* svc.system(later.ask).pipe(Effect.timeout("2 seconds"))
+          expect(sources(rules, external)).toEqual([imported])
+          expect(later.calls).toEqual([imported])
+        }),
+      )
+    }),
+  )
+
+  it.live("checks in-project imports with the read rules, so .env asks first", () =>
+    withProject(
+      { project: { "CLAUDE.md": "@.env\n@docs/a.md\nproject", ".env": "ENVSECRET", "docs/a.md": "a" } },
+      (dirs) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const asked: string[] = []
+          const ctx = {
+            ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+              Effect.sync(() => asked.push(`${req.permission} ${req.patterns.join(",")}`)).pipe(
+                Effect.andThen(
+                  req.patterns.some((item) => item.endsWith(".env"))
+                    ? Effect.die(new PermissionV1.RejectedError())
+                    : Effect.void,
+                ),
+              ),
+          }
+          const rules = yield* svc.system(asker((filepath) => Instruction.check(ctx, filepath)))
+          expect(rules.some((rule) => rule.includes("ENVSECRET"))).toBe(false)
+          expect(sources(rules, dirs.project)).toEqual([
+            path.join(dirs.project, "docs", "a.md"),
+            path.join(dirs.project, "CLAUDE.md"),
+          ])
+          // Only .env is left to the user; the rules allow docs/a.md without asking.
+          expect(asked).toHaveLength(1)
+          expect(asked[0]).toStartWith("read ")
+          expect(asked[0]).toEndWith(".env")
+        }),
+    ),
+  )
+
+  it.live("trusts imports only from instructions entries in the global config", () =>
+    Effect.gen(function* () {
+      const external = yield* tmpWithFiles({ "notes.md": "external notes" })
+      const imported = path.join(external, "notes.md")
+      const team = path.join(external, "team.md")
+      yield* write(team, `@${imported}\nteam`)
+      const declared = { get: () => Effect.succeed({ instructions: [team] }) }
+
+      yield* withProject({ project: {}, config: () => declared }, () =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const spy = counter(false)
+          const rules = yield* svc.system(spy.ask)
+          expect(sources(rules, external)).toEqual([team])
+          expect(spy.calls).toEqual([imported])
+        }),
+      )
+
+      yield* withProject({ project: {}, config: () => ({ ...declared, getGlobal: declared.get }) }, () =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          const spy = counter(false)
+          expect(sources(yield* svc.system(spy.ask), external)).toEqual([imported, team])
+          expect(spy.calls).toEqual([])
+        }),
+      )
+    }),
+  )
+
+  it.live("trusts instructions entries from OPENCODE_CONFIG_CONTENT and ~/.opencode, but not the project's", () =>
+    Effect.gen(function* () {
+      const external = yield* tmpWithFiles({ "notes.md": "external notes" })
+      const imported = path.join(external, "notes.md")
+      const team = path.join(external, "team.md")
+      const home = path.join(external, "home.md")
+      yield* write(team, `@${imported}\nteam`)
+      yield* write(home, `@${imported}\nhome`)
+      const declared = { get: () => Effect.succeed({ instructions: [team, home] }) }
+      const content = (value: string | undefined) =>
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            const previous = process.env.OPENCODE_CONFIG_CONTENT
+            if (value === undefined) delete process.env.OPENCODE_CONFIG_CONTENT
+            else process.env.OPENCODE_CONFIG_CONTENT = value
+            return previous
+          }),
+          (previous) =>
+            Effect.sync(() => {
+              if (previous === undefined) delete process.env.OPENCODE_CONFIG_CONTENT
+              else process.env.OPENCODE_CONFIG_CONTENT = previous
+            }),
+        )
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* content(JSON.stringify({ instructions: [team] }))
+          yield* withProject(
+            {
+              global: { ".opencode/opencode.jsonc": `// user config\n{ "instructions": [${JSON.stringify(home)}] }` },
+              project: { "opencode.json": JSON.stringify({ instructions: [team, home] }) },
+              config: () => declared,
+            },
+            () =>
+              Effect.gen(function* () {
+                const svc = yield* Instruction.Service
+                const spy = counter(false)
+                expect(sources(yield* svc.system(spy.ask), external)).toEqual([imported, team, home])
+                expect(spy.calls).toEqual([])
+              }),
+          )
+        }),
+      )
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* content(undefined)
+          yield* withProject(
+            { project: { "opencode.json": JSON.stringify({ instructions: [team, home] }) }, config: () => declared },
+            () =>
+              Effect.gen(function* () {
+                const svc = yield* Instruction.Service
+                const spy = counter(false)
+                expect(sources(yield* svc.system(spy.ask), external)).toEqual([team, home])
+                expect(spy.calls).toEqual([imported])
+              }),
+          )
         }),
       )
     }),
@@ -690,7 +1085,7 @@ describe("Instruction.system", () => {
       yield* withProject({ project: { "CLAUDE.md": "@big.md\nsmall", "big.md": big } }, (dirs) =>
         Effect.gen(function* () {
           const svc = yield* Instruction.Service
-          expect(sources(yield* svc.system(), dirs.project)).toEqual([path.join(dirs.project, "CLAUDE.md")])
+          expect(sources(yield* svc.system(allow), dirs.project)).toEqual([path.join(dirs.project, "CLAUDE.md")])
         }),
       )
     }),

@@ -1171,7 +1171,8 @@ export interface Interface {
     providerID: ProviderV2.ID,
     query: string[],
   ) => Effect.Effect<{ providerID: ProviderV2.ID; modelID: string } | undefined>
-  readonly getSmallModel: (providerID: ProviderV2.ID) => Effect.Effect<Model | undefined>
+  // modelID is the model the small request stands in for; some small-model picks depend on it.
+  readonly getSmallModel: (providerID: ProviderV2.ID, modelID?: ModelV2.ID) => Effect.Effect<Model | undefined>
   readonly defaultModel: () => Effect.Effect<{ providerID: ProviderV2.ID; modelID: ModelV2.ID }, DefaultModelError>
 }
 
@@ -1318,26 +1319,37 @@ export function fromModelsDevProvider(provider: ModelsDev.Provider): Info {
 
 // AgentCode's own gateway (agentcode-gateway/server.js) is not on models.dev, so it ships here. The
 // gateway rejects keyless calls, so like any catalog provider it loads once AGENTCODE_API_KEY or a stored
-// key exists, and a config `agentcode` block merges on top. Limits stay 0 (unknown) as for config-defined
-// models; reasoning and effort levels come from the gateway table in transform.ts.
-const AGENTCODE_GATEWAY_MODELS: Record<string, string> = {
-  "agentcode-free-fast": "AgentCode Free Fast (Qwen 35B)",
-  "agentcode-free": "AgentCode Free (Qwen 27B)",
-  "agentcode-fast": "AgentCode Fast (Kimi K2.7)",
-  "agentcode-max": "AgentCode Max (Kimi K3)",
-  "agentcode-claude": "Claude Code (your subscription)",
+// key exists, and a config `agentcode` block merges on top (its limits win). Reasoning and effort levels
+// come from the gateway table in transform.ts.
+// Context is what the upstream serves (Moonshot /v1/models context_length, Hetzner vLLM max_model_len,
+// checked 2026-09-16). Neither reports an output cap, so the output values are unverified conservative picks,
+// not documented limits: a quarter or an eighth of context, so max_tokens plus a prompt at the compaction
+// threshold still fits if OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX is raised. At the default 32000 they change
+// nothing. agentcode-claude stays 0: the gateway reports no token usage for it and the Claude CLI manages its
+// own context.
+const AGENTCODE_GATEWAY_MODELS: Record<string, { name: string; context: number; output: number }> = {
+  "agentcode-free-fast": { name: "AgentCode Free Fast (Qwen 35B)", context: 262_144, output: 65_536 },
+  "agentcode-free": { name: "AgentCode Free (Qwen 27B)", context: 262_144, output: 65_536 },
+  "agentcode-fast": { name: "AgentCode Fast (Kimi K2.7)", context: 262_144, output: 65_536 },
+  "agentcode-max": { name: "AgentCode Max (Kimi K3)", context: 1_048_576, output: 131_072 },
+  "agentcode-claude": { name: "Claude Code (your subscription)", context: 0, output: 0 },
 }
 
-function agentcodeGatewayModel(id: string, name: string): ModelsDev.Model {
+// Free, fast and outside Moonshot's rate cap: the gateway's default pick and its title model.
+const AGENTCODE_FREE_FAST = "agentcode-free-fast"
+// The user's own Claude subscription through the local Claude CLI.
+const AGENTCODE_CLAUDE = "agentcode-claude"
+
+function agentcodeGatewayModel(id: string, info: { name: string; context: number; output: number }): ModelsDev.Model {
   return {
     id,
-    name,
+    name: info.name,
     release_date: "",
     attachment: false,
     reasoning: ProviderTransform.agentcodeGatewayReasoning(id),
     temperature: false,
     tool_call: true,
-    limit: { context: 0, output: 0 },
+    limit: { context: info.context, output: info.output },
     modalities: { input: ["text"], output: ["text"] },
   }
 }
@@ -1348,7 +1360,37 @@ const agentcodeGateway: ModelsDev.Provider = {
   env: ["AGENTCODE_API_KEY"],
   npm: "@ai-sdk/openai-compatible",
   api: "http://localhost:8399/v1",
-  models: mapValues(AGENTCODE_GATEWAY_MODELS, (name, id) => agentcodeGatewayModel(id, name)),
+  models: mapValues(AGENTCODE_GATEWAY_MODELS, (info, id) => agentcodeGatewayModel(id, info)),
+}
+
+// The gateway registers its free Qwen models only when it has HETZNER_API_KEY, so the table above can name models
+// it does not serve. Returns the ids its GET /models lists, or undefined when there is nothing to check or the
+// list cannot be read (gateway down, bad key, not an AgentCode gateway), so a failure never hides a model.
+async function agentcodeGatewayServed(provider: Info, envs: Record<string, string | undefined>) {
+  const gateway = Object.values(provider.models).find((model) => Object.hasOwn(AGENTCODE_GATEWAY_MODELS, model.api.id))
+  if (!gateway) return
+  const baseURL =
+    typeof provider.options.baseURL === "string" && provider.options.baseURL !== ""
+      ? provider.options.baseURL
+      : gateway.api.url
+  const key = typeof provider.options.apiKey === "string" ? provider.options.apiKey : provider.key
+  if (!baseURL || !key) return
+  const url = baseURL.replace(/\$\{([^}]+)\}/g, (item, name) => envs[String(name)] ?? item).replace(/\/+$/, "")
+  try {
+    const response = await fetch(`${url}/models`, {
+      headers: { authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(2_000),
+    })
+    if (!response.ok) return
+    const body: unknown = await response.json()
+    if (!isRecord(body) || !Array.isArray(body.data)) return
+    const served = new Set(
+      body.data.flatMap((item) => (isRecord(item) && typeof item.id === "string" ? [item.id] : [])),
+    )
+    return Object.keys(AGENTCODE_GATEWAY_MODELS).some((id) => served.has(id)) ? served : undefined
+  } catch {
+    return
+  }
 }
 
 function modeOptions(model: Model, body: Record<string, unknown> | undefined) {
@@ -1678,6 +1720,23 @@ const layer = Layer.effect(
           })
         }
 
+        // A gateway model the gateway does not list 404s as "unknown model", and as the default or title pick it
+        // would fail every new session, so drop it. Only ids from the gateway table are checked.
+        yield* Effect.forEach(
+          Object.values(providers).filter((provider) => isProviderAllowed(provider.id)),
+          (provider) =>
+            Effect.promise(() => agentcodeGatewayServed(provider, envs)).pipe(
+              Effect.map((served) => {
+                if (!served) return
+                for (const [modelID, model] of Object.entries(provider.models)) {
+                  if (Object.hasOwn(AGENTCODE_GATEWAY_MODELS, model.api.id) && !served.has(model.api.id))
+                    delete provider.models[modelID]
+                }
+              }),
+            ),
+          { concurrency: "unbounded", discard: true },
+        )
+
         for (const [id, provider] of Object.entries(providers)) {
           const providerID = ProviderV2.ID.make(id)
           if (!isProviderAllowed(providerID)) {
@@ -1946,7 +2005,10 @@ const layer = Layer.effect(
       return undefined
     })
 
-    const getSmallModel = Effect.fn("Provider.getSmallModel")(function* (providerID: ProviderV2.ID) {
+    const getSmallModel = Effect.fn("Provider.getSmallModel")(function* (
+      providerID: ProviderV2.ID,
+      modelID?: ModelV2.ID,
+    ) {
       const cfg = yield* config.get()
 
       if (cfg.small_model) {
@@ -1972,6 +2034,14 @@ const layer = Layer.effect(
           providerID: ProviderV2.ID.make(experimental.model.providerID),
         }
       }
+
+      // Gateway titles use the free Qwen, which smallOptions keeps thinking-off, so they never spend a request
+      // against Moonshot's org-wide Kimi cap. Matched on the gateway id, like the transform.ts table. Sessions on
+      // agentcode-claude are skipped: the user picked it to keep prompts with their own Claude subscription, and
+      // the free Qwen is a third-party vendor, so their titles stay on the session model.
+      const gatewaySmall = Object.values(provider.models).find((model) => model.api.id === AGENTCODE_FREE_FAST)
+      if (gatewaySmall && (modelID === undefined || provider.models[modelID]?.api.id !== AGENTCODE_CLAUDE))
+        return gatewaySmall
 
       // TODO: Remove these provider-specific assumptions once model syncing reliably reports available deployments.
       if (providerID === ProviderV2.ID.azure || providerID === ProviderV2.ID.make("azure-cognitive-services")) {
@@ -2054,7 +2124,9 @@ const layer = Layer.effect(
   }),
 )
 
-const priority = ["gpt-5", "claude-sonnet-4", "big-pickle", "gemini-3-pro"]
+// Later entries rank first. agentcode-free-fast sits above unlisted ids but below every upstream pick, so the
+// AgentCode provider defaults to its free model instead of the id-order winner agentcode-max.
+const priority = [AGENTCODE_FREE_FAST, "gpt-5", "claude-sonnet-4", "big-pickle", "gemini-3-pro"]
 const smallModelFamilyPriority = ["gemini-flash", "gpt-nano", "claude-haiku"]
 export function sort<T extends { id: string }>(models: T[]) {
   return sortBy(

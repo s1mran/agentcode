@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test"
+import { afterAll, afterEach, expect, test } from "bun:test"
 import { mkdir, unlink } from "fs/promises"
 import path from "path"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -15,6 +15,8 @@ import { Config } from "@/config/config"
 import { Env } from "../../src/env"
 import { Plugin } from "../../src/plugin/index"
 import { Provider } from "@/provider/provider"
+import { ProviderTransform } from "@/provider/transform"
+import { isOverflow, usable } from "@/session/overflow"
 
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Filesystem } from "@/util/filesystem"
@@ -616,6 +618,175 @@ it.instance(
   },
 )
 
+it.instance("agentcode gateway models ship real limits so sessions auto-compact", () =>
+  Effect.gen(function* () {
+    yield* setProcessEnv("AGENTCODE_API_KEY", "test-key")
+    const models = (yield* list)[ProviderV2.ID.make("agentcode")].models
+    expect(
+      Object.fromEntries(Object.values(models).map((model) => [model.id, [model.limit.context, model.limit.output]])),
+    ).toEqual({
+      "agentcode-free-fast": [262144, 65536],
+      "agentcode-free": [262144, 65536],
+      "agentcode-fast": [262144, 65536],
+      "agentcode-max": [1048576, 131072],
+      "agentcode-claude": [0, 0],
+    })
+    for (const id of ["agentcode-free-fast", "agentcode-free", "agentcode-fast", "agentcode-max"]) {
+      const model = models[id]
+      const threshold = usable({ cfg: {}, model })
+      expect(threshold).toBeGreaterThan(0)
+      expect(threshold + ProviderTransform.maxOutputTokens(model)).toBeLessThanOrEqual(model.limit.context)
+      // Raising the engine-wide output cap must still leave room for the prompt at the compaction threshold.
+      expect(
+        usable({ cfg: {}, model, outputTokenMax: 1_000_000 }) + ProviderTransform.maxOutputTokens(model, 1_000_000),
+      ).toBeLessThanOrEqual(model.limit.context)
+      expect(
+        isOverflow({
+          cfg: {},
+          model,
+          tokens: { input: threshold, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+      ).toBe(true)
+    }
+  }),
+)
+
+it.instance(
+  "agentcode config block keeps built-in limits unless it sets its own",
+  Effect.gen(function* () {
+    const models = (yield* list)[ProviderV2.ID.make("agentcode")].models
+    expect(models["agentcode-max"].limit).toMatchObject({ context: 1048576, output: 131072 })
+    expect(models["agentcode-free"].limit).toMatchObject({ context: 100000, output: 8000 })
+  }),
+  {
+    config: agentcodeGatewayProvider({
+      "agentcode-max": { name: "AgentCode Max" },
+      "agentcode-free": { name: "AgentCode Free", limit: { context: 100000, output: 8000 } },
+    }),
+  },
+)
+
+it.instance("agentcode gateway defaults to agentcode-free-fast", () =>
+  Effect.gen(function* () {
+    yield* setProcessEnv("AGENTCODE_API_KEY", "test-key")
+    expect(Provider.defaultModelIDs(yield* list)[ProviderV2.ID.make("agentcode")]).toBe("agentcode-free-fast")
+  }),
+)
+
+it.instance(
+  "defaultModel picks agentcode-free-fast for the agentcode provider",
+  Effect.gen(function* () {
+    const model = yield* Provider.use.defaultModel()
+    expect(String(model.providerID)).toBe("agentcode")
+    expect(String(model.modelID)).toBe("agentcode-free-fast")
+  }),
+  { config: agentcodeGatewayProvider({ "agentcode-max": { name: "AgentCode Max" } }) },
+)
+
+it.instance("getSmallModel sends agentcode titles to agentcode-free-fast with thinking off", () =>
+  Effect.gen(function* () {
+    yield* setProcessEnv("AGENTCODE_API_KEY", "test-key")
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("agentcode"))
+    expect(String(model?.id)).toBe("agentcode-free-fast")
+    // The model has effort variants, so an empty smallOptions means thinking stays off rather than no variants.
+    expect(Object.keys(model?.variants ?? {})).toEqual(["low", "medium", "high"])
+    expect(ProviderTransform.smallOptions(model!)).toEqual({})
+  }),
+)
+
+it.instance(
+  "getSmallModel falls back when agentcode-free-fast is blacklisted",
+  Effect.gen(function* () {
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("agentcode"))
+    expect(model).toBeUndefined()
+  }),
+  {
+    config: {
+      provider: {
+        agentcode: {
+          name: "AgentCode Gateway",
+          options: { apiKey: "test-key" },
+          blacklist: ["agentcode-free-fast"],
+        },
+      },
+    },
+  },
+)
+
+it.instance(
+  "config small_model still wins over the agentcode title default",
+  Effect.gen(function* () {
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("agentcode"))
+    expect(String(model?.id)).toBe("agentcode-free")
+  }),
+  { config: { ...agentcodeGatewayProvider({}), small_model: "agentcode/agentcode-free" } },
+)
+
+// Stand-in for the gateway's GET /v1/models. The first path segment picks the listing, so each test points the
+// agentcode baseURL at what its gateway serves. A gateway without HETZNER_API_KEY lists no free Qwen models.
+const gatewayListings: Record<string, string[] | number> = {
+  "no-free": ["agentcode-fast", "agentcode-max", "agentcode-claude"],
+  down: 503,
+}
+const gatewayStub = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  fetch(req) {
+    const [, listing, ...rest] = new URL(req.url).pathname.split("/")
+    if (rest.join("/") !== "v1/models") return new Response("not found", { status: 404 })
+    if (req.headers.get("authorization") !== "Bearer test-key") return new Response("bad key", { status: 401 })
+    const served = gatewayListings[listing]
+    if (typeof served === "number") return new Response("unavailable", { status: served })
+    return Response.json({ object: "list", data: served.map((id) => ({ id, object: "model" })) })
+  },
+})
+afterAll(() => gatewayStub.stop(true))
+
+const agentcodeGatewayAt = (listing: string) => ({
+  provider: {
+    agentcode: { options: { baseURL: `http://127.0.0.1:${gatewayStub.port}/${listing}/v1`, apiKey: "test-key" } },
+  },
+})
+
+it.instance(
+  "agentcode drops built-in models its gateway does not serve, so default and title picks still work",
+  Effect.gen(function* () {
+    const agentcode = ProviderV2.ID.make("agentcode")
+    const providers = yield* list
+    expect(Object.keys(providers[agentcode].models).sort()).toEqual([
+      "agentcode-claude",
+      "agentcode-fast",
+      "agentcode-max",
+    ])
+    expect(Provider.defaultModelIDs(providers)[agentcode]).toBe("agentcode-max")
+    expect(String((yield* Provider.use.defaultModel()).modelID)).toBe("agentcode-max")
+    // No free model to title with, so titles fall back to the session model instead of a 404.
+    expect(yield* Provider.use.getSmallModel(agentcode, ModelV2.ID.make("agentcode-max"))).toBeUndefined()
+  }),
+  { config: agentcodeGatewayAt("no-free") },
+)
+
+it.instance(
+  "agentcode keeps its built-in models when the gateway model list is unavailable",
+  Effect.gen(function* () {
+    const agentcode = ProviderV2.ID.make("agentcode")
+    expect(Object.keys((yield* list)[agentcode].models)).toHaveLength(5)
+    expect(String((yield* Provider.use.getSmallModel(agentcode))?.id)).toBe("agentcode-free-fast")
+  }),
+  { config: agentcodeGatewayAt("down") },
+)
+
+it.instance("getSmallModel keeps agentcode-claude titles on the user's own Claude subscription", () =>
+  Effect.gen(function* () {
+    yield* setProcessEnv("AGENTCODE_API_KEY", "test-key")
+    const agentcode = ProviderV2.ID.make("agentcode")
+    expect(yield* Provider.use.getSmallModel(agentcode, ModelV2.ID.make("agentcode-claude"))).toBeUndefined()
+    expect(String((yield* Provider.use.getSmallModel(agentcode, ModelV2.ID.make("agentcode-max")))?.id)).toBe(
+      "agentcode-free-fast",
+    )
+  }),
+)
+
 it.instance(
   "explicit baseURL overrides api field",
   Effect.gen(function* () {
@@ -934,6 +1105,13 @@ test("provider.sort prioritizes preferred models", () => {
   expect(sorted[0].id).toContain("latest")
   expect(sorted[sorted.length - 1].id).not.toContain("gpt-5")
   expect(sorted[sorted.length - 1].id).not.toContain("sonnet-4")
+})
+
+test("provider.sort ranks agentcode-free-fast first for the gateway but below upstream picks", () => {
+  expect(
+    Provider.sort([{ id: "agentcode-max" }, { id: "agentcode-free-fast" }, { id: "agentcode-claude" }] as any[])[0].id,
+  ).toBe("agentcode-free-fast")
+  expect(Provider.sort([{ id: "agentcode-free-fast" }, { id: "gpt-5" }] as any[])[0].id).toBe("gpt-5")
 })
 
 it.instance(
