@@ -260,7 +260,74 @@ function setEnvScoped(key: string, value: string) {
   )
 }
 
+function unsetEnvScoped(key: string) {
+  return Effect.acquireRelease(
+    Effect.sync(() => {
+      const previous = process.env[key]
+      delete process.env[key]
+      return previous
+    }),
+    (previous) =>
+      Effect.sync(() => {
+        if (previous !== undefined) process.env[key] = previous
+      }),
+  )
+}
+
 describe("provider HttpApi", () => {
+  it.instance(
+    "lists the built-in AgentCode gateway without a key so the app can offer to connect it",
+    Effect.gen(function* () {
+      const directory = (yield* TestInstance).directory
+      yield* unsetEnvScoped("AGENTCODE_API_KEY")
+      yield* unsetEnvScoped("AGENTCODE_BASE_URL")
+      const response = yield* request("/provider", { headers: { "x-opencode-directory": directory } })
+      expect(response.status).toBe(200)
+
+      const body = yield* response.json
+      const agentcode = providerByID(body, "all", "agentcode")
+      expect(isRecord(agentcode)).toBe(true)
+      if (!isRecord(agentcode)) return
+      expect(agentcode.name).toBe("AgentCode Gateway")
+      expect(agentcode.env).toEqual(["AGENTCODE_API_KEY"])
+      expect(isRecord(agentcode.models) && Object.keys(agentcode.models)).toContain("agentcode-free-fast")
+      expect(isRecord(body) && Array.isArray(body.connected) && body.connected).not.toContain("agentcode")
+    }),
+    projectOptions,
+  )
+
+  it.instance(
+    "connects the built-in AgentCode gateway once a pasted key is stored",
+    Effect.gen(function* () {
+      const directory = (yield* TestInstance).directory
+      yield* unsetEnvScoped("AGENTCODE_API_KEY")
+      // Loopback port 9 refuses connections, so the served-model check fails fast instead of reaching the hosted gateway.
+      yield* setEnvScoped("AGENTCODE_BASE_URL", "http://127.0.0.1:9/v1")
+      // What PUT /auth/agentcode stores when the app's connect dialog submits a key.
+      yield* setEnvScoped("OPENCODE_AUTH_CONTENT", JSON.stringify({ agentcode: { type: "api", key: "test-key" } }))
+      const response = yield* request("/provider", { headers: { "x-opencode-directory": directory } })
+      expect(response.status).toBe(200)
+
+      const body = yield* response.json
+      expect(isRecord(body) && Array.isArray(body.connected) && body.connected).toContain("agentcode")
+      const agentcode = providerByID(body, "all", "agentcode")
+      expect(isRecord(agentcode) && agentcode.source).toBe("api")
+      expect(isRecord(body) && isRecord(body.default) && body.default.agentcode).toBe("agentcode-free-fast")
+    }),
+    projectOptions,
+  )
+
+  it.instance(
+    "leaves the built-in AgentCode gateway out when disabled_providers names it",
+    Effect.gen(function* () {
+      const directory = (yield* TestInstance).directory
+      const response = yield* request("/provider", { headers: { "x-opencode-directory": directory } })
+      expect(response.status).toBe(200)
+      expect(providerByID(yield* response.json, "all", "agentcode")).toBeUndefined()
+    }),
+    { config: { ...projectOptions.config, disabled_providers: ["agentcode"] } },
+  )
+
   it.instance.skip(
     "returns public v2 provider not found errors",
     Effect.gen(function* () {

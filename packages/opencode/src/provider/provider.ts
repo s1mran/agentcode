@@ -18,7 +18,7 @@ import { iife } from "@/util/iife"
 import { Global } from "@opencode-ai/core/global"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context, Schema, Types } from "effect"
+import { Duration, Effect, Layer, Context, Schema, Types } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectPromise } from "@/effect/promise"
@@ -1317,10 +1317,11 @@ export function fromModelsDevProvider(provider: ModelsDev.Provider): Info {
   }
 }
 
-// AgentCode's own gateway (agentcode-gateway/server.js) is not on models.dev, so it ships here. The
-// gateway rejects keyless calls, so like any catalog provider it loads once AGENTCODE_API_KEY or a stored
-// key exists, and a config `agentcode` block merges on top (its limits win). Reasoning and effort levels
-// come from the gateway table in transform.ts.
+// AgentCode's own gateway (agentcode-gateway/server.js) is not on models.dev, so it ships here, and every provider
+// list (provider state, GET /provider, `auth login`) gets it through withBuiltinProviders. It is listed without a
+// key so the app's connect dialog can offer it, but the gateway rejects keyless calls, so like any catalog provider
+// it only loads once AGENTCODE_API_KEY or a stored key exists. A config `agentcode` block merges on top (its limits
+// win). Reasoning and effort levels come from the gateway table in transform.ts.
 // Context is what the upstream serves (Moonshot /v1/models context_length, Hetzner vLLM max_model_len,
 // checked 2026-09-16). Neither reports an output cap, so the output values are unverified conservative picks,
 // not documented limits: a quarter or an eighth of context, so max_tokens plus a prompt at the compaction
@@ -1340,6 +1341,15 @@ const AGENTCODE_FREE_FAST = "agentcode-free-fast"
 // The user's own Claude subscription through the local Claude CLI.
 const AGENTCODE_CLAUDE = "agentcode-claude"
 
+// The hosted gateway customers connect to. AGENTCODE_BASE_URL points the built-in provider at another gateway (a
+// local or self-hosted one), and a config `provider.agentcode.options.baseURL` beats both, because resolveSDK and
+// the model check below read options.baseURL before the model's api.url.
+export const AGENTCODE_HOSTED_BASE_URL = "https://ovam.ai/agentcode/v1"
+
+function agentcodeBaseURL(envs: Record<string, string | undefined>) {
+  return envs.AGENTCODE_BASE_URL?.trim().replace(/\/+$/, "") || AGENTCODE_HOSTED_BASE_URL
+}
+
 function agentcodeGatewayModel(id: string, info: { name: string; context: number; output: number }): ModelsDev.Model {
   return {
     id,
@@ -1354,44 +1364,174 @@ function agentcodeGatewayModel(id: string, info: { name: string; context: number
   }
 }
 
-const agentcodeGateway: ModelsDev.Provider = {
-  id: "agentcode",
-  name: "AgentCode Gateway",
-  env: ["AGENTCODE_API_KEY"],
-  npm: "@ai-sdk/openai-compatible",
-  api: "http://localhost:8399/v1",
-  models: mapValues(AGENTCODE_GATEWAY_MODELS, (info, id) => agentcodeGatewayModel(id, info)),
+function agentcodeGateway(envs: Record<string, string | undefined>): ModelsDev.Provider {
+  return {
+    id: "agentcode",
+    name: "AgentCode Gateway",
+    env: ["AGENTCODE_API_KEY"],
+    npm: "@ai-sdk/openai-compatible",
+    api: agentcodeBaseURL(envs),
+    models: mapValues(AGENTCODE_GATEWAY_MODELS, (info, id) => agentcodeGatewayModel(id, info)),
+  }
 }
 
-// The gateway registers its free Qwen models only when it has HETZNER_API_KEY, so the table above can name models
-// it does not serve. Returns the ids its GET /models lists, or undefined when there is nothing to check or the
-// list cannot be read (gateway down, bad key, not an AgentCode gateway), so a failure never hides a model.
-async function agentcodeGatewayServed(provider: Info, envs: Record<string, string | undefined>) {
+// models.dev plus the providers AgentCode ships itself. Every list of connectable providers goes through this, so a
+// built-in provider shows up (not connected) before any key is stored.
+export function withBuiltinProviders(
+  modelsDev: Record<string, ModelsDev.Provider>,
+  envs: Record<string, string | undefined>,
+): Record<string, ModelsDev.Provider> {
+  const gateway = agentcodeGateway(envs)
+  return { ...modelsDev, [gateway.id]: gateway }
+}
+
+function sameGatewayURL(a: string, b: string) {
+  try {
+    const left = new URL(a)
+    const right = new URL(b)
+    return left.origin === right.origin && left.pathname.replace(/\/+$/, "") === right.pathname.replace(/\/+$/, "")
+  } catch {
+    return false
+  }
+}
+
+/** @internal Exported for testing */
+export const agentcodeGatewayTiming = {
+  // Provider state is built on the first provider request, which the app makes at startup, so a slow gateway costs
+  // at most this long once. The race below enforces it even if fetch ignores the abort (a stuck DNS lookup).
+  listTimeoutMs: 2_000,
+  // Every instance (the global one plus one per open project) builds its own state, so a listing is shared for a
+  // minute instead of each one asking the gateway again.
+  listTtlMs: 60_000,
+  // A lookup that failed in a way that can clear up is shared only this long, which covers instances starting
+  // together, and is then asked again in the background: first after this long, then twice as long each time up to
+  // retryMaxMs, until the gateway answers.
+  retryMs: 15_000,
+  retryMaxMs: 300_000,
+}
+
+// The ids the gateway's GET /models lists, or why there is no list: "retry" when the gateway was slow, unreachable
+// or erroring, which can clear up, and "unusable" when it rejected the key or is not an AgentCode gateway, which
+// asking again will not change.
+type AgentcodeGatewayList = Set<string> | "retry" | "unusable"
+
+const agentcodeGatewayLists = new Map<string, { expires: number; list: Promise<AgentcodeGatewayList> }>()
+
+function agentcodeGatewayList(url: string, key: string) {
+  const now = Date.now()
+  for (const [id, entry] of agentcodeGatewayLists) if (entry.expires <= now) agentcodeGatewayLists.delete(id)
+  const id = `${url}\n${key}`
+  const cached = agentcodeGatewayLists.get(id)
+  if (cached) return cached.list
+  const entry = { expires: now + agentcodeGatewayTiming.listTtlMs, list: fetchAgentcodeGatewayList(url, key) }
+  void entry.list.then((list) => {
+    if (list === "retry") entry.expires = now + agentcodeGatewayTiming.retryMs
+  })
+  agentcodeGatewayLists.set(id, entry)
+  return entry.list
+}
+
+// Statuses a gateway that is up and reachable with a good key can still answer with for a while.
+const retryableStatus = (status: number) => status === 408 || status === 425 || status === 429 || status >= 500
+
+// Never rejects.
+async function fetchAgentcodeGatewayList(url: string, key: string): Promise<AgentcodeGatewayList> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<"retry">((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort()
+      resolve("retry")
+    }, agentcodeGatewayTiming.listTimeoutMs)
+  })
+  const request = (async (): Promise<AgentcodeGatewayList> => {
+    const response = await fetch(`${url}/models`, {
+      headers: { authorization: `Bearer ${key}` },
+      signal: controller.signal,
+    })
+    if (!response.ok) return retryableStatus(response.status) ? "retry" : "unusable"
+    // An unparsable body is most likely a captive portal or a proxy error page, not the gateway.
+    const body: unknown = await response.json().catch(() => undefined)
+    if (body === undefined) return "retry"
+    if (!isRecord(body) || !Array.isArray(body.data)) return "unusable"
+    const served = new Set(
+      body.data.flatMap((item) => (isRecord(item) && typeof item.id === "string" ? [item.id] : [])),
+    )
+    return Object.keys(AGENTCODE_GATEWAY_MODELS).some((id) => served.has(id)) ? served : "unusable"
+  })().catch((): AgentcodeGatewayList => "retry")
+  try {
+    return await Promise.race([request, deadline])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// Where a provider's gateway-table models are served from, or undefined when it has none.
+function agentcodeGatewayOf(provider: Info, envs: Record<string, string | undefined>) {
   const gateway = Object.values(provider.models).find((model) => Object.hasOwn(AGENTCODE_GATEWAY_MODELS, model.api.id))
   if (!gateway) return
   const baseURL =
     typeof provider.options.baseURL === "string" && provider.options.baseURL !== ""
       ? provider.options.baseURL
       : gateway.api.url
-  const key = typeof provider.options.apiKey === "string" ? provider.options.apiKey : provider.key
-  if (!baseURL || !key) return
+  if (!baseURL) return
   const url = baseURL.replace(/\$\{([^}]+)\}/g, (item, name) => envs[String(name)] ?? item).replace(/\/+$/, "")
-  try {
-    const response = await fetch(`${url}/models`, {
-      headers: { authorization: `Bearer ${key}` },
-      signal: AbortSignal.timeout(2_000),
-    })
-    if (!response.ok) return
-    const body: unknown = await response.json()
-    if (!isRecord(body) || !Array.isArray(body.data)) return
-    const served = new Set(
-      body.data.flatMap((item) => (isRecord(item) && typeof item.id === "string" ? [item.id] : [])),
-    )
-    return Object.keys(AGENTCODE_GATEWAY_MODELS).some((id) => served.has(id)) ? served : undefined
-  } catch {
-    return
-  }
+  const key = typeof provider.options.apiKey === "string" ? provider.options.apiKey : provider.key
+  return { url, key: key || undefined }
 }
+
+// Removes the given model api ids from a provider in the live state, and the provider itself once it has no models
+// left, as building the state does.
+function dropAgentcodeModels(providers: Record<ProviderV2.ID, Info>, provider: Info, drop: ReadonlySet<string>) {
+  for (const [modelID, model] of Object.entries(provider.models))
+    if (drop.has(model.api.id)) delete provider.models[modelID]
+  if (Object.keys(provider.models).length === 0 && providers[provider.id] === provider) delete providers[provider.id]
+}
+
+// Drops the gateway-table models a provider's gateway does not serve. The gateway registers its free Qwen models only
+// when it has HETZNER_API_KEY and agentcode-claude only with ENABLE_CLAUDE_ENGINE=1, so the table can name models it
+// does not serve, and those 404 as "unknown model". While the list cannot be read nothing is dropped, so a failure
+// never hides a model, with one exception that needs no network: the hosted gateway never runs agentcode-claude (it
+// would spend the operator's own Claude subscription), so it is always dropped there.
+//
+// The state is built once per instance and kept until the instance is disposed, so a lookup that failed at startup
+// (a slow link, a gateway restart) would otherwise leave every table model listed for the whole session. Instead it
+// is asked again in the background for as long as the instance lives, and its answer is applied to the live state:
+// the engine's default and title picks follow at once, and the app shows the shorter list on its next provider fetch.
+// Never fails and never waits on a retry.
+const filterAgentcodeGateway = (
+  providers: Record<ProviderV2.ID, Info>,
+  provider: Info,
+  envs: Record<string, string | undefined>,
+) =>
+  Effect.gen(function* () {
+    const gateway = agentcodeGatewayOf(provider, envs)
+    if (!gateway) return
+    if (sameGatewayURL(gateway.url, AGENTCODE_HOSTED_BASE_URL))
+      dropAgentcodeModels(providers, provider, new Set([AGENTCODE_CLAUDE]))
+    const key = gateway.key
+    if (!key) return
+    const apply = (list: AgentcodeGatewayList) => {
+      if (!(list instanceof Set)) return
+      dropAgentcodeModels(
+        providers,
+        provider,
+        new Set(Object.keys(AGENTCODE_GATEWAY_MODELS).filter((id) => !list.has(id))),
+      )
+    }
+    const list = yield* Effect.promise(() => agentcodeGatewayList(gateway.url, key))
+    apply(list)
+    if (list !== "retry") return
+    yield* Effect.gen(function* () {
+      let wait = agentcodeGatewayTiming.retryMs
+      while (true) {
+        yield* Effect.sleep(Duration.millis(wait))
+        const next = yield* Effect.promise(() => agentcodeGatewayList(gateway.url, key))
+        if (next !== "retry") return apply(next)
+        wait = Math.min(wait * 2, agentcodeGatewayTiming.retryMaxMs)
+      }
+    }).pipe(Effect.forkScoped)
+  })
 
 function modeOptions(model: Model, body: Record<string, unknown> | undefined) {
   if (!body) return model.options
@@ -1448,7 +1588,7 @@ const layer = Layer.effect(
       Effect.gen(function* () {
         const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
-        const modelsDev = { ...(yield* modelsDevSvc.get()), [agentcodeGateway.id]: agentcodeGateway }
+        const modelsDev = withBuiltinProviders(yield* modelsDevSvc.get(), yield* env.all())
         const catalog = mapValues(modelsDev, fromModelsDevProvider)
         const database = mapValues(catalog, toPublicInfo)
 
@@ -1720,20 +1860,13 @@ const layer = Layer.effect(
           })
         }
 
-        // A gateway model the gateway does not list 404s as "unknown model", and as the default or title pick it
-        // would fail every new session, so drop it. Only ids from the gateway table are checked.
+        // A gateway model the gateway does not serve 404s as "unknown model", and as the default or title pick it
+        // would fail every new session, so drop it. Only ids from the gateway table are checked, and the check is
+        // time-boxed and never fails, so an unreachable gateway cannot hold up or break provider loading. A failed
+        // check keeps retrying in this state's scope, so disposing the instance stops it.
         yield* Effect.forEach(
           Object.values(providers).filter((provider) => isProviderAllowed(provider.id)),
-          (provider) =>
-            Effect.promise(() => agentcodeGatewayServed(provider, envs)).pipe(
-              Effect.map((served) => {
-                if (!served) return
-                for (const [modelID, model] of Object.entries(provider.models)) {
-                  if (Object.hasOwn(AGENTCODE_GATEWAY_MODELS, model.api.id) && !served.has(model.api.id))
-                    delete provider.models[modelID]
-                }
-              }),
-            ),
+          (provider) => filterAgentcodeGateway(providers, provider, envs),
           { concurrency: "unbounded", discard: true },
         )
 

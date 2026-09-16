@@ -8,7 +8,13 @@ import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Global } from "@opencode-ai/core/global"
-import { disposeAllInstances, provideInstanceEffect, tmpdirScoped, TestInstance } from "../fixture/fixture"
+import {
+  disposeAllInstances,
+  disposeAllInstancesEffect,
+  provideInstanceEffect,
+  tmpdirScoped,
+  TestInstance,
+} from "../fixture/fixture"
 import { markPluginDependenciesReady } from "../fixture/plugin"
 import { Auth } from "@/auth"
 import { Config } from "@/config/config"
@@ -22,7 +28,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Filesystem } from "@/util/filesystem"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { InstanceStore } from "@/project/instance-store"
-import { testEffect } from "../lib/effect"
+import { pollWithTimeout, testEffect } from "../lib/effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 
@@ -528,6 +534,59 @@ it.instance(
   },
 )
 
+// Stand-in for the gateway's GET /v1/models. The first path segment picks the listing, so each test points the
+// agentcode baseURL at what its gateway serves. A gateway without HETZNER_API_KEY lists no free Qwen models, and one
+// without ENABLE_CLAUDE_ENGINE=1 (the hosted one) lists no agentcode-claude. Every test that gives the built-in
+// provider a key points it here, so no test reaches the real hosted gateway.
+// A number answers with that status, and "hang" accepts the connection and never answers. Tests may change a listing
+// mid-test to play a gateway that recovers; gatewayRequests counts the GET /models calls each listing received.
+const gatewayListings: Record<string, string[] | number | "hang"> = {
+  all: ["agentcode-free-fast", "agentcode-free", "agentcode-fast", "agentcode-max", "agentcode-claude"],
+  "no-free": ["agentcode-fast", "agentcode-max", "agentcode-claude"],
+  "no-claude": ["agentcode-free-fast", "agentcode-free", "agentcode-fast", "agentcode-max"],
+  down: 503,
+  hang: "hang",
+}
+const gatewayRequests: Record<string, number> = {}
+const gatewayStub = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  idleTimeout: 0,
+  async fetch(req) {
+    const [, listing, ...rest] = new URL(req.url).pathname.split("/")
+    if (rest.join("/") !== "v1/models") return new Response("not found", { status: 404 })
+    gatewayRequests[listing] = (gatewayRequests[listing] ?? 0) + 1
+    const served = gatewayListings[listing]
+    if (served === "hang") return new Promise<Response>(() => {})
+    if (req.headers.get("authorization") !== "Bearer test-key") return new Response("bad key", { status: 401 })
+    if (served === undefined) return new Response("not found", { status: 404 })
+    if (typeof served === "number") return new Response("unavailable", { status: served })
+    return Response.json({ object: "list", data: served.map((id) => ({ id, object: "model" })) })
+  },
+})
+afterAll(() => gatewayStub.stop(true))
+
+const gatewayURL = (listing: string) => `http://127.0.0.1:${gatewayStub.port}/${listing}/v1`
+// Where an @ai-sdk/openai-compatible chat model sends its requests.
+const chatURL = (language: unknown) =>
+  (language as { config: { url: (input: { path: string; modelId: string }) => string } }).config.url({
+    path: "/chat/completions",
+    modelId: "",
+  })
+
+// A customer who pasted a key, on a gateway that serves the given listing.
+const agentcodeKeyAt = (listing: string) =>
+  Effect.gen(function* () {
+    yield* setProcessEnv("AGENTCODE_API_KEY", "test-key")
+    yield* setProcessEnv("AGENTCODE_BASE_URL", gatewayURL(listing))
+  })
+
+const agentcodeGatewayAt = (listing: string) => ({
+  provider: {
+    agentcode: { options: { baseURL: gatewayURL(listing), apiKey: "test-key" } },
+  },
+})
+
 const agentcodeGatewayProvider = (models: Record<string, Record<string, unknown>>, providerID = "agentcode") => ({
   provider: {
     [providerID]: {
@@ -535,7 +594,7 @@ const agentcodeGatewayProvider = (models: Record<string, Record<string, unknown>
       npm: "@ai-sdk/openai-compatible",
       api: "http://localhost:8399/v1",
       env: [],
-      options: { apiKey: "test-key" },
+      options: { apiKey: "test-key", baseURL: gatewayURL("all") },
       models,
     },
   },
@@ -553,9 +612,20 @@ const expectAgentcodeGatewayDefaults = (models: Record<string, Provider.Model>) 
   expect(models["agentcode-claude"].variants).toEqual({})
 }
 
+test("agentcode gateway defaults to the hosted gateway and AGENTCODE_BASE_URL overrides it", () => {
+  expect(Provider.AGENTCODE_HOSTED_BASE_URL).toBe("https://ovam.ai/agentcode/v1")
+  expect(Provider.withBuiltinProviders({}, {}).agentcode.api).toBe("https://ovam.ai/agentcode/v1")
+  expect(Provider.withBuiltinProviders({}, { AGENTCODE_BASE_URL: "  " }).agentcode.api).toBe(
+    "https://ovam.ai/agentcode/v1",
+  )
+  expect(Provider.withBuiltinProviders({}, { AGENTCODE_BASE_URL: "http://localhost:8399/v1/" }).agentcode.api).toBe(
+    "http://localhost:8399/v1",
+  )
+})
+
 it.instance("agentcode gateway ships built in and loads from its key with no config", () =>
   Effect.gen(function* () {
-    yield* setProcessEnv("AGENTCODE_API_KEY", "test-key")
+    yield* agentcodeKeyAt("all")
     const providers = yield* list
     const provider = providers[ProviderV2.ID.make("agentcode")]
     expect(provider).toBeDefined()
@@ -564,7 +634,7 @@ it.instance("agentcode gateway ships built in and loads from its key with no con
       ["agentcode-claude", "agentcode-fast", "agentcode-free", "agentcode-free-fast", "agentcode-max"].sort(),
     )
     for (const model of Object.values(provider.models)) {
-      expect(model.api.url).toBe("http://localhost:8399/v1")
+      expect(model.api.url).toBe(gatewayURL("all"))
       expect(model.api.npm).toBe("@ai-sdk/openai-compatible")
       expect(model.capabilities.input.text).toBe(true)
       expect(model.capabilities.output.text).toBe(true)
@@ -573,7 +643,51 @@ it.instance("agentcode gateway ships built in and loads from its key with no con
   }),
 )
 
-it.instance("agentcode gateway is not listed without a key", () =>
+it.instance("agentcode gateway talks to the AGENTCODE_BASE_URL gateway", () =>
+  Effect.gen(function* () {
+    yield* agentcodeKeyAt("all")
+    const provider = yield* Provider.Service
+    const model = yield* provider.getModel(ProviderV2.ID.make("agentcode"), ModelV2.ID.make("agentcode-max"))
+    expect(chatURL(yield* provider.getLanguage(model))).toBe(`${gatewayURL("all")}/chat/completions`)
+  }),
+)
+
+it.instance(
+  "agentcode config baseURL beats AGENTCODE_BASE_URL and the hosted default",
+  Effect.gen(function* () {
+    // The env gateway would not serve agentcode-claude; the config one (the owner's local gateway) does.
+    yield* setProcessEnv("AGENTCODE_BASE_URL", gatewayURL("no-claude"))
+    const provider = yield* Provider.Service
+    const agentcode = ProviderV2.ID.make("agentcode")
+    const models = (yield* provider.list())[agentcode].models
+    // The built-in models took the env URL, yet requests and the served-model check follow the config baseURL.
+    expect(models["agentcode-max"].api.url).toBe(gatewayURL("no-claude"))
+    expect(Object.keys(models)).toContain("agentcode-claude")
+    const model = yield* provider.getModel(agentcode, ModelV2.ID.make("agentcode-claude"))
+    expect(chatURL(yield* provider.getLanguage(model))).toBe(`${gatewayURL("all")}/chat/completions`)
+  }),
+  { config: agentcodeGatewayAt("all") },
+)
+
+it.instance(
+  "agentcode on the hosted gateway never offers agentcode-claude, even before its model list is read",
+  Effect.gen(function* () {
+    // No key, so nothing is fetched: the hosted gateway is recognised from its URL alone.
+    yield* remove("AGENTCODE_API_KEY")
+    yield* remove("AGENTCODE_BASE_URL")
+    const models = (yield* list)[ProviderV2.ID.make("agentcode")].models
+    expect(Object.keys(models).sort()).toEqual([
+      "agentcode-fast",
+      "agentcode-free",
+      "agentcode-free-fast",
+      "agentcode-max",
+    ])
+    for (const model of Object.values(models)) expect(model.api.url).toBe("https://ovam.ai/agentcode/v1")
+  }),
+  { config: { provider: { agentcode: { name: "AgentCode Gateway" } } } },
+)
+
+it.instance("agentcode gateway is not connected without a key", () =>
   Effect.gen(function* () {
     yield* remove("AGENTCODE_API_KEY")
     const providers = yield* list
@@ -620,7 +734,7 @@ it.instance(
 
 it.instance("agentcode gateway models ship real limits so sessions auto-compact", () =>
   Effect.gen(function* () {
-    yield* setProcessEnv("AGENTCODE_API_KEY", "test-key")
+    yield* agentcodeKeyAt("all")
     const models = (yield* list)[ProviderV2.ID.make("agentcode")].models
     expect(
       Object.fromEntries(Object.values(models).map((model) => [model.id, [model.limit.context, model.limit.output]])),
@@ -668,7 +782,7 @@ it.instance(
 
 it.instance("agentcode gateway defaults to agentcode-free-fast", () =>
   Effect.gen(function* () {
-    yield* setProcessEnv("AGENTCODE_API_KEY", "test-key")
+    yield* agentcodeKeyAt("all")
     expect(Provider.defaultModelIDs(yield* list)[ProviderV2.ID.make("agentcode")]).toBe("agentcode-free-fast")
   }),
 )
@@ -685,7 +799,7 @@ it.instance(
 
 it.instance("getSmallModel sends agentcode titles to agentcode-free-fast with thinking off", () =>
   Effect.gen(function* () {
-    yield* setProcessEnv("AGENTCODE_API_KEY", "test-key")
+    yield* agentcodeKeyAt("all")
     const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("agentcode"))
     expect(String(model?.id)).toBe("agentcode-free-fast")
     // The model has effort variants, so an empty smallOptions means thinking stays off rather than no variants.
@@ -705,7 +819,7 @@ it.instance(
       provider: {
         agentcode: {
           name: "AgentCode Gateway",
-          options: { apiKey: "test-key" },
+          options: { apiKey: "test-key", baseURL: gatewayURL("all") },
           blacklist: ["agentcode-free-fast"],
         },
       },
@@ -721,32 +835,6 @@ it.instance(
   }),
   { config: { ...agentcodeGatewayProvider({}), small_model: "agentcode/agentcode-free" } },
 )
-
-// Stand-in for the gateway's GET /v1/models. The first path segment picks the listing, so each test points the
-// agentcode baseURL at what its gateway serves. A gateway without HETZNER_API_KEY lists no free Qwen models.
-const gatewayListings: Record<string, string[] | number> = {
-  "no-free": ["agentcode-fast", "agentcode-max", "agentcode-claude"],
-  down: 503,
-}
-const gatewayStub = Bun.serve({
-  hostname: "127.0.0.1",
-  port: 0,
-  fetch(req) {
-    const [, listing, ...rest] = new URL(req.url).pathname.split("/")
-    if (rest.join("/") !== "v1/models") return new Response("not found", { status: 404 })
-    if (req.headers.get("authorization") !== "Bearer test-key") return new Response("bad key", { status: 401 })
-    const served = gatewayListings[listing]
-    if (typeof served === "number") return new Response("unavailable", { status: served })
-    return Response.json({ object: "list", data: served.map((id) => ({ id, object: "model" })) })
-  },
-})
-afterAll(() => gatewayStub.stop(true))
-
-const agentcodeGatewayAt = (listing: string) => ({
-  provider: {
-    agentcode: { options: { baseURL: `http://127.0.0.1:${gatewayStub.port}/${listing}/v1`, apiKey: "test-key" } },
-  },
-})
 
 it.instance(
   "agentcode drops built-in models its gateway does not serve, so default and title picks still work",
@@ -767,6 +855,43 @@ it.instance(
 )
 
 it.instance(
+  "agentcode drops agentcode-claude when its gateway does not list it",
+  Effect.gen(function* () {
+    const agentcode = ProviderV2.ID.make("agentcode")
+    const providers = yield* list
+    expect(Object.keys(providers[agentcode].models).sort()).toEqual([
+      "agentcode-fast",
+      "agentcode-free",
+      "agentcode-free-fast",
+      "agentcode-max",
+    ])
+    expect(Provider.defaultModelIDs(providers)[agentcode]).toBe("agentcode-free-fast")
+  }),
+  { config: agentcodeGatewayAt("no-claude") },
+)
+
+it.instance(
+  "a gateway that never answers holds up provider loading for at most the list timeout",
+  Effect.gen(function* () {
+    const started = Date.now()
+    const models = (yield* list)[ProviderV2.ID.make("agentcode")].models
+    expect(Date.now() - started).toBeLessThan(4_000)
+    expect(Object.keys(models)).toHaveLength(5)
+  }),
+  { config: agentcodeGatewayAt("hang") },
+  15_000,
+)
+
+it.instance(
+  "agentcode keeps its built-in models when the gateway is unreachable",
+  Effect.gen(function* () {
+    expect(Object.keys((yield* list)[ProviderV2.ID.make("agentcode")].models)).toHaveLength(5)
+  }),
+  // Port 9 (discard) on loopback refuses the connection.
+  { config: { provider: { agentcode: { options: { baseURL: "http://127.0.0.1:9/v1", apiKey: "test-key" } } } } },
+)
+
+it.instance(
   "agentcode keeps its built-in models when the gateway model list is unavailable",
   Effect.gen(function* () {
     const agentcode = ProviderV2.ID.make("agentcode")
@@ -776,9 +901,117 @@ it.instance(
   { config: agentcodeGatewayAt("down") },
 )
 
+// The production retry waits are seconds to minutes; these shrink them for one test and put them back afterwards.
+const agentcodeGatewayTimingScoped = (timing: Partial<typeof Provider.agentcodeGatewayTiming>) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const previous = { ...Provider.agentcodeGatewayTiming }
+      Object.assign(Provider.agentcodeGatewayTiming, timing)
+      return previous
+    }),
+    (previous) => Effect.sync(() => Object.assign(Provider.agentcodeGatewayTiming, previous)),
+  )
+
+// The agentcode models of the live provider state once agentcode-free-fast is gone from them.
+const agentcodeModelsWithoutFreeFast = list.pipe(
+  Effect.map((providers) => {
+    const models = providers[ProviderV2.ID.make("agentcode")].models
+    return models["agentcode-free-fast"] ? undefined : models
+  }),
+)
+
+const expectNoFreeGatewayPicks = Effect.gen(function* () {
+  const agentcode = ProviderV2.ID.make("agentcode")
+  const models = yield* pollWithTimeout(
+    agentcodeModelsWithoutFreeFast,
+    "the gateway was never asked again",
+    "5 seconds",
+  )
+  expect(Object.keys(models).sort()).toEqual(["agentcode-claude", "agentcode-fast", "agentcode-max"])
+  expect(Provider.defaultModelIDs(yield* list)[agentcode]).toBe("agentcode-max")
+  expect(String((yield* Provider.use.defaultModel()).modelID)).toBe("agentcode-max")
+  expect(yield* Provider.use.getSmallModel(agentcode, ModelV2.ID.make("agentcode-max"))).toBeUndefined()
+})
+
+it.instance(
+  "a gateway that errored at startup is asked again, and its answer drops the unserved models from the live state",
+  Effect.gen(function* () {
+    // The shared listing cache expires almost at once, so only a re-check of the built state can make this pass.
+    yield* agentcodeGatewayTimingScoped({ listTtlMs: 50, retryMs: 50, retryMaxMs: 200 })
+    gatewayListings["errors-then-no-free"] = 503
+    const agentcode = ProviderV2.ID.make("agentcode")
+    // Startup: the list cannot be read, so nothing is dropped and free-fast is still the default.
+    expect(Object.keys((yield* list)[agentcode].models)).toHaveLength(5)
+    expect(Provider.defaultModelIDs(yield* list)[agentcode]).toBe("agentcode-free-fast")
+    // The gateway recovers, serving no free Qwen models. The same instance's state catches up without a reload.
+    gatewayListings["errors-then-no-free"] = gatewayListings["no-free"]
+    yield* expectNoFreeGatewayPicks
+  }),
+  { config: agentcodeGatewayAt("errors-then-no-free") },
+)
+
+it.instance(
+  "a gateway that was too slow at startup is asked again once it answers in time",
+  Effect.gen(function* () {
+    yield* agentcodeGatewayTimingScoped({ listTimeoutMs: 100, retryMs: 50, retryMaxMs: 200 })
+    gatewayListings["hangs-then-no-free"] = "hang"
+    const agentcode = ProviderV2.ID.make("agentcode")
+    expect(Object.keys((yield* list)[agentcode].models)).toHaveLength(5)
+    gatewayListings["hangs-then-no-free"] = gatewayListings["no-free"]
+    yield* expectNoFreeGatewayPicks
+  }),
+  { config: agentcodeGatewayAt("hangs-then-no-free") },
+)
+
+it.instance(
+  "a gateway that keeps failing is asked less and less often",
+  Effect.gen(function* () {
+    yield* agentcodeGatewayTimingScoped({ retryMs: 40, retryMaxMs: 160 })
+    gatewayListings["stays-down"] = 503
+    expect(Object.keys((yield* list)[ProviderV2.ID.make("agentcode")].models)).toHaveLength(5)
+    // Asked at 0 and then after 40, 80, 160, 160, ... ms: about 6 calls in 700 ms, where a fixed 40 ms wait gives 17.
+    yield* Effect.promise(() => Bun.sleep(700))
+    expect(gatewayRequests["stays-down"]).toBeGreaterThanOrEqual(3)
+    expect(gatewayRequests["stays-down"]).toBeLessThanOrEqual(8)
+  }),
+  { config: agentcodeGatewayAt("stays-down") },
+)
+
+it.instance(
+  "a gateway that rejects the key is not asked again",
+  Effect.gen(function* () {
+    yield* agentcodeGatewayTimingScoped({ retryMs: 20, retryMaxMs: 20 })
+    gatewayListings["bad-key"] = gatewayListings["no-free"]
+    expect(Object.keys((yield* list)[ProviderV2.ID.make("agentcode")].models)).toHaveLength(5)
+    yield* Effect.promise(() => Bun.sleep(300))
+    expect(gatewayRequests["bad-key"]).toBe(1)
+  }),
+  {
+    config: {
+      provider: { agentcode: { options: { baseURL: gatewayURL("bad-key"), apiKey: "revoked-key" } } },
+    },
+  },
+)
+
+it.instance(
+  "disposing the instance stops the re-checks",
+  Effect.gen(function* () {
+    yield* agentcodeGatewayTimingScoped({ retryMs: 20, retryMaxMs: 20 })
+    gatewayListings["disposed"] = 503
+    expect(Object.keys((yield* list)[ProviderV2.ID.make("agentcode")].models)).toHaveLength(5)
+    yield* Effect.promise(() => Bun.sleep(100))
+    expect(gatewayRequests["disposed"]).toBeGreaterThan(1)
+    yield* disposeAllInstancesEffect
+    const asked = gatewayRequests["disposed"]
+    yield* Effect.promise(() => Bun.sleep(200))
+    expect(gatewayRequests["disposed"]).toBe(asked)
+  }),
+  { config: agentcodeGatewayAt("disposed") },
+)
+
 it.instance("getSmallModel keeps agentcode-claude titles on the user's own Claude subscription", () =>
   Effect.gen(function* () {
-    yield* setProcessEnv("AGENTCODE_API_KEY", "test-key")
+    yield* agentcodeKeyAt("all")
     const agentcode = ProviderV2.ID.make("agentcode")
     expect(yield* Provider.use.getSmallModel(agentcode, ModelV2.ID.make("agentcode-claude"))).toBeUndefined()
     expect(String((yield* Provider.use.getSmallModel(agentcode, ModelV2.ID.make("agentcode-max")))?.id)).toBe(
