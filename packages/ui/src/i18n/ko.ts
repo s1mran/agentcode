@@ -162,6 +162,27 @@ export const dict = {
   "ui.message.copyMessage": "메시지 복사",
   "ui.message.forkMessage": "새 세션으로 분기",
   "ui.message.revertMessage": "메시지 되돌리기",
+  "ui.message.revertMessage.partial.one": "메시지 되돌리기 (파일 {{count}}개는 복원할 수 없음)",
+  "ui.message.revertMessage.partial.other": "메시지 되돌리기 (파일 {{count}}개는 복원할 수 없음)",
+  "ui.checkpoint.skipped.one": "실행 취소로 여기서 변경된 파일 {{count}}개를 복원할 수 없습니다",
+  "ui.checkpoint.skipped.other": "실행 취소로 여기서 변경된 파일 {{count}}개를 복원할 수 없습니다",
+  "ui.checkpoint.reason.ignored": "무시됨, 저장되지 않음",
+  "ui.checkpoint.reason.large": "2 MB 초과",
+  "ui.checkpoint.reason.outside": "프로젝트 폴더 외부",
+  "ui.checkpoint.reason.offline": "다운로드되지 않은 클라우드 파일",
+  "ui.checkpoint.reason.unavailable": "체크포인트 꺼짐",
+  "ui.checkpoint.unavailable.root":
+    "드라이브 루트이므로 체크포인트가 꺼져 있습니다. 실행 취소로 이 파일들을 복원할 수 없습니다.",
+  "ui.checkpoint.unavailable.home":
+    "홈 폴더에서는 체크포인트가 꺼져 있습니다. 실행 취소를 사용하려면 프로젝트 폴더를 여세요.",
+  "ui.checkpoint.unavailable.data-dir": "이 폴더에 AgentCode 자체 데이터가 있으므로 체크포인트가 꺼져 있습니다.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "체크포인트가 꺼져 있습니다: 종속성과 빌드 출력을 제외해도 이 폴더에 파일이 20,000개를 넘습니다.",
+  "ui.checkpoint.unavailable.too-large": "체크포인트가 꺼져 있습니다: 이 폴더의 파일이 512 MB를 넘습니다.",
+  "ui.checkpoint.unavailable.slow":
+    "체크포인트가 잠시 꺼져 있습니다: 이 폴더를 검사하는 데 시간이 너무 오래 걸렸습니다. 곧 다시 시도합니다.",
+  "ui.checkpoint.unavailable.no-git":
+    "체크포인트가 꺼져 있습니다: Git이 설치되어 있지 않습니다. 실행 취소를 쓰려면 Git을 설치하세요.",
   "ui.message.copyResponse": "응답 복사",
   "ui.message.copied": "복사됨!",
   "ui.message.interrupted": "중단됨",

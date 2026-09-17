@@ -178,6 +178,27 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Salin mesej",
   "ui.message.forkMessage": "Cabang ke sesi baharu",
   "ui.message.revertMessage": "Kembalikan mesej",
+  "ui.message.revertMessage.partial.one": "Kembalikan mesej ({{count}} fail tidak dapat dipulihkan)",
+  "ui.message.revertMessage.partial.other": "Kembalikan mesej ({{count}} fail tidak dapat dipulihkan)",
+  "ui.checkpoint.skipped.one": "Buat asal tidak dapat memulihkan {{count}} fail yang diubah di sini",
+  "ui.checkpoint.skipped.other": "Buat asal tidak dapat memulihkan {{count}} fail yang diubah di sini",
+  "ui.checkpoint.reason.ignored": "diabaikan, tidak disimpan",
+  "ui.checkpoint.reason.large": "lebih besar daripada 2 MB",
+  "ui.checkpoint.reason.outside": "di luar folder projek",
+  "ui.checkpoint.reason.offline": "fail awan belum dimuat turun",
+  "ui.checkpoint.reason.unavailable": "titik semak dimatikan",
+  "ui.checkpoint.unavailable.root":
+    "Titik semak dimatikan kerana ini ialah akar pemacu. Buat asal tidak dapat memulihkan fail ini.",
+  "ui.checkpoint.unavailable.home":
+    "Titik semak dimatikan dalam folder rumah anda. Buka folder projek untuk dapat buat asal.",
+  "ui.checkpoint.unavailable.data-dir": "Titik semak dimatikan kerana folder ini mengandungi data AgentCode sendiri.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Titik semak dimatikan: folder ini mempunyai lebih daripada 20,000 fail selepas melangkau kebergantungan dan output binaan.",
+  "ui.checkpoint.unavailable.too-large": "Titik semak dimatikan: folder ini menyimpan lebih daripada 512 MB fail.",
+  "ui.checkpoint.unavailable.slow":
+    "Titik semak dimatikan buat sementara: imbasan folder ini mengambil masa terlalu lama. Akan dicuba semula tidak lama lagi.",
+  "ui.checkpoint.unavailable.no-git":
+    "Titik semak dimatikan: Git tidak dipasang. Pasang Git untuk membolehkan buat asal.",
   "ui.message.copyResponse": "Salin respons",
   "ui.message.copied": "Disalin",
   "ui.message.duration.seconds": "{{count}}s",

@@ -12,6 +12,7 @@ import { Schema } from "effect"
 import type { ServerConnection } from "@/context/server"
 import { sessionHref } from "@/utils/session-route"
 import { useServerSync } from "@/context/server-sync"
+import { WorkspaceTrustGate } from "@/components/dialog-workspace-trust"
 
 export function DirectoryDataProvider(
   props: ParentProps<{
@@ -67,6 +68,7 @@ export function DirectoryDataProvider(
           onNavigateToSession={(sessionID: string) => navigate(href(sessionID))}
           onSessionHref={href}
         >
+          <WorkspaceTrustGate directory={directory} />
           <LocalProvider>{props.children}</LocalProvider>
         </DataProvider>
       )}

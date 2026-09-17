@@ -15,6 +15,16 @@ import { SessionID, MessageID } from "../../src/session/schema"
 import * as Tool from "../../src/tool/tool"
 import { testEffect } from "../lib/effect"
 import { Watcher } from "@opencode-ai/core/filesystem/watcher"
+import { FileReads } from "../../src/session/file-reads"
+import { ReadTool } from "../../src/tool/read"
+import { Instruction } from "../../src/session/instruction"
+import { Session } from "../../src/session/session"
+import { RuntimeFlags } from "@/effect/runtime-flags"
+import { Config } from "@/config/config"
+import { TestConfig } from "../fixture/config"
+import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
+import { Ripgrep } from "@opencode-ai/core/ripgrep"
+import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-edit-session"),
@@ -571,4 +581,285 @@ describe("tool.edit", () => {
       }),
     )
   })
+})
+
+// Read-before-edit ledger (session/file-reads.ts). The blocks above run without the FileReads service, so they keep
+// the pre-ledger behaviour; these compile it in, with the read tool, as the tool registry does.
+const ledgerNodes = [
+  LSP.node,
+  FSUtil.node,
+  Format.node,
+  EventV2Bridge.node,
+  Truncate.node,
+  Agent.node,
+  FileReads.node,
+  CrossSpawnSpawner.node,
+  Instruction.node,
+  Ripgrep.node,
+  Session.node,
+] as const
+const ledger = testEffect(LayerNode.compile(LayerNode.group([...ledgerNodes])))
+const unchecked = testEffect(
+  LayerNode.compile(LayerNode.group([...ledgerNodes]), [
+    [RuntimeFlags.node, RuntimeFlags.layer({ disableFileReadCheck: true })],
+  ]),
+)
+
+// Project config formatters are held until the folder is trusted, so the formatter comes from the config service.
+const formatted = testEffect(
+  LayerNode.compile(LayerNode.group([...ledgerNodes]), [
+    [
+      Config.node,
+      TestConfig.layer({
+        get: () =>
+          Effect.succeed({
+            formatter: { custom: { command: ["sh", "-c", 'printf "formatted\\n" > "$FILE"'], extensions: [".txt"] } },
+          } as ConfigV1.Info),
+      }),
+    ],
+  ]),
+)
+
+const ledgerCtx = (messageID = "msg_ledger", extra: Partial<Tool.Context> = {}): Tool.Context => ({
+  ...ctx,
+  sessionID: SessionID.make("ses_test-edit-ledger"),
+  messageID: MessageID.make(messageID),
+  messages: [],
+  ...extra,
+})
+
+const readWith = Effect.fn("EditToolTest.read")(function* (
+  filePath: string,
+  next: Tool.Context,
+  range: { offset?: number; limit?: number } = {},
+) {
+  const info = yield* ReadTool
+  const tool = yield* info.init()
+  return yield* tool.execute({ filePath, ...range }, next)
+})
+
+const failWith = Effect.fn("EditToolTest.failWith")(function* (
+  args: Tool.InferParameters<typeof EditTool>,
+  next: Tool.Context,
+) {
+  const exit = yield* run(args, next).pipe(Effect.exit)
+  if (Exit.isFailure(exit)) {
+    const err = Cause.squash(exit.cause)
+    return err instanceof Error ? err : new Error(String(err))
+  }
+  throw new Error("expected edit to fail")
+})
+
+const external = (filepath: string, content: string) =>
+  Effect.promise(async () => {
+    await fs.writeFile(filepath, content)
+    const later = new Date(Date.now() + 10_000)
+    await fs.utimes(filepath, later, later)
+  })
+
+describe("tool.edit read ledger", () => {
+  ledger.instance("fails on an existing file that was not read and leaves it unchanged", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "unread.txt")
+      yield* put(filepath, "alpha\nbeta\n")
+
+      const err = yield* failWith({ filePath: filepath, oldString: "beta", newString: "gamma" }, ledgerCtx())
+      expect(err.message).toContain("must read")
+      expect(yield* load(filepath)).toBe("alpha\nbeta\n")
+    }),
+  )
+
+  ledger.instance("allows edits after a read, and consecutive edits without a re-read", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "read.txt")
+      yield* put(filepath, "alpha\nbeta\ngamma\n")
+      const next = ledgerCtx()
+
+      yield* readWith(filepath, next)
+      const first = yield* run({ filePath: filepath, oldString: "beta", newString: "BETA" }, next)
+      expect(first.metadata.ledger?.[0]?.full).toBe(true)
+      yield* run({ filePath: filepath, oldString: "gamma", newString: "GAMMA" }, next)
+      expect(yield* load(filepath)).toBe("alpha\nBETA\nGAMMA\n")
+    }),
+  )
+
+  ledger.instance("creates a new file without a read", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "brand-new.txt")
+      yield* run({ filePath: filepath, oldString: "", newString: "hello\n" }, ledgerCtx())
+      expect(yield* load(filepath)).toBe("hello\n")
+      yield* run({ filePath: filepath, oldString: "hello", newString: "bye" }, ledgerCtx())
+      expect(yield* load(filepath)).toBe("bye\n")
+    }),
+  )
+
+  ledger.instance("a partial read allows edits only inside the lines read", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "big.txt")
+      yield* put(filepath, Array.from({ length: 3000 }, (_, i) => `row ${i + 1}`).join("\n") + "\n")
+      const next = ledgerCtx()
+
+      yield* readWith(filepath, next, { offset: 1, limit: 100 })
+      yield* run({ filePath: filepath, oldString: "row 50\n", newString: "row fifty\n" }, next)
+      const err = yield* failWith({ filePath: filepath, oldString: "row 2500\n", newString: "row x\n" }, next)
+      expect(err.message).toContain("only read lines 1-100")
+      expect(err.message).toContain("2500")
+    }),
+  )
+
+  ledger.instance("applies an exact edit to a file changed on disk and notes it", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "changed.txt")
+      yield* put(filepath, "one\ntwo\nthree\nfour\n")
+      const next = ledgerCtx()
+
+      yield* readWith(filepath, next)
+      yield* external(filepath, "one\ntwo\nthree\nFOUR (external)\n")
+      const result = yield* run({ filePath: filepath, oldString: "two", newString: "TWO" }, next)
+      expect(result.output).toContain("changed on disk")
+      expect(yield* load(filepath)).toBe("one\nTWO\nthree\nFOUR (external)\n")
+
+      // Only the edited line counts as seen now.
+      const err = yield* failWith({ filePath: filepath, oldString: "three", newString: "THREE" }, next)
+      expect(err.message).toContain("only read lines 2")
+    }),
+  )
+
+  ledger.instance("a partial read of a file changed on disk never lets an exact match reach unread lines", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "partial-changed.txt")
+      const rows = Array.from({ length: 2000 }, (_, i) => `row ${i + 1}`)
+      yield* put(filepath, rows.join("\n") + "\n")
+      const next = ledgerCtx()
+
+      yield* readWith(filepath, next, { offset: 1, limit: 50 })
+      const refused = yield* failWith({ filePath: filepath, oldString: "row 1500\n", newString: "row x\n" }, next)
+      expect(refused.message).toContain("only read lines 1-50")
+
+      // An unrelated outside change must not turn the refusal into an allowed edit.
+      yield* external(filepath, rows.map((row, i) => (i === 9 ? "row ten (editor)" : row)).join("\n") + "\n")
+      const changed = yield* failWith({ filePath: filepath, oldString: "row 1500\n", newString: "row x\n" }, next)
+      expect(changed.message).toContain("modified since you last read it")
+      expect(yield* load(filepath)).toContain("row 1500\n")
+
+      // Re-reading just the lines to change is enough.
+      yield* readWith(filepath, next, { offset: 1495, limit: 10 })
+      yield* run({ filePath: filepath, oldString: "row 1500\n", newString: "row x\n" }, next)
+      expect(yield* load(filepath)).toContain("row x\n")
+    }),
+  )
+
+  ledger.instance("an insertion just above a ranged read counts as inside it", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "insert.txt")
+      yield* put(filepath, Array.from({ length: 10 }, (_, i) => `line${i + 1}`).join("\n") + "\n")
+      const next = ledgerCtx()
+
+      yield* readWith(filepath, next, { offset: 3, limit: 3 })
+      yield* run({ filePath: filepath, oldString: "line3\n", newString: "inserted\nline3\n" }, next)
+      expect(yield* load(filepath)).toContain("line2\ninserted\nline3\n")
+      // Directly below the range too; far away still fails.
+      yield* run({ filePath: filepath, oldString: "line5\n", newString: "line5\nafter\n" }, next)
+      const err = yield* failWith({ filePath: filepath, oldString: "line9\n", newString: "line9\nx\n" }, next)
+      expect(err.message).toContain("only read lines 3-7")
+      expect(err.message).toContain("Read lines 11 ")
+    }),
+  )
+
+  ledger.instance("asks for a re-read when a changed file no longer matches oldString exactly once", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "ambiguous.txt")
+      yield* put(filepath, "value = 1\nother = 2\n")
+      const next = ledgerCtx()
+
+      yield* readWith(filepath, next)
+      yield* external(filepath, "value = 1\nvalue = 1\nother = 2\n")
+      const twice = yield* failWith({ filePath: filepath, oldString: "value = 1", newString: "value = 3" }, next)
+      expect(twice.message).toContain("modified since you last read it")
+
+      const fuzzy = yield* failWith({ filePath: filepath, oldString: "  other = 2", newString: "other = 4" }, next)
+      expect(fuzzy.message).toContain("modified since you last read it")
+      expect(yield* load(filepath)).toBe("value = 1\nvalue = 1\nother = 2\n")
+    }),
+  )
+
+  ledger.instance("a touch without a content change is not a change", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "touched.txt")
+      yield* put(filepath, "same\n")
+      const next = ledgerCtx()
+
+      yield* readWith(filepath, next)
+      const later = new Date(Date.now() + 10_000)
+      yield* Effect.promise(() => fs.utimes(filepath, later, later))
+      const result = yield* run({ filePath: filepath, oldString: "same", newString: "new" }, next)
+      expect(result.output).not.toContain("changed on disk")
+    }),
+  )
+
+  ledger.instance("never overwrites a change made while the permission prompt was open", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "race.txt")
+      yield* put(filepath, "before\n")
+      const next = ledgerCtx("msg_ledger", {
+        ask: () => Effect.promise(() => fs.writeFile(filepath, "external change\n")),
+      })
+
+      yield* readWith(filepath, ledgerCtx())
+      const err = yield* failWith({ filePath: filepath, oldString: "before", newString: "after" }, next)
+      expect(err.message).toContain("changed while waiting for approval")
+      expect(yield* load(filepath)).toBe("external change\n")
+    }),
+  )
+
+  it.instance("the approval re-check also runs without the ledger", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "race-plain.txt")
+      yield* put(filepath, "before\n")
+      const next = { ...ctx, ask: () => Effect.promise(() => fs.writeFile(filepath, "external change\n")) }
+
+      const err = yield* failWith({ filePath: filepath, oldString: "before", newString: "after" }, next)
+      expect(err.message).toContain("changed while waiting for approval")
+      expect(yield* load(filepath)).toBe("external change\n")
+    }),
+  )
+
+  formatted.instance("reports a formatter rewrite and refreshes the ledger", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "format.txt")
+      yield* put(filepath, "a\nb\n")
+      const next = ledgerCtx()
+
+      yield* readWith(filepath, next)
+      const result = yield* run({ filePath: filepath, oldString: "a", newString: "c" }, next)
+      expect(result.output).toContain("the formatter (custom) rewrote")
+      expect(yield* load(filepath)).toBe("formatted\n")
+
+      const again = yield* run({ filePath: filepath, oldString: "formatted", newString: "done" }, next)
+      expect(again.output).toContain("Edit applied successfully")
+    }),
+  )
+
+  unchecked.instance("OPENCODE_DISABLE_FILE_READ_CHECK allows an edit without a read", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "flag.txt")
+      yield* put(filepath, "alpha\n")
+      const result = yield* run({ filePath: filepath, oldString: "alpha", newString: "beta" }, ledgerCtx())
+      expect(result.output).toContain("Edit applied successfully")
+      expect(result.metadata.ledger?.length).toBe(1)
+    }),
+  )
 })

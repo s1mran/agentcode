@@ -16,6 +16,7 @@ import { validateSession } from "../tui/validate-session"
 import { win32InstallCtrlCGuard } from "@opencode-ai/tui/terminal-win32"
 import { PERMISSION_MODE_DESCRIBE, resolvePermissionModeArgs } from "./run"
 import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { WorkspaceTrustLaunch } from "@opencode-ai/core/trust/launch"
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -63,6 +64,10 @@ export function workerEnv(env: NodeJS.ProcessEnv, mode: PermissionV1.Mode | unde
     Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
   )
   if (mode) result.OPENCODE_PERMISSION_MODE = mode
+  // The CLI entry claimed OPENCODE_WORKSPACE_TRUST out of this process's environment; the worker still needs it.
+  const trust = WorkspaceTrustLaunch.claimedValue()
+  if (trust !== undefined && result[WorkspaceTrustLaunch.ENV_KEY] === undefined)
+    result[WorkspaceTrustLaunch.ENV_KEY] = trust
   return result
 }
 

@@ -178,6 +178,28 @@ export const dict = {
   "ui.message.copyMessage": "Зурвас хуулах",
   "ui.message.forkMessage": "Шинэ сесс рүү салаалах",
   "ui.message.revertMessage": "Мессежийг буцаах",
+  "ui.message.revertMessage.partial.one": "Мессежийг буцаах ({{count}} файлыг сэргээх боломжгүй)",
+  "ui.message.revertMessage.partial.other": "Мессежийг буцаах ({{count}} файлыг сэргээх боломжгүй)",
+  "ui.checkpoint.skipped.one": "Буцаах үйлдэл энд өөрчлөгдсөн {{count}} файлыг сэргээж чадахгүй",
+  "ui.checkpoint.skipped.other": "Буцаах үйлдэл энд өөрчлөгдсөн {{count}} файлыг сэргээж чадахгүй",
+  "ui.checkpoint.reason.ignored": "үл тоомсорлосон, хадгалагдаагүй",
+  "ui.checkpoint.reason.large": "2 MB-аас том",
+  "ui.checkpoint.reason.outside": "төслийн хавтасны гадна",
+  "ui.checkpoint.reason.offline": "үүлэн файл татагдаагүй",
+  "ui.checkpoint.reason.unavailable": "хяналтын цэгүүд унтраалттай",
+  "ui.checkpoint.unavailable.root":
+    "Энэ нь дискний үндэс тул хяналтын цэгүүд унтраалттай. Буцаах үйлдэл эдгээр файлыг сэргээж чадахгүй.",
+  "ui.checkpoint.unavailable.home":
+    "Таны гэрийн хавтаст хяналтын цэгүүд унтраалттай. Буцаах боломжтой болохын тулд төслийн хавтас нээнэ үү.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Энэ хавтаст AgentCode-ийн өөрийн өгөгдөл байгаа тул хяналтын цэгүүд унтраалттай.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Хяналтын цэгүүд унтраалттай: хамаарал болон build-ийн гаралтыг алгассаны дараа энэ хавтаст 20,000-аас олон файл байна.",
+  "ui.checkpoint.unavailable.too-large": "Хяналтын цэгүүд унтраалттай: энэ хавтаст 512 MB-аас их файл байна.",
+  "ui.checkpoint.unavailable.slow":
+    "Хяналтын цэгүүд түр унтраалттай: энэ хавтсыг шалгахад хэт удсан. Удахгүй дахин оролдоно.",
+  "ui.checkpoint.unavailable.no-git":
+    "Хяналтын цэгүүд унтраалттай: Git суулгаагүй байна. Буцаах боломжтой болохын тулд Git суулгана уу.",
   "ui.message.copyResponse": "Хариултыг хуулах",
   "ui.message.copied": "Хуулсан",
   "ui.message.duration.seconds": "{{count}}сек",

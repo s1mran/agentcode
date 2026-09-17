@@ -13,6 +13,13 @@ import { Truncate } from "@/tool/truncate"
 import { TestInstance } from "../fixture/fixture"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { testEffect } from "../lib/effect"
+import { FileReads } from "../../src/session/file-reads"
+import { ReadTool } from "../../src/tool/read"
+import { Instruction } from "../../src/session/instruction"
+import { Session } from "../../src/session/session"
+import { Ripgrep } from "@opencode-ai/core/ripgrep"
+import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import type { Tool } from "@/tool/tool"
 
 const it = testEffect(
   LayerNode.compile(
@@ -552,6 +559,194 @@ EOF`
       yield* execute({ patchText }, ctx)
       // Result has ASCII quotes because that's what the patch specifies
       expect(yield* readText(target)).toBe(`He said "hi"\nsome${emDash}dash\nend\n`)
+    }),
+  )
+})
+
+// Read-before-edit ledger (session/file-reads.ts), compiled in with the read tool as the tool registry does.
+const ledger = testEffect(
+  LayerNode.compile(
+    LayerNode.group([
+      LSP.node,
+      FSUtil.node,
+      Format.node,
+      EventV2Bridge.node,
+      Truncate.node,
+      Agent.node,
+      FileReads.node,
+      CrossSpawnSpawner.node,
+      Instruction.node,
+      Ripgrep.node,
+      Session.node,
+    ]),
+  ),
+)
+
+const ledgerCtx = (): ToolCtx => ({
+  ...baseCtx,
+  sessionID: SessionID.make("ses_test-patch-ledger"),
+  messageID: MessageID.make("msg_ledger"),
+  ask: () => Effect.void,
+})
+
+const readWith = Effect.fn("ApplyPatchToolTest.read")(function* (
+  filePath: string,
+  ctx: ToolCtx,
+  range: { offset?: number; limit?: number } = {},
+) {
+  const info = yield* ReadTool
+  const tool = yield* info.init()
+  return yield* tool.execute({ filePath, ...range }, ctx as Tool.Context)
+})
+
+// An LSP whose diagnostics round checks whether the patched file's lock is still held.
+const lockProbe: { file: string; free?: boolean } = { file: "" }
+const probeLsp = Layer.succeed(
+  LSP.Service,
+  LSP.Service.of({
+    init: () => Effect.void,
+    status: () => Effect.succeed([]),
+    hasClients: () => Effect.succeed(true),
+    touchFile: () => Effect.void,
+    diagnostics: () =>
+      FileReads.withLock([lockProbe.file], Effect.succeed(true)).pipe(
+        Effect.timeoutOption("300 millis"),
+        Effect.map((result) => {
+          lockProbe.free = result._tag === "Some"
+          return {}
+        }),
+      ),
+    hover: () => Effect.succeed([]),
+    definition: () => Effect.succeed([]),
+    references: () => Effect.succeed([]),
+    implementation: () => Effect.succeed([]),
+    documentSymbol: () => Effect.succeed([]),
+    workspaceSymbol: () => Effect.succeed([]),
+    prepareCallHierarchy: () => Effect.succeed([]),
+    incomingCalls: () => Effect.succeed([]),
+    outgoingCalls: () => Effect.succeed([]),
+  }),
+)
+const probed = testEffect(
+  LayerNode.compile(
+    LayerNode.group([
+      LSP.node,
+      FSUtil.node,
+      Format.node,
+      EventV2Bridge.node,
+      Truncate.node,
+      Agent.node,
+      FileReads.node,
+      CrossSpawnSpawner.node,
+      Instruction.node,
+      Ripgrep.node,
+      Session.node,
+    ]),
+    [[LSP.node, probeLsp]],
+  ),
+)
+
+describe("tool.apply_patch read ledger", () => {
+  ledger.instance("Update File needs a read of the lines it changes", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const ctx = ledgerCtx()
+      const file = path.join(test.directory, "update.txt")
+      yield* writeText(file, Array.from({ length: 300 }, (_, i) => `row ${i + 1}`).join("\n") + "\n")
+      const patch = (from: string, to: string) =>
+        `*** Begin Patch\n*** Update File: update.txt\n@@\n-${from}\n+${to}\n*** End Patch`
+
+      yield* expectFailure(
+        execute({ patchText: patch("row 5", "row five") }, ctx),
+        "apply_patch verification failed: You must read",
+      )
+      expect(yield* readText(file)).toContain("row 5\n")
+
+      yield* readWith(file, ctx, { offset: 1, limit: 10 })
+      yield* expectFailure(execute({ patchText: patch("row 200", "row x") }, ctx), "only read lines 1-10")
+
+      const result = yield* execute({ patchText: patch("row 5", "row five") }, ctx)
+      expect(result.metadata.ledger?.length).toBe(1)
+      // Own changes count as reads.
+      yield* execute({ patchText: patch("row five", "row 5 again") }, ctx)
+      expect(yield* readText(file)).toContain("row 5 again\n")
+    }),
+  )
+
+  ledger.instance("Add File over an existing file needs a full read; Delete File needs none", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const ctx = ledgerCtx()
+      yield* writeText(path.join(test.directory, "exists.txt"), "old\n")
+      yield* writeText(path.join(test.directory, "gone.txt"), "bye\n")
+
+      yield* expectFailure(
+        execute({ patchText: "*** Begin Patch\n*** Add File: exists.txt\n+new\n*** End Patch" }, ctx),
+        "You must read",
+      )
+      expect(yield* readText(path.join(test.directory, "exists.txt"))).toBe("old\n")
+
+      yield* execute({ patchText: "*** Begin Patch\n*** Delete File: gone.txt\n*** End Patch" }, ctx)
+      yield* expectReadFailure(path.join(test.directory, "gone.txt"))
+    }),
+  )
+
+  ledger.instance("Move to an existing unread destination fails", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const ctx = ledgerCtx()
+      const source = path.join(test.directory, "source.txt")
+      yield* writeText(source, "move me\n")
+      yield* writeText(path.join(test.directory, "dest.txt"), "occupied\n")
+      yield* readWith(source, ctx)
+
+      yield* expectFailure(
+        execute(
+          {
+            patchText:
+              "*** Begin Patch\n*** Update File: source.txt\n*** Move to: dest.txt\n@@\n-move me\n+moved\n*** End Patch",
+          },
+          ctx,
+        ),
+        "You must read",
+      )
+      expect(yield* readText(path.join(test.directory, "dest.txt"))).toBe("occupied\n")
+    }),
+  )
+
+  probed.instance("releases the file locks before waiting on the language server", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const ctx = ledgerCtx()
+      const file = path.join(test.directory, "locked.txt")
+      yield* writeText(file, "alpha\n")
+      yield* readWith(file, ctx)
+      lockProbe.file = file
+      delete lockProbe.free
+
+      yield* execute(
+        { patchText: "*** Begin Patch\n*** Update File: locked.txt\n@@\n-alpha\n+ALPHA\n*** End Patch" },
+        ctx,
+      )
+      expect(lockProbe.free === true).toBe(true)
+      expect(yield* readText(file)).toBe("ALPHA\n")
+    }),
+  )
+
+  ledger.instance("a source changed on disk since the read fails", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const ctx = ledgerCtx()
+      const file = path.join(test.directory, "changed.txt")
+      yield* writeText(file, "alpha\nbeta\n")
+      yield* readWith(file, ctx)
+      yield* writeText(file, "alpha\nbeta\ngamma (external)\n")
+
+      yield* expectFailure(
+        execute({ patchText: "*** Begin Patch\n*** Update File: changed.txt\n@@\n-alpha\n+ALPHA\n*** End Patch" }, ctx),
+        "modified since you last read it",
+      )
+      expect(yield* readText(file)).toBe("alpha\nbeta\ngamma (external)\n")
     }),
   )
 })

@@ -159,6 +159,28 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Kopioi viesti",
   "ui.message.forkMessage": "Haarauta uuteen istuntoon",
   "ui.message.revertMessage": "Palauta viesti",
+  "ui.message.revertMessage.partial.one": "Palauta viesti ({{count}} tiedostoa ei voi palauttaa)",
+  "ui.message.revertMessage.partial.other": "Palauta viesti ({{count}} tiedostoa ei voi palauttaa)",
+  "ui.checkpoint.skipped.one": "Kumoaminen ei voi palauttaa {{count}} täällä muutettua tiedostoa",
+  "ui.checkpoint.skipped.other": "Kumoaminen ei voi palauttaa {{count}} täällä muutettua tiedostoa",
+  "ui.checkpoint.reason.ignored": "ohitettu, ei tallennettu",
+  "ui.checkpoint.reason.large": "suurempi kuin 2 Mt",
+  "ui.checkpoint.reason.outside": "projektikansion ulkopuolella",
+  "ui.checkpoint.reason.offline": "pilvitiedostoa ei ole ladattu",
+  "ui.checkpoint.reason.unavailable": "tarkistuspisteet pois päältä",
+  "ui.checkpoint.unavailable.root":
+    "Tarkistuspisteet ovat pois päältä, koska tämä on aseman juuri. Kumoaminen ei voi palauttaa näitä tiedostoja.",
+  "ui.checkpoint.unavailable.home":
+    "Tarkistuspisteet ovat pois päältä kotikansiossa. Avaa projektikansio, jotta voit kumota muutoksia.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Tarkistuspisteet ovat pois päältä, koska tämä kansio sisältää AgentCoden omia tietoja.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Tarkistuspisteet ovat pois päältä: tässä kansiossa on yli 20 000 tiedostoa ilman riippuvuuksia ja käännöstuloksia.",
+  "ui.checkpoint.unavailable.too-large": "Tarkistuspisteet ovat pois päältä: tässä kansiossa on yli 512 Mt tiedostoja.",
+  "ui.checkpoint.unavailable.slow":
+    "Tarkistuspisteet ovat toistaiseksi pois päältä: tämän kansion läpikäynti kesti liian kauan. Uusi yritys tehdään pian.",
+  "ui.checkpoint.unavailable.no-git":
+    "Tarkistuspisteet ovat pois päältä: Gitiä ei ole asennettu. Asenna Git, jotta voit perua muutoksia.",
   "ui.message.copyResponse": "Kopioi vastaus",
   "ui.message.copied": "Kopioitu",
   "ui.message.duration.seconds": "{{count}} s",

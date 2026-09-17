@@ -21,6 +21,18 @@ Certain MCP servers, like the GitHub MCP server, tend to add a lot of tokens and
 
 ---
 
+## Workspace trust
+
+MCP servers defined in a folder's own configuration do not start until you trust the folder and approve them. Until then they show **pending approval**; a server whose command or URL changes asks again, and a rejected server stays off. Servers from a folder's configuration never receive credential variables (API keys, tokens, passwords) from AgentCode's environment; set what they need in their `environment`. See [Workspace trust](/docs/workspace-trust).
+
+```bash
+agentcode mcp reset-project-choices
+```
+
+Clears the approved and rejected servers of the current folder, so they ask again.
+
+---
+
 ## Enable
 
 You can define MCP servers in your [OpenCode Config](https://opencode.ai/docs/config/) under `mcp`. Add each MCP with a unique name. You can refer to that MCP by name when prompting the LLM.

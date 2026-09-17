@@ -190,6 +190,31 @@ export const dict = {
   "ui.message.copyMessage": "Copiar mensagem",
   "ui.message.forkMessage": "Bifurcar para nova sessão",
   "ui.message.revertMessage": "Redefinir para este ponto",
+  "ui.message.revertMessage.partial.one": "Redefinir para este ponto ({{count}} arquivo não pode ser restaurado)",
+  "ui.message.revertMessage.partial.other": "Redefinir para este ponto ({{count}} arquivos não podem ser restaurados)",
+  "ui.message.revertMessage.partial.many": "Redefinir para este ponto ({{count}} arquivos não podem ser restaurados)",
+  "ui.checkpoint.skipped.one": "Desfazer não pode restaurar {{count}} arquivo alterado aqui",
+  "ui.checkpoint.skipped.other": "Desfazer não pode restaurar {{count}} arquivos alterados aqui",
+  "ui.checkpoint.skipped.many": "Desfazer não pode restaurar {{count}} arquivos alterados aqui",
+  "ui.checkpoint.reason.ignored": "ignorado, não capturado",
+  "ui.checkpoint.reason.large": "maior que 2 MB",
+  "ui.checkpoint.reason.outside": "fora da pasta do projeto",
+  "ui.checkpoint.reason.offline": "arquivo na nuvem não baixado",
+  "ui.checkpoint.reason.unavailable": "checkpoints desativados",
+  "ui.checkpoint.unavailable.root":
+    "Os checkpoints estão desativados porque esta é a raiz de uma unidade. Desfazer não pode restaurar estes arquivos.",
+  "ui.checkpoint.unavailable.home":
+    "Os checkpoints estão desativados na sua pasta pessoal. Abra uma pasta de projeto para poder desfazer.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Os checkpoints estão desativados porque esta pasta contém os próprios dados do AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Os checkpoints estão desativados: esta pasta tem mais de 20.000 arquivos, sem contar dependências e saída de build.",
+  "ui.checkpoint.unavailable.too-large":
+    "Os checkpoints estão desativados: esta pasta contém mais de 512 MB de arquivos.",
+  "ui.checkpoint.unavailable.slow":
+    "Os checkpoints estão desativados por enquanto: a verificação desta pasta demorou demais. Uma nova tentativa será feita em breve.",
+  "ui.checkpoint.unavailable.no-git":
+    "Os checkpoints estão desativados: o Git não está instalado. Instale o Git para poder desfazer.",
   "ui.message.copyResponse": "Copiar resposta",
   "ui.message.copied": "Copiado!",
   "ui.message.interrupted": "Interrompido",

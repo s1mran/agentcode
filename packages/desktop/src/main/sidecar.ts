@@ -81,6 +81,9 @@ async function stop() {
 }
 
 function prepareSidecarEnv(password: string, userDataPath: string) {
+  // The desktop app always asks before a folder's own configuration runs (the `prompt` workspace trust policy), even
+  // when the user's shell exports OPENCODE_WORKSPACE_TRUST and loadShellEnv copied it into this environment.
+  delete process.env.OPENCODE_WORKSPACE_TRUST
   Object.assign(process.env, {
     OPENCODE_SERVER_USERNAME: "opencode",
     OPENCODE_SERVER_PASSWORD: password,

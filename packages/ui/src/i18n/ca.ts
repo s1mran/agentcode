@@ -182,6 +182,31 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Copia el missatge",
   "ui.message.forkMessage": "Bifurca en una sessió nova",
   "ui.message.revertMessage": "Reverteix el missatge",
+  "ui.message.revertMessage.partial.one": "Reverteix el missatge ({{count}} fitxer no es pot restaurar)",
+  "ui.message.revertMessage.partial.other": "Reverteix el missatge ({{count}} fitxers no es poden restaurar)",
+  "ui.message.revertMessage.partial.many": "Reverteix el missatge ({{count}} fitxers no es poden restaurar)",
+  "ui.checkpoint.skipped.one": "Desfer no pot restaurar {{count}} fitxer modificat aquí",
+  "ui.checkpoint.skipped.other": "Desfer no pot restaurar {{count}} fitxers modificats aquí",
+  "ui.checkpoint.skipped.many": "Desfer no pot restaurar {{count}} fitxers modificats aquí",
+  "ui.checkpoint.reason.ignored": "ignorat, no capturat",
+  "ui.checkpoint.reason.large": "més gran de 2 MB",
+  "ui.checkpoint.reason.outside": "fora de la carpeta del projecte",
+  "ui.checkpoint.reason.offline": "fitxer al núvol no baixat",
+  "ui.checkpoint.reason.unavailable": "punts de control desactivats",
+  "ui.checkpoint.unavailable.root":
+    "Els punts de control estan desactivats perquè aquesta és l'arrel d'una unitat. Desfer no pot restaurar aquests fitxers.",
+  "ui.checkpoint.unavailable.home":
+    "Els punts de control estan desactivats a la carpeta d'inici. Obre una carpeta de projecte per poder desfer.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Els punts de control estan desactivats perquè aquesta carpeta conté les dades pròpies d'AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Els punts de control estan desactivats: aquesta carpeta té més de 20.000 fitxers sense comptar dependències ni sortida de compilació.",
+  "ui.checkpoint.unavailable.too-large":
+    "Els punts de control estan desactivats: aquesta carpeta conté més de 512 MB de fitxers.",
+  "ui.checkpoint.unavailable.slow":
+    "Els punts de control estan desactivats de moment: l'anàlisi d'aquesta carpeta ha trigat massa. Es tornarà a provar aviat.",
+  "ui.checkpoint.unavailable.no-git":
+    "Els punts de control estan desactivats: Git no està instal·lat. Instal·leu Git per poder desfer.",
   "ui.message.copyResponse": "Copia la resposta",
   "ui.message.copied": "Copiat",
   "ui.message.duration.seconds": "{{count}}s",

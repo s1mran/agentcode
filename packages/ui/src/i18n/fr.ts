@@ -192,6 +192,33 @@ export const dict = {
   "ui.message.copyMessage": "Copier le message",
   "ui.message.forkMessage": "Bifurquer vers une nouvelle session",
   "ui.message.revertMessage": "Réinitialiser à ce point",
+  "ui.message.revertMessage.partial.one": "Réinitialiser à ce point ({{count}} fichier ne peut pas être restauré)",
+  "ui.message.revertMessage.partial.other":
+    "Réinitialiser à ce point ({{count}} fichiers ne peuvent pas être restaurés)",
+  "ui.message.revertMessage.partial.many":
+    "Réinitialiser à ce point ({{count}} fichiers ne peuvent pas être restaurés)",
+  "ui.checkpoint.skipped.one": "L'annulation ne peut pas restaurer {{count}} fichier modifié ici",
+  "ui.checkpoint.skipped.other": "L'annulation ne peut pas restaurer {{count}} fichiers modifiés ici",
+  "ui.checkpoint.skipped.many": "L'annulation ne peut pas restaurer {{count}} fichiers modifiés ici",
+  "ui.checkpoint.reason.ignored": "ignoré, non capturé",
+  "ui.checkpoint.reason.large": "plus de 2 Mo",
+  "ui.checkpoint.reason.outside": "hors du dossier du projet",
+  "ui.checkpoint.reason.offline": "fichier cloud non téléchargé",
+  "ui.checkpoint.reason.unavailable": "points de contrôle désactivés",
+  "ui.checkpoint.unavailable.root":
+    "Les points de contrôle sont désactivés, car il s'agit de la racine d'un disque. L'annulation ne peut pas restaurer ces fichiers.",
+  "ui.checkpoint.unavailable.home":
+    "Les points de contrôle sont désactivés dans votre dossier personnel. Ouvrez un dossier de projet pour pouvoir annuler.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Les points de contrôle sont désactivés, car ce dossier contient les données propres à AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Les points de contrôle sont désactivés : ce dossier contient plus de 20 000 fichiers, hors dépendances et résultats de compilation.",
+  "ui.checkpoint.unavailable.too-large":
+    "Les points de contrôle sont désactivés : ce dossier contient plus de 512 Mo de fichiers.",
+  "ui.checkpoint.unavailable.slow":
+    "Les points de contrôle sont désactivés pour le moment : l'analyse de ce dossier a pris trop de temps. Nouvel essai sous peu.",
+  "ui.checkpoint.unavailable.no-git":
+    "Les points de contrôle sont désactivés : Git n'est pas installé. Installez Git pour pouvoir annuler.",
   "ui.message.copyResponse": "Copier la réponse",
   "ui.message.copied": "Copié !",
   "ui.message.interrupted": "Interrompu",

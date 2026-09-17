@@ -178,6 +178,26 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Kopeeri sõnum",
   "ui.message.forkMessage": "Hargne uude seanssi",
   "ui.message.revertMessage": "Taasta sõnum",
+  "ui.message.revertMessage.partial.one": "Taasta sõnum (taastamatuid faile: {{count}})",
+  "ui.message.revertMessage.partial.other": "Taasta sõnum (taastamatuid faile: {{count}})",
+  "ui.checkpoint.skipped.one": "Tagasivõtmine ei saa siin muudetud faile taastada: {{count}}",
+  "ui.checkpoint.skipped.other": "Tagasivõtmine ei saa siin muudetud faile taastada: {{count}}",
+  "ui.checkpoint.reason.ignored": "ignoreeritud, pole salvestatud",
+  "ui.checkpoint.reason.large": "suurem kui 2 MB",
+  "ui.checkpoint.reason.outside": "väljaspool projektikausta",
+  "ui.checkpoint.reason.offline": "pilvefail pole alla laaditud",
+  "ui.checkpoint.reason.unavailable": "kontrollpunktid väljas",
+  "ui.checkpoint.unavailable.root":
+    "Kontrollpunktid on väljas, sest see on draivi juurkaust. Tagasivõtmine ei saa neid faile taastada.",
+  "ui.checkpoint.unavailable.home":
+    "Kontrollpunktid on kodukaustas väljas. Tagasivõtmise kasutamiseks ava projektikaust.",
+  "ui.checkpoint.unavailable.data-dir": "Kontrollpunktid on väljas, sest see kaust sisaldab AgentCode'i enda andmeid.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Kontrollpunktid on väljas: selles kaustas on pärast sõltuvuste ja ehitustulemuste vahelejätmist üle 20 000 faili.",
+  "ui.checkpoint.unavailable.too-large": "Kontrollpunktid on väljas: selles kaustas on üle 512 MB faile.",
+  "ui.checkpoint.unavailable.slow":
+    "Kontrollpunktid on ajutiselt väljas: selle kausta skannimine võttis liiga kaua. Peagi proovitakse uuesti.",
+  "ui.checkpoint.unavailable.no-git": "Kontrollpunktid on väljas: Git pole installitud. Tagasivõtmiseks installi Git.",
   "ui.message.copyResponse": "Kopeeri vastus",
   "ui.message.copied": "Kopeeritud",
   "ui.message.duration.seconds": "{{count}}s",

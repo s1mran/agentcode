@@ -12,6 +12,8 @@ import { Session } from "../session/session"
 import { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import { isPdfAttachment, sniffAttachmentMime } from "@/util/media"
+import { FileReads } from "../session/file-reads"
+import { createHash } from "crypto"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -62,6 +64,8 @@ type Metadata = {
   truncated: boolean
   loaded: string[]
   display?: Display
+  /** What this read showed, for the read-before-edit ledger (session/file-reads.ts). */
+  ledger?: FileReads.View[]
 }
 
 export const ReadTool = Tool.define<
@@ -77,6 +81,7 @@ export const ReadTool = Tool.define<
     const agents = yield* Agent.Service
     const sessions = yield* Session.Service
     const scope = yield* Scope.Scope
+    const reads = yield* Effect.serviceOption(FileReads.Service)
 
     const miss = Effect.fn("ReadTool.miss")(function* (filepath: string) {
       const dir = path.dirname(filepath)
@@ -150,8 +155,13 @@ export const ReadTool = Tool.define<
       // line of the upstream splitLines pipeline) and use a tagged error to stop the
       // upstream file stream as soon as the byte cap is reached.
       const decoder = new TextDecoder("utf-8")
+      // Hashes the raw bytes on the way, so the ledger can tell a later `touch` from a real change.
+      const hash = createHash("sha256")
       yield* fs.stream(filepath).pipe(
-        Stream.map((bytes) => decoder.decode(bytes, { stream: true })),
+        Stream.map((bytes) => {
+          hash.update(bytes)
+          return decoder.decode(bytes, { stream: true })
+        }),
         Stream.splitLines,
         Stream.runForEach((text) =>
           Effect.gen(function* () {
@@ -181,7 +191,14 @@ export const ReadTool = Tool.define<
         Effect.catchTag("ReadStop", () => Effect.void),
       )
 
-      return { raw, count: flags.count, cut: flags.cut, more: flags.more, offset: opts.offset }
+      return {
+        raw,
+        count: flags.count,
+        cut: flags.cut,
+        more: flags.more,
+        offset: opts.offset,
+        hash: flags.cut ? undefined : hash.digest("hex"),
+      }
     })
 
     const isBinaryFile = (filepath: string, bytes: Uint8Array) => {
@@ -327,10 +344,25 @@ export const ReadTool = Tool.define<
       const mime = sniffAttachmentMime(sample, FSUtil.mimeType(filepath))
       const isImage = SUPPORTED_IMAGE_MIMES.has(mime)
 
+      const version = {
+        file: FileReads.key(filepath),
+        mtimeMs: stat.mtime._tag === "Some" ? stat.mtime.value.getTime() : 0,
+        size: Number(stat.size),
+        time: Date.now(),
+      }
+
       if (isImage || isPdfAttachment(mime)) {
         const bytes = yield* fs.readFile(filepath)
         const loaded = yield* nearby()
         const msg = isPdfAttachment(mime) ? "PDF read successfully" : "Image read successfully"
+        const view: FileReads.View = {
+          ...version,
+          hash: bytes.byteLength <= FileReads.HASH_MAX_BYTES ? FileReads.hashBytes(bytes) : undefined,
+          ranges: [],
+          full: true,
+          source: "read",
+        }
+        if (Option.isSome(reads)) yield* reads.value.record(ctx, [view])
         return {
           title,
           output: msg,
@@ -338,6 +370,7 @@ export const ReadTool = Tool.define<
             preview: msg,
             truncated: false,
             loaded: loaded.map((item) => item.filepath),
+            ledger: [view],
           },
           attachments: [
             {
@@ -376,6 +409,18 @@ export const ReadTool = Tool.define<
       }
       output += "\n</content>"
 
+      // A read that reached the end from line 1 saw the whole file; a ranged read only the lines it showed. When the
+      // 50 KB cap stopped the stream, the total line count and the hash are unknown.
+      const view: FileReads.View = {
+        ...version,
+        hash: file.hash !== undefined && Number(stat.size) <= FileReads.HASH_MAX_BYTES ? file.hash : undefined,
+        lines: file.cut ? undefined : file.count,
+        ranges: file.raw.length ? [[file.offset, last]] : [],
+        full: (file.offset === 1 && !file.more && !file.cut) || file.count === 0,
+        source: "read",
+      }
+      if (Option.isSome(reads)) yield* reads.value.record(ctx, [view])
+
       yield* warm(filepath)
 
       if (loaded.length > 0) {
@@ -398,6 +443,7 @@ export const ReadTool = Tool.define<
             totalLines: file.count,
             truncated,
           },
+          ledger: [view],
         },
       }
     })

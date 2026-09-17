@@ -330,10 +330,12 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
       }
 
       async function addWorkflowFiles() {
-        const envStr =
-          provider === "amazon-bedrock"
-            ? ""
-            : `\n        env:${providers[provider].env.map((e) => `\n          ${e}: \${{ secrets.${e} }}`).join("")}`
+        // Workspace trust: `github run` loads the checkout with OPENCODE_WORKSPACE_TRUST (headless in GitHub Actions when
+        // unset, `prompt` elsewhere, which holds the repository's plugins, MCP servers and allow rules). The template sets
+        // `headless` explicitly so the repository's own plugins and MCP servers keep loading while its allow rules do
+        // not; use `untrusted` for workflows that run on pull requests from forks.
+        const secrets = provider === "amazon-bedrock" ? [] : providers[provider].env
+        const envStr = `\n        env:\n          OPENCODE_WORKSPACE_TRUST: headless${secrets.map((e) => `\n          ${e}: \${{ secrets.${e} }}`).join("")}`
 
         await Filesystem.write(
           path.join(app.root, WORKFLOW_FILE),

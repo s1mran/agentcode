@@ -259,6 +259,7 @@ export default defineConfig({
             "commands",
             "formatters",
             "permissions",
+            "workspace-trust",
             "policies",
             "lsp",
             "mcp-servers",

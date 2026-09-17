@@ -2,7 +2,7 @@ import { MCP } from "@/mcp"
 import { ConfigMCPV1 } from "@opencode-ai/core/v1/config/mcp"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
-import { McpServerNotFoundError } from "../errors"
+import { McpApprovalRequiredError, McpServerNotFoundError } from "../errors"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
 import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
@@ -118,7 +118,7 @@ export const McpApi = HttpApi.make("mcp")
           params: { name: Schema.String },
           query: WorkspaceRoutingQuery,
           success: described(Schema.Boolean, "MCP server connected successfully"),
-          error: McpServerNotFoundError,
+          error: [McpServerNotFoundError, McpApprovalRequiredError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "mcp.connect",

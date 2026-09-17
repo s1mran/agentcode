@@ -295,6 +295,10 @@
                     "permissionModes": {
                       "type": "boolean",
                       "enum": [true]
+                    },
+                    "workspaceTrust": {
+                      "type": "boolean",
+                      "enum": [true]
                     }
                   },
                   "required": ["healthy", "version"],
@@ -484,6 +488,106 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.dispose({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/global/trust": {
+      "get": {
+        "tags": ["global"],
+        "operationId": "global.trust.list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Workspace trust decisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GlobalTrustEntry"
+                  },
+                  "description": "Workspace trust decisions"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "List every stored workspace trust decision, and the ones kept for this session only.",
+        "summary": "List workspace trust decisions",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.trust.list({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["global"],
+        "operationId": "global.trust.forget",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Whether a decision was removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "description": "Whether a decision was removed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequest | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Remove the trust decision stored for a folder path. Loaded instances it covered are disposed.",
+        "summary": "Forget a workspace trust decision",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.trust.forget({\n  ...\n})"
           }
         ]
       }
@@ -3517,6 +3621,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/McpServerNotFoundError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "McpApprovalRequiredError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpApprovalRequiredError"
                 }
               }
             }
@@ -7112,6 +7226,9 @@
                   },
                   "auto": {
                     "type": "boolean"
+                  },
+                  "instructions": {
+                    "type": "string"
                   }
                 },
                 "required": ["providerID", "modelID"],
@@ -8442,6 +8559,390 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.sync.history.list({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/trust": {
+      "get": {
+        "tags": ["trust"],
+        "operationId": "trust.get",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace trust state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Whether this folder is trusted, the effective mode this instance loaded with, and the project configuration held until it is trusted.",
+        "summary": "Get workspace trust",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.trust.get({\n  ...\n})"
+          }
+        ]
+      },
+      "post": {
+        "tags": ["trust"],
+        "operationId": "trust.set",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trust decision recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustDecision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "WorkspaceTrustStoreError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceTrustStoreError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Record a workspace trust decision, approving or rejecting held project MCP servers by name. Every loaded instance the decision covers reloads after the response.",
+        "summary": "Trust or restrict this folder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "trusted": {
+                    "type": "boolean"
+                  },
+                  "remember": {
+                    "type": "boolean"
+                  },
+                  "mcp": {
+                    "type": "object",
+                    "properties": {
+                      "approve": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "reject": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["trusted"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.trust.set({\n  ...\n})"
+          }
+        ]
+      },
+      "delete": {
+        "tags": ["trust"],
+        "operationId": "trust.forget",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trust decision removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustDecision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "WorkspaceTrustStoreError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceTrustStoreError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Remove the trust decision for this folder, so it is asked again. Covered instances reload.",
+        "summary": "Forget workspace trust",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.trust.forget({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/trust/mcp": {
+      "delete": {
+        "tags": ["trust"],
+        "operationId": "trust.resetMcp",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MCP server choices cleared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustDecision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "WorkspaceTrustStoreError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceTrustStoreError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Clear the approved and rejected MCP servers of this folder's configuration, so they ask for approval again. The instance reloads.",
+        "summary": "Reset project MCP server choices",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.trust.resetMcp({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/trust/mcp/{name}": {
+      "post": {
+        "tags": ["trust"],
+        "operationId": "trust.mcp",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MCP server choice recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustDecision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "WorkspaceTrustRequiredError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/WorkspaceTrustRequiredError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "McpServerNotFoundError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpServerNotFoundError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "WorkspaceTrustStoreError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceTrustStoreError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Approve or reject one held MCP server from this folder's configuration. The folder must be trusted.",
+        "summary": "Approve or reject a project MCP server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "approve": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["approve"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.trust.mcp({\n  ...\n})"
           }
         ]
       }
@@ -17046,6 +17547,20 @@
         "required": ["id", "sessionID", "messageID", "type", "snapshot"],
         "additionalProperties": false
       },
+      "PatchSkippedFile": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "enum": ["ignored", "large", "outside", "offline", "unavailable"]
+          }
+        },
+        "required": ["file", "reason"],
+        "additionalProperties": false
+      },
       "PatchPart": {
         "type": "object",
         "properties": {
@@ -17073,6 +17588,16 @@
             "items": {
               "type": "string"
             }
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PatchSkippedFile"
+            }
+          },
+          "unavailable": {
+            "type": "string",
+            "enum": ["root", "home", "data-dir", "too-many-files", "too-large", "slow", "no-git"]
           }
         },
         "required": ["id", "sessionID", "messageID", "type", "hash", "files"],
@@ -17191,6 +17716,9 @@
           "tail_start_id": {
             "type": "string",
             "pattern": "^msg"
+          },
+          "instructions": {
+            "type": "string"
           }
         },
         "required": ["id", "sessionID", "messageID", "type", "auto"],
@@ -21647,6 +22175,29 @@
         },
         "additionalProperties": false
       },
+      "GlobalTrustEntry": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["repository", "directory"]
+          },
+          "trusted": {
+            "type": "boolean"
+          },
+          "time": {
+            "type": "number"
+          },
+          "sessionOnly": {
+            "type": "boolean"
+          }
+        },
+        "required": ["path", "kind", "trusted", "time", "sessionOnly"],
+        "additionalProperties": false
+      },
       "Model": {
         "type": "object",
         "properties": {
@@ -22762,6 +23313,35 @@
         "required": ["status", "error"],
         "additionalProperties": false
       },
+      "MCPStatusPendingApproval": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["pending_approval"]
+          },
+          "reason": {
+            "type": "string",
+            "enum": ["untrusted", "pending", "changed"]
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": ["status", "reason", "source"],
+        "additionalProperties": false
+      },
+      "MCPStatusRejected": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["rejected"]
+          }
+        },
+        "required": ["status"],
+        "additionalProperties": false
+      },
       "MCPStatus": {
         "anyOf": [
           {
@@ -22778,6 +23358,12 @@
           },
           {
             "$ref": "#/components/schemas/MCPStatusNeedsClientRegistration"
+          },
+          {
+            "$ref": "#/components/schemas/MCPStatusPendingApproval"
+          },
+          {
+            "$ref": "#/components/schemas/MCPStatusRejected"
           }
         ]
       },
@@ -22806,6 +23392,26 @@
           }
         },
         "required": ["_tag", "name", "message"],
+        "additionalProperties": false
+      },
+      "McpApprovalRequiredError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["McpApprovalRequiredError"]
+          },
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "name", "reason", "message"],
         "additionalProperties": false
       },
       "Project": {
@@ -23381,6 +23987,263 @@
           }
         },
         "required": ["_tag", "sessionID", "message"],
+        "additionalProperties": false
+      },
+      "TrustHeldPlugin": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["plugin"]
+          },
+          "spec": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "spec", "source"],
+        "additionalProperties": false
+      },
+      "TrustHeldTool": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["tool"]
+          },
+          "file": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "file"],
+        "additionalProperties": false
+      },
+      "TrustHeldMcp": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["mcp"]
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["local", "remote"]
+          },
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "url": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "enum": ["untrusted", "pending", "changed", "rejected"]
+          },
+          "fingerprint": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "name", "type", "source", "reason", "fingerprint"],
+        "additionalProperties": false
+      },
+      "TrustHeldPermission": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["permission"]
+          },
+          "permission": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "permission", "pattern", "source"],
+        "additionalProperties": false
+      },
+      "TrustHeldCommand": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["command"]
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "name", "source"],
+        "additionalProperties": false
+      },
+      "TrustHeldSetting": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["setting"]
+          },
+          "key": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "key", "source"],
+        "additionalProperties": false
+      },
+      "TrustHeldItem": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/TrustHeldPlugin"
+          },
+          {
+            "$ref": "#/components/schemas/TrustHeldTool"
+          },
+          {
+            "$ref": "#/components/schemas/TrustHeldMcp"
+          },
+          {
+            "$ref": "#/components/schemas/TrustHeldPermission"
+          },
+          {
+            "$ref": "#/components/schemas/TrustHeldCommand"
+          },
+          {
+            "$ref": "#/components/schemas/TrustHeldSetting"
+          }
+        ]
+      },
+      "TrustInfo": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["repository", "directory"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["trusted", "untrusted", "unknown"]
+          },
+          "source": {
+            "type": "string",
+            "enum": ["stored", "parent", "session", "launch"]
+          },
+          "policy": {
+            "type": "string",
+            "enum": ["prompt", "headless", "trusted", "untrusted"]
+          },
+          "effective": {
+            "type": "string",
+            "enum": ["full", "headless", "restricted"]
+          },
+          "sessionOnly": {
+            "type": "boolean"
+          },
+          "held": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrustHeldItem"
+            }
+          },
+          "mcp": {
+            "type": "object",
+            "properties": {
+              "approved": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "rejected": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["approved", "rejected"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["path", "kind", "status", "policy", "effective", "sessionOnly", "held", "mcp"],
+        "additionalProperties": false
+      },
+      "TrustDecision": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["trusted", "untrusted", "unknown"]
+          },
+          "effective": {
+            "type": "string",
+            "enum": ["full", "headless", "restricted"]
+          }
+        },
+        "required": ["path", "status", "effective"],
+        "additionalProperties": false
+      },
+      "WorkspaceTrustStoreError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["WorkspaceTrustStoreError"]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "message"],
+        "additionalProperties": false
+      },
+      "WorkspaceTrustRequiredError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["WorkspaceTrustRequiredError"]
+          },
+          "path": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "path", "message"],
         "additionalProperties": false
       },
       "EventTuiPromptAppend": {
@@ -37011,6 +37874,10 @@
     {
       "name": "sync",
       "description": "Experimental HttpApi sync routes."
+    },
+    {
+      "name": "trust",
+      "description": "Workspace trust routes."
     },
     {
       "name": "tui",

@@ -24,6 +24,8 @@ import { normalizeSessionInfo } from "@/utils/session"
 import { Event } from "@opencode-ai/schema/event"
 import { blobDataUrl } from "@/utils/draft-store"
 import { isBuiltinPlanCommand, planCommandArguments } from "./permission-mode-controls"
+import { findServerCommand, parseSlash, type SlashResolution } from "@opencode-ai/core/util/slash"
+import { slashResolutionToast } from "./slash"
 
 type PendingPrompt = {
   abort: AbortController
@@ -77,9 +79,9 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
     return true
   }
 
-  const [head, ...tail] = text.split(" ")
-  const cmd = head?.startsWith("/") ? head.slice(1) : undefined
-  if (cmd && input.sync.data.command.find((item) => item.name === cmd)) {
+  const parsed = parseSlash(text)
+  const server = parsed && findServerCommand(input.sync.data.command, parsed.name)
+  if (parsed && server) {
     setBusy()
     try {
       if (!(await wait())) {
@@ -91,8 +93,8 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       await input.api.command({
         sessionID: input.draft.sessionID,
         id: messageID,
-        command: cmd,
-        arguments: tail.join(" "),
+        command: server.name,
+        arguments: parsed.args,
         agent: input.draft.agent,
         model: {
           id: input.draft.model.modelID,
@@ -242,6 +244,11 @@ type PromptSubmitInput = {
   onAbort?: () => void
   onSubmit?: () => void
   model?: ModelSelection
+  /** Resolves a typed slash command and runs desktop built-ins. */
+  slash: {
+    resolve: (text: string) => SlashResolution
+    run: (id: string, args: string) => void
+  }
 }
 
 export function createPromptSubmit(input: PromptSubmitInput) {
@@ -367,6 +374,24 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
     const requestedMode = isPlan ? "plan" : composerMode
+
+    // A `/plan <task>` resolves to the engine's plan command, so it runs through the server-command path below.
+    const slash = mode === "normal" ? input.slash.resolve(text) : ({ type: "text" } as const)
+    const slashToast = slashResolutionToast(slash, language.t)
+    if (slashToast) {
+      // The draft, history and session stay untouched, so a typo never creates an empty session.
+      showToast(slashToast)
+      return
+    }
+    if (slash.type === "builtin") {
+      // Built-ins run at once, even while a turn is working, as they do from the palette and keybinds.
+      input.addToHistory(currentPrompt, mode)
+      input.resetHistoryNavigation()
+      submission.target().set([{ type: "text", content: "", start: 0, end: 0 }, ...images], 0)
+      input.setPopover(null)
+      input.slash.run(slash.id, slash.args)
+      return
+    }
 
     const modelSelection = input.model ?? local.model
     const currentModel = modelSelection.current()
@@ -559,40 +584,35 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       return
     }
 
-    if (text.startsWith("/")) {
-      const [cmdName, ...args] = text.split(" ")
-      const commandName = cmdName.slice(1)
-      const customCommand = sync().data.command.find((c) => c.name === commandName)
-      if (customCommand) {
-        clearInput()
-        const messageID = Identifier.ascending("message")
-        serverSync().session.set("session_status", session.id, { type: "busy" })
-        sdk()
-          .api.session.command({
-            sessionID: session.id,
-            id: messageID,
-            command: commandName,
-            arguments: args.join(" "),
-            agent,
-            model: { id: model.modelID, providerID: model.providerID, variant },
-            permissionMode: sendMode,
-            files: await Promise.all(
-              images.map(async (attachment) => ({
-                uri: await blobDataUrl(attachment.blob, attachment.mime),
-                name: attachment.filename,
-              })),
-            ),
+    if (slash.type === "server") {
+      clearInput()
+      const messageID = Identifier.ascending("message")
+      serverSync().session.set("session_status", session.id, { type: "busy" })
+      sdk()
+        .api.session.command({
+          sessionID: session.id,
+          id: messageID,
+          command: slash.name,
+          arguments: slash.args,
+          agent,
+          model: { id: model.modelID, providerID: model.providerID, variant },
+          permissionMode: sendMode,
+          files: await Promise.all(
+            images.map(async (attachment) => ({
+              uri: await blobDataUrl(attachment.blob, attachment.mime),
+              name: attachment.filename,
+            })),
+          ),
+        })
+        .catch((err) => {
+          serverSync().session.set("session_status", session.id, { type: "idle" })
+          showToast({
+            title: language.t("prompt.toast.commandSendFailed.title"),
+            description: formatServerError(err, language.t, language.t("common.requestFailed")),
           })
-          .catch((err) => {
-            serverSync().session.set("session_status", session.id, { type: "idle" })
-            showToast({
-              title: language.t("prompt.toast.commandSendFailed.title"),
-              description: formatServerError(err, language.t, language.t("common.requestFailed")),
-            })
-            restoreInput()
-          })
-        return
-      }
+          restoreInput()
+        })
+      return
     }
 
     const commentItems = context.filter((item) => item.type === "file" && !!item.comment?.trim())

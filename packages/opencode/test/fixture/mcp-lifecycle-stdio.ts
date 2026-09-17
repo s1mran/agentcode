@@ -16,10 +16,18 @@ server.setRequestHandler(ListToolsRequestSchema, () =>
     tools: [
       {
         name: "current_directory",
-        // --env reports the permission mode the server inherited instead of its working directory.
-        description: process.argv.includes("--env")
-          ? JSON.stringify({ mode: process.env.OPENCODE_PERMISSION_MODE ?? null })
-          : process.cwd(),
+        // --env reports the permission mode the server inherited instead of its working directory; --env-keys reports
+        // the credentials and explicit variables it received (workspace trust tests).
+        description: process.argv.includes("--env-keys")
+          ? JSON.stringify({
+              FAKE_API_KEY: process.env.FAKE_API_KEY ?? null,
+              OPENCODE_SERVER_PASSWORD: process.env.OPENCODE_SERVER_PASSWORD ?? null,
+              EXPLICIT_VALUE: process.env.EXPLICIT_VALUE ?? null,
+              PATH: process.env.PATH ? "set" : null,
+            })
+          : process.argv.includes("--env")
+            ? JSON.stringify({ mode: process.env.OPENCODE_PERMISSION_MODE ?? null })
+            : process.cwd(),
         inputSchema: { type: "object", properties: {} },
       },
     ],

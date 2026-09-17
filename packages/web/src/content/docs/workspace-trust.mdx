@@ -1,0 +1,104 @@
+---
+title: Workspace trust
+description: Decide whether a folder's own configuration may run on your machine.
+---
+
+A repository can ship configuration that runs code: plugins, custom tools, MCP servers, shell commands in slash commands, and permission rules that approve actions for you. Opening a folder should not run any of that until you decide you trust it.
+
+The first time you open a folder, AgentCode asks **Trust this folder?** and lists what the folder's configuration would run. Until you answer, the folder runs in **restricted mode**.
+
+---
+
+## What waits for trust
+
+The engine enforces trust while it loads configuration, so the desktop app, the TUI, `serve`, `run` and ACP all apply the same rules. Your own global configuration (`~/.config/agentcode`), managed configuration, `OPENCODE_CONFIG_CONTENT` and `OPENCODE_PERMISSION` are always trusted.
+
+| From the folder's configuration                                                                | Restricted (not trusted) | Headless (`run`, `acp`) | Trusted                |
+| ---------------------------------------------------------------------------------------------- | ------------------------ | ----------------------- | ---------------------- |
+| Plugins (`plugin`, `.opencode/plugins/*`)                                                      | Held                     | Loads                   | Loads                  |
+| Custom tools (`.opencode/tools/*`)                                                             | Held                     | Loads                   | Loads                  |
+| MCP servers (`mcp`)                                                                            | Held (pending approval)  | Connect                 | Connect when approved  |
+| `permission` and agent `allow` rules                                                           | Held                     | Held                    | Apply                  |
+| `deny` and `ask` rules                                                                         | Apply                    | Apply                   | Apply                  |
+| `default_permission_mode: acceptEdits`                                                         | Held                     | Held                    | Applies                |
+| Commands whose template runs shell (`` !`cmd` ``)                                              | Held                     | Load                    | Load                   |
+| `shell`, `provider`, `lsp`/`formatter` commands, `server`, `share`, `enterprise`, `references` | Held                     | Apply                   | Apply                  |
+| Instruction URLs and instruction files outside the folder, `skills.urls`, skill paths outside  | Held                     | Apply                   | Apply                  |
+| Instruction files and skills inside the folder, themes, keybinds, `model`, `compaction`        | Apply                    | Apply                   | Apply                  |
+| `{env:NAME}` for credential-like variables, `{file:...}` outside the folder                    | Read as empty            | Substituted             | Substituted            |
+| `.opencode/settings.local.json` in a repository ("Allow always" answers)                       | Not read                 | Applies when untracked  | Applies when untracked |
+| TUI plugins from the folder's `tui.json`                                                       | Held                     | Load                    | Load                   |
+
+Restricted mode uses an allowlist: a configuration key added in a later version is held until it is known to be safe.
+
+When a folder is restricted, **Allow always** answers last for the session instead of being written to `.opencode/settings.local.json`, because a file dropped into a fresh checkout cannot be told apart from one you wrote.
+
+---
+
+## Which folder is trusted
+
+- Inside a git repository, trust covers the whole repository. Every worktree of a trusted repository is trusted too. A worktree counts only when the main repository's own `.git/worktrees` records it, so a folder that ships a `.git` file pointing at another repository needs its own trust.
+- A nested repository (a submodule or a clone inside another folder) needs its own trust.
+- Outside a repository, trust covers the folder and the folders inside it, except nested repositories. A closer decision wins, so a restricted subfolder of a trusted folder stays restricted.
+- Your home folder and `/` are trusted for the session only and never saved. A git repository at your home folder (a dotfiles repository) does not cover the folders under it: each is trusted on its own, like a folder outside a repository.
+
+Decisions are stored outside every repository, in `~/.local/share/agentcode/trust/workspaces.json`. Setting `"trusted": true` for a folder by hand counts as trust. Tools cannot edit this file: writes to it always ask, whatever your permission rules or mode.
+
+---
+
+## MCP servers
+
+Trusting a folder approves the MCP servers you leave checked in the dialog. After that:
+
+- A server added to the folder's configuration later shows **pending approval** until you approve it.
+- A server whose command, working directory, environment variable names, URL, header names or OAuth setting changes shows **changed since approval**. They are compared as written, with `{env:...}` and `{file:...}` left in place, so rotating a token does not ask again, even when the token is part of the command or URL.
+- A rejected server stays rejected.
+
+Approve or reject a server from the MCP list in the app or the TUI. A held server that has the same name as one in your own configuration uses your definition.
+
+MCP servers from a folder's configuration never receive credentials from AgentCode's environment, trusted or not: variables whose names contain `TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `KEY`, `AUTH` or `CREDENTIAL` are removed, along with the server password, proxies whose URL includes a user name or password, and the launch settings. `GIT_CONFIG_KEY_<n>`, `SSH_AUTH_SOCK`, `XAUTHORITY` and proxies without credentials are kept. The server's own `environment` entries still apply, so `"environment": { "GITHUB_TOKEN": "{env:GITHUB_TOKEN}" }` passes a token on purpose.
+
+In restricted mode, `{env:NAME}` in a folder's configuration reads as empty for every credential-like variable (such as `ANTHROPIC_API_KEY`, `GITHUB_TOKEN` or `MY_SERVICE_TOKEN`), and every `{file:...}` outside the folder reads as empty too. In a trusted folder and in headless runs both are substituted as in your own configuration, as Claude Code does for project MCP configuration.
+
+---
+
+## Headless runs
+
+`agentcode run` and `agentcode acp` never ask, and never wait for an answer. Like Claude Code's `-p`, they run **headless**: the folder's plugins, tools and MCP servers load, while its allow rules do not. A one-line warning goes to stderr when allow rules were ignored. In a trusted folder a headless run loads everything and connects servers you have not approved yet, so trusting a folder never makes a headless run load less; servers you rejected stay off.
+
+| Policy                               | Effect                                                                               |
+| ------------------------------------ | ------------------------------------------------------------------------------------ |
+| `--trust`                            | Trusts the folder for this process only. Nothing is saved.                           |
+| `agentcode trust --yes`              | Saves the folder as trusted, for scripts and CI.                                     |
+| `OPENCODE_WORKSPACE_TRUST=untrusted` | Restricted even if the folder is trusted. Use it for CI on pull requests from forks. |
+| `OPENCODE_DISABLE_PROJECT_CONFIG=1`  | Ignores the folder's configuration entirely.                                         |
+
+`OPENCODE_WORKSPACE_TRUST` accepts `prompt` (the default: undecided folders run restricted until a client asks), `headless`, `trusted` and `untrusted`. It applies to the process that reads it only and is never passed on to shell commands, MCP servers or nested agents. The desktop app ignores it and always asks.
+
+`agentcode serve` uses the `prompt` policy, so SDK users of `serve` get restricted mode for undecided folders unless they set `OPENCODE_WORKSPACE_TRUST=headless` or trust the folder. `agentcode github run` reads the variable too. Without it, `github run` is headless inside GitHub Actions (so workflows generated before workspace trust keep working), and the generated workflow sets `headless` explicitly. Set `untrusted` for workflows that run on pull requests from forks.
+
+---
+
+## Change a decision
+
+- **Desktop app:** Settings > Workspace trust shows the current folder's decision (trust, restrict, forget, reset MCP choices) and every stored decision.
+- **Terminal:** use [`agentcode trust`](/docs/cli#trust).
+
+```bash
+agentcode trust --status           # what the folder supplies and what is held
+agentcode trust --yes              # trust it without asking
+agentcode trust --revoke           # restricted mode
+agentcode trust --forget           # ask again next time
+agentcode trust --list             # every stored decision
+agentcode mcp reset-project-choices
+```
+
+Changing trust reloads the folder's project, which stops sessions running in it.
+
+---
+
+## Known limits
+
+- Built-in language servers and formatters can still run binaries from the folder's `node_modules` while it is restricted.
+- A folder's `AGENTS.md`, skills and instruction files still reach the model, so a hostile repository can try prompt injection.
+- Trust does not protect you from a folder you trust. Only trust folders from people you trust.

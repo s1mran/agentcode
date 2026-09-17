@@ -52,7 +52,20 @@ const run = Effect.fn("Cli.debug.agent.body")(function* (
     }
     const params = parseToolParams(args.params)
     const toolCtx = yield* createToolContext(agent, ctx)
-    const result = yield* tool.execute(params, toolCtx)
+    const result = yield* tool.execute(params, toolCtx).pipe(
+      Effect.tapCause((cause) =>
+        Effect.sync(() => {
+          // Each debug run is a new session with no reads, so edit, write and apply_patch refuse existing files.
+          const error = Cause.squash(cause)
+          const message = error instanceof Error ? error.message : String(error)
+          if (!message.includes("with the read tool before you")) return
+          process.stderr.write(
+            "Debug tool runs start a new session that has read nothing. Set OPENCODE_DISABLE_FILE_READ_CHECK=true to edit or overwrite existing files here." +
+              EOL,
+          )
+        }),
+      ),
+    )
     process.stdout.write(JSON.stringify({ tool: toolID, input: params, result }, null, 2) + EOL)
     return
   }

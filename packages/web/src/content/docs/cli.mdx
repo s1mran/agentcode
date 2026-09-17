@@ -303,6 +303,39 @@ opencode mcp debug <name>
 
 ---
 
+#### reset-project-choices
+
+Clear the approved and rejected MCP servers of the current folder's configuration, so they ask for approval again.
+
+```bash
+opencode mcp reset-project-choices
+```
+
+---
+
+### trust
+
+Review and trust the configuration a folder supplies: plugins, custom tools, MCP servers and allow rules. See [Workspace trust](/docs/workspace-trust).
+
+```bash
+opencode trust [dir]
+```
+
+Without flags it lists what the folder would run and asks for confirmation. When stdin is not a terminal, pass `--yes`.
+
+#### Flags
+
+| Flag                                      | Description                                                       |
+| ----------------------------------------- | ----------------------------------------------------------------- |
+| <nobr><code>{"--yes"}</code></nobr>       | Trust without asking                                              |
+| <nobr><code>{"--revoke"}</code></nobr>    | Store the folder as untrusted (restricted mode)                   |
+| <nobr><code>{"--forget"}</code></nobr>    | Remove the decision, so the folder is asked about again           |
+| <nobr><code>{"--status"}</code></nobr>    | Print the trust state and what is held (`--format json` for JSON) |
+| <nobr><code>{"--list"}</code></nobr>      | List every stored decision                                        |
+| <nobr><code>{"--reset-mcp"}</code></nobr> | Clear the approved and rejected MCP servers for the folder        |
+
+---
+
 ### models
 
 List all available models from configured providers.
@@ -382,6 +415,9 @@ opencode run --attach http://localhost:4096 "Explain async/await in JavaScript"
 | <nobr><code>{"--variant"}</code></nobr>  |       | Model variant (provider-specific reasoning effort)                         |
 | <nobr><code>{"--thinking"}</code></nobr> |       | Show thinking blocks                                                       |
 | <nobr><code>{"--auto"}</code></nobr>     |       | Auto-approve permissions that are not explicitly denied                    |
+| <nobr><code>{"--trust"}</code></nobr>    |       | Trust the folder for this run only (applies its allow rules; not saved)    |
+
+A non-interactive `run` never asks about workspace trust: it loads the folder's plugins and MCP servers, ignores the folder's allow rules, and prints a warning to stderr when it did. `--trust` cannot be combined with `--attach`, because the attached server decides trust for its folders. See [Workspace trust](/docs/workspace-trust#headless-runs).
 
 ---
 
@@ -540,6 +576,9 @@ This command starts an ACP server that communicates via stdin/stdout using nd-JS
 | <nobr><code>{"--mdns"}</code></nobr>        | Enable mDNS discovery                      |
 | <nobr><code>{"--mdns-domain"}</code></nobr> | Custom mDNS domain name                    |
 | <nobr><code>{"--cors"}</code></nobr>        | Additional browser origin(s) to allow CORS |
+| <nobr><code>{"--trust"}</code></nobr>       | Trust the folder for this process only     |
+
+ACP never asks about workspace trust. Like `run`, it loads the folder's plugins and MCP servers and ignores the folder's allow rules unless you pass `--trust`.
 
 ---
 
@@ -677,33 +716,35 @@ The opencode CLI takes the following global flags.
 
 OpenCode can be configured using environment variables.
 
-| Variable                              | Type    | Description                                       |
-| ------------------------------------- | ------- | ------------------------------------------------- |
-| `OPENCODE_AUTO_SHARE`                 | boolean | Automatically share sessions                      |
-| `OPENCODE_GIT_BASH_PATH`              | string  | Path to Git Bash executable on Windows            |
-| `OPENCODE_CONFIG`                     | string  | Path to config file                               |
-| `OPENCODE_TUI_CONFIG`                 | string  | Path to TUI config file                           |
-| `OPENCODE_CONFIG_DIR`                 | string  | Path to config directory                          |
-| `OPENCODE_CONFIG_CONTENT`             | string  | Inline json config content                        |
-| `OPENCODE_DISABLE_AUTOUPDATE`         | boolean | Disable automatic update checks                   |
-| `OPENCODE_DISABLE_PRUNE`              | boolean | Disable pruning of old data                       |
-| `OPENCODE_DISABLE_TERMINAL_TITLE`     | boolean | Disable automatic terminal title updates          |
-| `OPENCODE_PERMISSION`                 | string  | Inlined json permissions config                   |
-| `OPENCODE_DISABLE_DEFAULT_PLUGINS`    | boolean | Disable default plugins                           |
-| `OPENCODE_DISABLE_LSP_DOWNLOAD`       | boolean | Disable automatic LSP server downloads            |
-| `OPENCODE_ENABLE_EXPERIMENTAL_MODELS` | boolean | Enable experimental models                        |
-| `OPENCODE_DISABLE_AUTOCOMPACT`        | boolean | Disable automatic context compaction              |
-| `OPENCODE_DISABLE_CLAUDE_CODE`        | boolean | Disable reading from `.claude` (prompt + skills)  |
-| `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` | boolean | Disable reading `~/.claude/CLAUDE.md`             |
-| `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` | boolean | Disable loading `.claude/skills`                  |
-| `OPENCODE_DISABLE_MODELS_FETCH`       | boolean | Disable fetching models from remote sources       |
-| `OPENCODE_DISABLE_MOUSE`              | boolean | Disable mouse capture in the TUI                  |
-| `OPENCODE_FAKE_VCS`                   | string  | Fake VCS provider for testing purposes            |
-| `OPENCODE_CLIENT`                     | string  | Client identifier (defaults to `cli`)             |
-| `OPENCODE_ENABLE_EXA`                 | boolean | Enable Exa web search tools                       |
-| `OPENCODE_SERVER_PASSWORD`            | string  | Enable basic auth for `serve`/`web`               |
-| `OPENCODE_SERVER_USERNAME`            | string  | Override basic auth username (default `opencode`) |
-| `OPENCODE_MODELS_URL`                 | string  | Custom URL for fetching models configuration      |
+| Variable                              | Type    | Description                                                            |
+| ------------------------------------- | ------- | ---------------------------------------------------------------------- |
+| `OPENCODE_AUTO_SHARE`                 | boolean | Automatically share sessions                                           |
+| `OPENCODE_GIT_BASH_PATH`              | string  | Path to Git Bash executable on Windows                                 |
+| `OPENCODE_CONFIG`                     | string  | Path to config file                                                    |
+| `OPENCODE_TUI_CONFIG`                 | string  | Path to TUI config file                                                |
+| `OPENCODE_CONFIG_DIR`                 | string  | Path to config directory                                               |
+| `OPENCODE_CONFIG_CONTENT`             | string  | Inline json config content                                             |
+| `OPENCODE_DISABLE_AUTOUPDATE`         | boolean | Disable automatic update checks                                        |
+| `OPENCODE_DISABLE_PRUNE`              | boolean | Disable pruning of old data                                            |
+| `OPENCODE_DISABLE_TERMINAL_TITLE`     | boolean | Disable automatic terminal title updates                               |
+| `OPENCODE_PERMISSION`                 | string  | Inlined json permissions config                                        |
+| `OPENCODE_DISABLE_DEFAULT_PLUGINS`    | boolean | Disable default plugins                                                |
+| `OPENCODE_DISABLE_LSP_DOWNLOAD`       | boolean | Disable automatic LSP server downloads                                 |
+| `OPENCODE_ENABLE_EXPERIMENTAL_MODELS` | boolean | Enable experimental models                                             |
+| `OPENCODE_DISABLE_AUTOCOMPACT`        | boolean | Disable automatic context compaction                                   |
+| `OPENCODE_DISABLE_CLAUDE_CODE`        | boolean | Disable reading from `.claude` (prompt + skills)                       |
+| `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` | boolean | Disable reading `~/.claude/CLAUDE.md`                                  |
+| `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` | boolean | Disable loading `.claude/skills`                                       |
+| `OPENCODE_DISABLE_MODELS_FETCH`       | boolean | Disable fetching models from remote sources                            |
+| `OPENCODE_DISABLE_MOUSE`              | boolean | Disable mouse capture in the TUI                                       |
+| `OPENCODE_FAKE_VCS`                   | string  | Fake VCS provider for testing purposes                                 |
+| `OPENCODE_CLIENT`                     | string  | Client identifier (defaults to `cli`)                                  |
+| `OPENCODE_ENABLE_EXA`                 | boolean | Enable Exa web search tools                                            |
+| `OPENCODE_SERVER_PASSWORD`            | string  | Enable basic auth for `serve`/`web`                                    |
+| `OPENCODE_SERVER_USERNAME`            | string  | Override basic auth username (default `opencode`)                      |
+| `OPENCODE_MODELS_URL`                 | string  | Custom URL for fetching models configuration                           |
+| `OPENCODE_WORKSPACE_TRUST`            | string  | Workspace trust policy: `prompt`, `headless`, `trusted` or `untrusted` |
+| `OPENCODE_DISABLE_PROJECT_CONFIG`     | boolean | Ignore the folder's own configuration entirely                         |
 
 ---
 

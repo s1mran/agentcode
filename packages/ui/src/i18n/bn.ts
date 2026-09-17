@@ -180,6 +180,26 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "বার্তা কপি করুন",
   "ui.message.forkMessage": "নতুন অধিবেশনে কাঁটাচামচ",
   "ui.message.revertMessage": "বার্তা প্রত্যাবর্তন করুন",
+  "ui.message.revertMessage.partial.one": "বার্তা প্রত্যাবর্তন করুন ({{count}}টি ফাইল পুনরুদ্ধার করা যাবে না)",
+  "ui.message.revertMessage.partial.other": "বার্তা প্রত্যাবর্তন করুন ({{count}}টি ফাইল পুনরুদ্ধার করা যাবে না)",
+  "ui.checkpoint.skipped.one": "পূর্বাবস্থায় ফেরানো এখানে পরিবর্তিত {{count}}টি ফাইল পুনরুদ্ধার করতে পারবে না",
+  "ui.checkpoint.skipped.other": "পূর্বাবস্থায় ফেরানো এখানে পরিবর্তিত {{count}}টি ফাইল পুনরুদ্ধার করতে পারবে না",
+  "ui.checkpoint.reason.ignored": "উপেক্ষিত, সংরক্ষিত হয়নি",
+  "ui.checkpoint.reason.large": "2 MB-এর চেয়ে বড়",
+  "ui.checkpoint.reason.outside": "প্রকল্প ফোল্ডারের বাইরে",
+  "ui.checkpoint.reason.offline": "ক্লাউড ফাইল ডাউনলোড করা হয়নি",
+  "ui.checkpoint.reason.unavailable": "চেকপয়েন্ট বন্ধ",
+  "ui.checkpoint.unavailable.root":
+    "এটি একটি ড্রাইভের রুট, তাই চেকপয়েন্ট বন্ধ। পূর্বাবস্থায় ফেরানো এই ফাইলগুলি পুনরুদ্ধার করতে পারবে না।",
+  "ui.checkpoint.unavailable.home":
+    "আপনার হোম ফোল্ডারে চেকপয়েন্ট বন্ধ। পূর্বাবস্থায় ফেরাতে একটি প্রকল্প ফোল্ডার খুলুন।",
+  "ui.checkpoint.unavailable.data-dir": "এই ফোল্ডারে AgentCode-এর নিজস্ব ডেটা আছে, তাই চেকপয়েন্ট বন্ধ।",
+  "ui.checkpoint.unavailable.too-many-files":
+    "চেকপয়েন্ট বন্ধ: নির্ভরতা এবং বিল্ড আউটপুট বাদ দেওয়ার পরেও এই ফোল্ডারে 20,000-এর বেশি ফাইল আছে।",
+  "ui.checkpoint.unavailable.too-large": "চেকপয়েন্ট বন্ধ: এই ফোল্ডারে 512 MB-এর বেশি ফাইল আছে।",
+  "ui.checkpoint.unavailable.slow":
+    "চেকপয়েন্ট আপাতত বন্ধ: এই ফোল্ডার স্ক্যান করতে অনেক সময় লেগেছে। শীঘ্রই আবার চেষ্টা করা হবে।",
+  "ui.checkpoint.unavailable.no-git": "চেকপয়েন্ট বন্ধ: Git ইনস্টল করা নেই। পূর্বাবস্থায় ফেরাতে Git ইনস্টল করুন।",
   "ui.message.copyResponse": "কপি প্রতিক্রিয়া",
   "ui.message.copied": "কপি করা হয়েছে",
   "ui.message.duration.seconds": "{{count}}s",

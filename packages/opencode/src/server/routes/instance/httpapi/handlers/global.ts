@@ -11,7 +11,11 @@ import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
-import { GlobalUpgradeInput } from "../groups/global"
+import { GlobalTrustForgetInput, GlobalUpgradeInput } from "../groups/global"
+import { InstanceStore } from "@/project/instance-store"
+import { WorkspaceTrust } from "@/trust"
+import { WorkspaceTrustKey } from "@/trust/key"
+import { HttpApiError } from "effect/unstable/httpapi"
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -70,9 +74,42 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const config = yield* Config.Service
     const installation = yield* Installation.Service
     const bridge = yield* EffectBridge.make()
+    const trust = yield* WorkspaceTrust.Service
+    const store = yield* InstanceStore.Service
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
-      return { healthy: true as const, version: InstallationVersion, permissionModes: true as const }
+      return {
+        healthy: true as const,
+        version: InstallationVersion,
+        permissionModes: true as const,
+        workspaceTrust: true as const,
+      }
+    })
+
+    const trustList = Effect.fn("GlobalHttpApi.trustList")(function* () {
+      return (yield* trust.list()).map((item) => ({
+        path: item.path,
+        kind: item.kind,
+        trusted: item.trusted,
+        time: item.time,
+        sessionOnly: item.sessionOnly,
+      }))
+    })
+
+    const trustForget = Effect.fn("GlobalHttpApi.trustForget")(function* (ctx: {
+      payload: typeof GlobalTrustForgetInput.Type
+    }) {
+      const removed = yield* trust
+        .forgetPath(ctx.payload.path)
+        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+      if (removed.length === 0) return false
+      // Instances loaded under a forgotten decision keep what it granted until they are disposed.
+      for (const loaded of yield* store.loaded()) {
+        const key = WorkspaceTrustKey.resolve(loaded.directory).key
+        if (!removed.some((item) => WorkspaceTrustKey.covers(item, key))) continue
+        bridge.fork(store.dispose(loaded))
+      }
+      return true
     })
 
     const event = Effect.fn("GlobalHttpApi.event")(function* () {
@@ -151,6 +188,8 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("configGet", configGet)
       .handle("configUpdate", configUpdate)
       .handle("dispose", dispose)
+      .handle("trustList", trustList)
+      .handle("trustForget", trustForget)
       .handleRaw("upgrade", upgradeRaw)
   }),
 )

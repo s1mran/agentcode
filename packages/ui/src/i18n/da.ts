@@ -164,6 +164,27 @@ export const dict = {
   "ui.message.copyMessage": "Kopier besked",
   "ui.message.forkMessage": "Forgren til ny session",
   "ui.message.revertMessage": "Nulstil til dette punkt",
+  "ui.message.revertMessage.partial.one": "Nulstil til dette punkt ({{count}} fil kan ikke gendannes)",
+  "ui.message.revertMessage.partial.other": "Nulstil til dette punkt ({{count}} filer kan ikke gendannes)",
+  "ui.checkpoint.skipped.one": "Fortryd kan ikke gendanne {{count}} fil, der er ændret her",
+  "ui.checkpoint.skipped.other": "Fortryd kan ikke gendanne {{count}} filer, der er ændret her",
+  "ui.checkpoint.reason.ignored": "ignoreret, ikke gemt",
+  "ui.checkpoint.reason.large": "større end 2 MB",
+  "ui.checkpoint.reason.outside": "uden for projektmappen",
+  "ui.checkpoint.reason.offline": "cloudfil ikke downloadet",
+  "ui.checkpoint.reason.unavailable": "checkpoints slået fra",
+  "ui.checkpoint.unavailable.root":
+    "Checkpoints er slået fra, fordi dette er roden af et drev. Fortryd kan ikke gendanne disse filer.",
+  "ui.checkpoint.unavailable.home":
+    "Checkpoints er slået fra i din hjemmemappe. Åbn en projektmappe for at kunne fortryde.",
+  "ui.checkpoint.unavailable.data-dir": "Checkpoints er slået fra, fordi denne mappe indeholder AgentCodes egne data.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Checkpoints er slået fra: denne mappe har mere end 20.000 filer, når afhængigheder og build-output springes over.",
+  "ui.checkpoint.unavailable.too-large": "Checkpoints er slået fra: denne mappe indeholder mere end 512 MB filer.",
+  "ui.checkpoint.unavailable.slow":
+    "Checkpoints er slået fra indtil videre: det tog for lang tid at scanne denne mappe. Der prøves igen om lidt.",
+  "ui.checkpoint.unavailable.no-git":
+    "Checkpoints er slået fra: Git er ikke installeret. Installer Git for at kunne fortryde.",
   "ui.message.copyResponse": "Kopier svar",
   "ui.message.copied": "Kopieret!",
   "ui.message.interrupted": "Afbrudt",

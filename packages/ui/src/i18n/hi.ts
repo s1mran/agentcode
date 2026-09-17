@@ -180,6 +180,26 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "संदेश कॉपी करें",
   "ui.message.forkMessage": "नए सेशन में फ़ोर्क करें",
   "ui.message.revertMessage": "संदेश पूर्ववत करें",
+  "ui.message.revertMessage.partial.one": "संदेश पूर्ववत करें ({{count}} फ़ाइल पुनर्स्थापित नहीं हो सकती)",
+  "ui.message.revertMessage.partial.other": "संदेश पूर्ववत करें ({{count}} फ़ाइलें पुनर्स्थापित नहीं हो सकतीं)",
+  "ui.checkpoint.skipped.one": "पूर्ववत यहाँ बदली गई {{count}} फ़ाइल को पुनर्स्थापित नहीं कर सकता",
+  "ui.checkpoint.skipped.other": "पूर्ववत यहाँ बदली गई {{count}} फ़ाइलों को पुनर्स्थापित नहीं कर सकता",
+  "ui.checkpoint.reason.ignored": "अनदेखा किया गया, सहेजा नहीं गया",
+  "ui.checkpoint.reason.large": "2 MB से बड़ी",
+  "ui.checkpoint.reason.outside": "प्रोजेक्ट फ़ोल्डर के बाहर",
+  "ui.checkpoint.reason.offline": "क्लाउड फ़ाइल डाउनलोड नहीं हुई",
+  "ui.checkpoint.reason.unavailable": "चेकपॉइंट बंद",
+  "ui.checkpoint.unavailable.root":
+    "चेकपॉइंट बंद हैं क्योंकि यह एक ड्राइव का रूट है। पूर्ववत इन फ़ाइलों को पुनर्स्थापित नहीं कर सकता।",
+  "ui.checkpoint.unavailable.home":
+    "आपके होम फ़ोल्डर में चेकपॉइंट बंद हैं। पूर्ववत पाने के लिए कोई प्रोजेक्ट फ़ोल्डर खोलें।",
+  "ui.checkpoint.unavailable.data-dir": "चेकपॉइंट बंद हैं क्योंकि इस फ़ोल्डर में AgentCode का अपना डेटा है।",
+  "ui.checkpoint.unavailable.too-many-files":
+    "चेकपॉइंट बंद हैं: निर्भरताओं और बिल्ड आउटपुट को छोड़ने के बाद भी इस फ़ोल्डर में 20,000 से अधिक फ़ाइलें हैं।",
+  "ui.checkpoint.unavailable.too-large": "चेकपॉइंट बंद हैं: इस फ़ोल्डर में 512 MB से अधिक फ़ाइलें हैं।",
+  "ui.checkpoint.unavailable.slow":
+    "चेकपॉइंट अभी बंद हैं: इस फ़ोल्डर को स्कैन करने में बहुत समय लगा। जल्द ही फिर से कोशिश की जाएगी।",
+  "ui.checkpoint.unavailable.no-git": "चेकपॉइंट बंद हैं: Git इंस्टॉल नहीं है। पूर्ववत करने के लिए Git इंस्टॉल करें।",
   "ui.message.copyResponse": "प्रतिक्रिया कॉपी करें",
   "ui.message.copied": "कॉपी किया गया",
   "ui.message.duration.seconds": "{{count}}s",

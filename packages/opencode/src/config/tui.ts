@@ -23,6 +23,10 @@ import { ConfigVariable } from "@/config/variable"
 import { Npm } from "@opencode-ai/core/npm"
 import { FormatError, FormatUnknownError } from "@/cli/error"
 import { TuiConfig } from "@opencode-ai/tui/config"
+import { WorkspaceTrustLaunch } from "@opencode-ai/core/trust/launch"
+import { WorkspaceTrustKey } from "@/trust/key"
+import { WorkspaceTrustStore } from "@/trust/store"
+import { WorkspaceTrust } from "@/trust"
 
 export const Info = TuiConfig.Info
 export type Info = TuiConfig.Info
@@ -80,9 +84,37 @@ function dropUnknownKeybinds(input: Record<string, unknown>) {
   }
 }
 
+/**
+ * Whether TUI plugins a project ships may load in this process: only in a trusted folder, or under a headless or
+ * trusted launch policy. This process has no instance, so it reads the trust store directly; a decision made after the
+ * TUI started applies on its next start.
+ */
+export function projectPluginsAllowed(directory: string) {
+  const policy = WorkspaceTrustLaunch.read()
+  if (policy === "trusted" || policy === "headless") return true
+  if (policy === "untrusted") return false
+  const state = WorkspaceTrust.compute({
+    info: WorkspaceTrustKey.resolve(directory),
+    data: WorkspaceTrustStore.readSync().data,
+    policy,
+  })
+  return state.effective !== "restricted"
+}
+
 const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: string }) {
   const afs = yield* FSUtil.Service
   let appliedOrder = 0
+  const pluginsAllowed = Flag.OPENCODE_DISABLE_PROJECT_CONFIG || projectPluginsAllowed(ctx.directory)
+  // A tui file the project ships (as opposed to the user's global, home or OPENCODE_CONFIG_DIR / OPENCODE_TUI_CONFIG).
+  const isProjectFile = (file: string) => {
+    const resolved = path.resolve(file)
+    const dir = path.dirname(resolved)
+    if (FSUtil.contains(Global.Path.config, resolved)) return false
+    if (dir === path.join(Global.Path.home, ".opencode")) return false
+    if (Flag.OPENCODE_CONFIG_DIR && dir === path.resolve(Flag.OPENCODE_CONFIG_DIR)) return false
+    if (Flag.OPENCODE_TUI_CONFIG && resolved === path.resolve(Flag.OPENCODE_TUI_CONFIG)) return false
+    return true
+  }
 
   const resolvePlugins = (config: Info, configFilepath: string): Effect.Effect<Info> =>
     Effect.gen(function* () {
@@ -153,6 +185,15 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
         appliedOrder += 1
         yield* Effect.logInfo("applying tui config", { path: file, order: appliedOrder })
       }
+      if (data.plugin?.length && !pluginsAllowed && isProjectFile(file)) {
+        yield* Effect.logWarning("tui plugins from this folder wait for workspace trust", {
+          path: file,
+          plugins: data.plugin.length,
+        })
+        const { plugin: _held, ...rest } = data
+        acc.result = mergeDeep(acc.result, rest)
+        return
+      }
       acc.result = mergeDeep(acc.result, data)
       if (!data.plugin?.length) return
 
@@ -221,7 +262,9 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
   return {
     config: result,
     pluginOrigins: acc.plugin_origins,
-    dirs: result.plugin?.length ? dirs : [],
+    dirs: result.plugin?.length
+      ? dirs.filter((dir) => pluginsAllowed || !isProjectFile(path.join(dir, "tui.json")))
+      : [],
   }
 })
 

@@ -29,6 +29,8 @@ import { DbCommand } from "./cli/cmd/db"
 import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
 import { Heap } from "./cli/heap"
+import { TrustCommand } from "./cli/cmd/trust"
+import { WorkspaceTrustLaunch } from "@opencode-ai/core/trust/launch"
 
 const args = hideBin(process.argv)
 
@@ -72,6 +74,10 @@ const cli = yargs(args)
 
     Heap.start()
 
+    // The workspace trust policy is this process's setting: take it out of the environment before anything is spawned,
+    // so no shell command, MCP server or nested agent inherits a `trusted` policy. read() still returns it.
+    WorkspaceTrustLaunch.claim()
+
     process.env.AGENT = "1"
     process.env.OPENCODE = "1"
     process.env.OPENCODE_PID = String(process.pid)
@@ -80,6 +86,7 @@ const cli = yargs(args)
   .completion("completion", "generate shell completion script")
   .command(AcpCommand)
   .command(McpCommand)
+  .command(TrustCommand)
   .command(TuiThreadCommand)
   .command(AttachCommand)
   .command(RunCommand)

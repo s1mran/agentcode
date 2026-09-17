@@ -4,7 +4,7 @@
 // https://github.com/cline/cline/blob/main/evals/diff-edits/diff-apply/diff-06-26-25.ts
 
 import * as path from "path"
-import { Effect, Schema, Semaphore } from "effect"
+import { Effect, Option, Schema } from "effect"
 import * as Tool from "./tool"
 import { LSP } from "@/lsp/lsp"
 import { createTwoFilesPatch, diffLines } from "diff"
@@ -19,6 +19,7 @@ import { assertExternalDirectoryEffect } from "./external-directory"
 import { PlanEditGuard } from "./plan-edit-guard"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import * as Bom from "@/util/bom"
+import { FileReads } from "../session/file-reads"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -33,16 +34,11 @@ function convertToLineEnding(text: string, ending: "\n" | "\r\n"): string {
   return text.replaceAll("\n", "\r\n")
 }
 
-const locks = new Map<string, Semaphore.Semaphore>()
-
-function lock(filePath: string) {
-  const resolvedFilePath = FSUtil.resolve(filePath)
-  const hit = locks.get(resolvedFilePath)
-  if (hit) return hit
-
-  const next = Semaphore.makeUnsafe(1)
-  locks.set(resolvedFilePath, next)
-  return next
+/** Exact, non-overlapping occurrences of `search` in `text`. */
+function occurrences(text: string, search: string) {
+  let count = 0
+  for (let index = text.indexOf(search); index !== -1; index = text.indexOf(search, index + search.length)) count++
+  return count
 }
 
 export const Parameters = Schema.Struct({
@@ -64,6 +60,8 @@ export const EditTool = Tool.define(
     const format = yield* Format.Service
     const events = yield* EventV2Bridge.Service
     const denyPlanModeEdits = yield* PlanEditGuard.make
+    // Optional so isolated tool tests keep working; the tool registry always provides it.
+    const reads = Option.getOrUndefined(yield* Effect.serviceOption(FileReads.Service))
 
     return {
       description: DESCRIPTION,
@@ -88,7 +86,10 @@ export const EditTool = Tool.define(
           let diff = ""
           let contentOld = ""
           let contentNew = ""
-          yield* lock(filePath).withPermits(1)(
+          const notes: string[] = []
+          let ledger: FileReads.View[] | undefined
+          yield* FileReads.withLock(
+            [filePath],
             Effect.gen(function* () {
               if (params.oldString === "") {
                 const existed = yield* afs.existsSafe(filePath)
@@ -111,9 +112,26 @@ export const EditTool = Tool.define(
                     diff,
                   },
                 })
+                if (yield* FileReads.changedSince(afs, filePath, undefined)) {
+                  throw new Error(FileReads.raceError(filePath))
+                }
                 yield* afs.writeWithDirs(filePath, Bom.join(contentNew, desiredBom))
-                if (yield* format.file(filePath)) {
-                  contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)
+                const written = contentNew
+                const formatted = yield* FileReads.formatWritten(format, afs, filePath, desiredBom, written)
+                contentNew = formatted.text
+                notes.push(...formatted.notes)
+                if (reads) {
+                  const view = yield* FileReads.recordWrite(afs, filePath, {
+                    base: undefined,
+                    before: "",
+                    written,
+                    final: contentNew,
+                    source: "edit",
+                  })
+                  if (view) {
+                    yield* reads.record(ctx, [view])
+                    ledger = [view]
+                  }
                 }
                 yield* events.publish(FileSystem.Event.Edited, { file: filePath })
                 yield* events.publish(Watcher.Event.Updated, {
@@ -126,16 +144,45 @@ export const EditTool = Tool.define(
               const info = yield* afs.stat(filePath).pipe(Effect.catch(() => Effect.succeed(undefined)))
               if (!info) throw new Error(`File ${filePath} not found`)
               if (info.type === "Directory") throw new Error(`Path is a directory, not a file: ${filePath}`)
-              const source = yield* Bom.readFile(afs, filePath)
-              contentOld = source.text
+              const snap = yield* FileReads.read(afs, filePath)
+              contentOld = snap.text
 
               const ending = detectLineEnding(contentOld)
               const old = convertToLineEnding(normalizeLineEndings(params.oldString), ending)
               const replacement = convertToLineEnding(normalizeLineEndings(params.newString), ending)
 
-              const next = Bom.split(replace(contentOld, old, replacement, params.replaceAll))
-              const desiredBom = source.bom || next.bom
+              // Read-before-edit (session/file-reads.ts): the file must have been read in this session, the lines this
+              // edit replaces must be among the lines read, and a file changed on disk since is only edited where
+              // oldString matches it exactly, so a fuzzy match can never land on text the model has not seen. That
+              // leniency needs a whole-file read: after a partial one, the lines read cannot be mapped onto the new
+              // version, so an exact match could land on lines the model never saw.
+              const status = reads ? yield* reads.status(ctx, filePath, snap) : undefined
+              const enforce = reads?.enforce === true
+              if (enforce && status?.kind === "unread") throw new Error(FileReads.unreadError(filePath, "edit"))
+              const exact =
+                status?.kind === "changed" && (status.entry.full || !enforce) && old !== replacement
+                  ? occurrences(contentOld, old)
+                  : 0
+              const changedOnDisk = exact === 1 || (exact > 1 && params.replaceAll === true)
+              if (enforce && status?.kind === "changed" && !changedOnDisk) {
+                throw new Error(FileReads.changedError(filePath, "edit"))
+              }
+
+              const next = Bom.split(
+                changedOnDisk
+                  ? contentOld.split(old).join(replacement)
+                  : replace(contentOld, old, replacement, params.replaceAll),
+              )
+              const desiredBom = snap.bom || next.bom
               contentNew = next.text
+
+              // A full view covers every line, so the diff is only worth running for a partial one.
+              if (enforce && status?.kind === "fresh" && !status.entry.full) {
+                const need = FileReads.touched(contentOld, contentNew, status.entry)
+                if (!FileReads.covers(status.entry, need)) {
+                  throw new Error(FileReads.partialError(filePath, status.entry, need))
+                }
+              }
 
               diff = trimDiff(
                 createTwoFilesPatch(
@@ -154,10 +201,28 @@ export const EditTool = Tool.define(
                   diff,
                 },
               })
+              // The file may have changed while the prompt was open: never overwrite that.
+              if (yield* FileReads.changedSince(afs, filePath, snap)) throw new Error(FileReads.raceError(filePath))
 
               yield* afs.writeWithDirs(filePath, Bom.join(contentNew, desiredBom))
-              if (yield* format.file(filePath)) {
-                contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)
+              if (changedOnDisk) notes.push(FileReads.changedNote(filePath))
+              const written = contentNew
+              const formatted = yield* FileReads.formatWritten(format, afs, filePath, desiredBom, written)
+              contentNew = formatted.text
+              notes.push(...formatted.notes)
+              if (reads) {
+                // Own edits count as reads. After a changed-on-disk edit only the edited lines count as seen.
+                const view = yield* FileReads.recordWrite(afs, filePath, {
+                  base: status?.kind === "fresh" ? status.entry : undefined,
+                  before: contentOld,
+                  written,
+                  final: contentNew,
+                  source: "edit",
+                })
+                if (view) {
+                  yield* reads.record(ctx, [view])
+                  ledger = [view]
+                }
               }
               yield* events.publish(FileSystem.Event.Edited, { file: filePath })
               yield* events.publish(Watcher.Event.Updated, {
@@ -197,6 +262,7 @@ export const EditTool = Tool.define(
           })
 
           let output = "Edit applied successfully."
+          if (notes.length > 0) output += `\n\n${notes.join("\n\n")}`
           yield* lsp.touchFile(filePath, "document")
           const diagnostics = yield* lsp.diagnostics()
           const normalizedFilePath = FSUtil.normalizePath(filePath)
@@ -208,6 +274,7 @@ export const EditTool = Tool.define(
               diagnostics,
               diff,
               filediff,
+              ...(ledger ? { ledger } : {}),
             },
             title: `${path.relative(instance.worktree, filePath)}`,
             output,

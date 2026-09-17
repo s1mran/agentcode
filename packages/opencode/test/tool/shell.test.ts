@@ -21,6 +21,8 @@ import { testEffect } from "../lib/effect"
 import { Tool } from "@/tool/tool"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { InstanceStore } from "@/project/instance-store"
+import { FileReads } from "../../src/session/file-reads"
+import fs from "fs/promises"
 
 const shellLayer = Layer.mergeAll(
   LayerNode.compile(
@@ -1227,5 +1229,128 @@ describe("tool.shell truncation", () => {
         expect(lines[lineCount - 1]).toBe(String(lineCount))
       }),
     ),
+  )
+})
+
+// Read ledger (session/file-reads.ts): a single viewer command of one file counts as a read of what it printed.
+const ledgerShellLayer = Layer.mergeAll(
+  LayerNode.compile(
+    LayerNode.group([
+      CrossSpawnSpawner.node,
+      FSUtil.node,
+      Plugin.node,
+      Truncate.node,
+      Config.node,
+      Agent.node,
+      RuntimeFlags.node,
+      FileReads.node,
+    ]),
+  ),
+  testInstanceStoreLayer,
+)
+const ledgerIt = testEffect(ledgerShellLayer)
+
+describe("tool.shell read ledger", () => {
+  if (process.platform === "win32") return
+
+  const setup = Effect.gen(function* () {
+    const tmp = yield* tmpdirScoped()
+    yield* Effect.promise(async () => {
+      await Bun.write(path.join(tmp, "f.txt"), "alpha\nbeta x\ngamma\ndelta x\n")
+      await Bun.write(path.join(tmp, "sub", "f.txt"), "sub one\nsub two\n")
+    })
+    return tmp
+  })
+
+  const ledgerOf = (command: string, next: Tool.Context = ctx) =>
+    Effect.gen(function* () {
+      // The spawner occasionally loses a fast command's output ("(no output)" with exit 0). Nothing reached the model
+      // then, so nothing is recorded; retry so that race does not fail a case that expects a record.
+      for (let attempt = 1; ; attempt++) {
+        const result = yield* run({ command }, next)
+        if (result.output !== "(no output)" || attempt === 3)
+          return result.metadata.ledger as FileReads.View[] | undefined
+      }
+    })
+
+  ledgerIt.live("cat, head and grep -n record what they printed", () =>
+    Effect.gen(function* () {
+      const tmp = yield* setup
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          const reads = yield* FileReads.Service
+          const file = path.join(tmp, "f.txt")
+
+          const cat = yield* ledgerOf("cat f.txt")
+          expect(cat?.[0]?.full).toBe(true)
+          expect(cat?.[0]?.source).toBe("shell")
+          const status = yield* reads.status(ctx, file, yield* reads.snapshot(file))
+          expect(status.kind).toBe("fresh")
+          if (status.kind === "fresh") expect(status.entry.full).toBe(true)
+
+          expect((yield* ledgerOf("head -n 2 f.txt"))?.[0]?.ranges).toEqual([[1, 2]])
+          expect((yield* ledgerOf("grep -n x f.txt"))?.[0]?.ranges).toEqual([
+            [2, 2],
+            [4, 4],
+          ])
+          expect((yield* ledgerOf("sed -n 2,3p f.txt"))?.[0]?.ranges).toEqual([[2, 3]])
+          expect((yield* ledgerOf("sed -n '$p' f.txt"))?.[0]?.ranges).toEqual([[4, 4]])
+          expect((yield* ledgerOf("cd sub && cat f.txt"))?.[0]?.file).toBe(
+            FileReads.key(path.join(tmp, "sub", "f.txt")),
+          )
+        }),
+      )
+    }),
+  )
+
+  ledgerIt.live("pipelines, redirects, failures and truncated output record nothing", () =>
+    Effect.gen(function* () {
+      const tmp = yield* setup
+      yield* Effect.promise(() =>
+        Bun.write(path.join(tmp, "huge.txt"), Array.from({ length: 5000 }, (_, i) => `line ${i}`).join("\n")),
+      )
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          expect(yield* ledgerOf("cat f.txt | head -1")).toBeUndefined()
+          expect(yield* ledgerOf("cat missing.txt")).toBeUndefined()
+          expect(yield* ledgerOf("cat f.txt > g.txt")).toBeUndefined()
+          expect(yield* ledgerOf("grep x f.txt")).toBeUndefined()
+          expect(yield* ledgerOf("cat f.txt &")).toBeUndefined()
+          expect(yield* ledgerOf("cat huge.txt")).toBeUndefined()
+          // Output that never reached the model is not a read.
+          expect(yield* ledgerOf("cat f.txt > /dev/null")).toBeUndefined()
+          expect(yield* ledgerOf("cat f.txt >/dev/null 2>&1")).toBeUndefined()
+          expect(yield* ledgerOf("{ cat f.txt; } > /dev/null")).toBeUndefined()
+          expect(yield* ledgerOf("(head -n 2 f.txt) >/dev/null")).toBeUndefined()
+          expect(yield* ledgerOf("x=$(cat f.txt)")).toBeUndefined()
+          expect(yield* ledgerOf("[[ -n x ]] || cat f.txt")).toBeUndefined()
+          expect(yield* ledgerOf("show() { cat f.txt; }")).toBeUndefined()
+          expect(yield* ledgerOf("sed -n 2p f.txt > /dev/null")).toBeUndefined()
+        }),
+      )
+    }),
+  )
+
+  ledgerIt.live("a recording error never fails the command", () =>
+    Effect.gen(function* () {
+      const tmp = yield* setup
+      const file = path.join(tmp, "f.txt")
+      yield* runIn(
+        tmp,
+        Effect.gen(function* () {
+          // The file disappears once its output has arrived, before the ledger reads it.
+          const next = {
+            ...ctx,
+            metadata: (input: { metadata?: { output?: string } }) =>
+              input.metadata?.output ? Effect.promise(() => fs.rm(file, { force: true })) : Effect.void,
+          }
+          const result = yield* run({ command: "cat f.txt" }, next)
+          expect(result.metadata.exit).toBe(0)
+          expect(result.metadata.ledger).toBeUndefined()
+        }),
+      )
+    }),
   )
 })

@@ -178,6 +178,27 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Mesajı kopyala",
   "ui.message.forkMessage": "Yeni sessiyaya fork et",
   "ui.message.revertMessage": "Mesajı geri al",
+  "ui.message.revertMessage.partial.one": "Mesajı geri al ({{count}} fayl bərpa edilə bilməz)",
+  "ui.message.revertMessage.partial.other": "Mesajı geri al ({{count}} fayl bərpa edilə bilməz)",
+  "ui.checkpoint.skipped.one": "Geri alma burada dəyişdirilmiş {{count}} faylı bərpa edə bilməz",
+  "ui.checkpoint.skipped.other": "Geri alma burada dəyişdirilmiş {{count}} faylı bərpa edə bilməz",
+  "ui.checkpoint.reason.ignored": "nəzərə alınmayıb, saxlanmayıb",
+  "ui.checkpoint.reason.large": "2 MB-dan böyük",
+  "ui.checkpoint.reason.outside": "layihə qovluğundan kənarda",
+  "ui.checkpoint.reason.offline": "bulud faylı endirilməyib",
+  "ui.checkpoint.reason.unavailable": "yoxlama nöqtələri söndürülüb",
+  "ui.checkpoint.unavailable.root":
+    "Bu diskin kök qovluğu olduğu üçün yoxlama nöqtələri söndürülüb. Geri alma bu faylları bərpa edə bilməz.",
+  "ui.checkpoint.unavailable.home": "Ev qovluğunuzda yoxlama nöqtələri söndürülüb. Geri alma üçün layihə qovluğu açın.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Bu qovluqda AgentCode-un öz məlumatları olduğu üçün yoxlama nöqtələri söndürülüb.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Yoxlama nöqtələri söndürülüb: asılılıqlar və qurma nəticələri çıxıldıqdan sonra bu qovluqda 20.000-dən çox fayl var.",
+  "ui.checkpoint.unavailable.too-large": "Yoxlama nöqtələri söndürülüb: bu qovluqda 512 MB-dan çox fayl var.",
+  "ui.checkpoint.unavailable.slow":
+    "Yoxlama nöqtələri hələlik söndürülüb: bu qovluğun yoxlanması çox uzun çəkdi. Tezliklə yenidən cəhd ediləcək.",
+  "ui.checkpoint.unavailable.no-git":
+    "Yoxlama nöqtələri söndürülüb: Git quraşdırılmayıb. Geri qaytarma üçün Git quraşdırın.",
   "ui.message.copyResponse": "Cavabı kopyala",
   "ui.message.copied": "Kopyalandı",
   "ui.message.duration.seconds": "{{count}} san",

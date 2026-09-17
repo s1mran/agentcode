@@ -190,6 +190,31 @@ export const dict = {
   "ui.message.copyMessage": "Copiar mensaje",
   "ui.message.forkMessage": "Bifurcar a nueva sesión",
   "ui.message.revertMessage": "Restablecer a este punto",
+  "ui.message.revertMessage.partial.one": "Restablecer a este punto ({{count}} archivo no se puede restaurar)",
+  "ui.message.revertMessage.partial.other": "Restablecer a este punto ({{count}} archivos no se pueden restaurar)",
+  "ui.message.revertMessage.partial.many": "Restablecer a este punto ({{count}} archivos no se pueden restaurar)",
+  "ui.checkpoint.skipped.one": "Deshacer no puede restaurar {{count}} archivo cambiado aquí",
+  "ui.checkpoint.skipped.other": "Deshacer no puede restaurar {{count}} archivos cambiados aquí",
+  "ui.checkpoint.skipped.many": "Deshacer no puede restaurar {{count}} archivos cambiados aquí",
+  "ui.checkpoint.reason.ignored": "ignorado, no capturado",
+  "ui.checkpoint.reason.large": "mayor de 2 MB",
+  "ui.checkpoint.reason.outside": "fuera de la carpeta del proyecto",
+  "ui.checkpoint.reason.offline": "archivo en la nube no descargado",
+  "ui.checkpoint.reason.unavailable": "puntos de control desactivados",
+  "ui.checkpoint.unavailable.root":
+    "Los puntos de control están desactivados porque esta es la raíz de una unidad. Deshacer no puede restaurar estos archivos.",
+  "ui.checkpoint.unavailable.home":
+    "Los puntos de control están desactivados en la carpeta personal. Abre una carpeta de proyecto para poder deshacer.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Los puntos de control están desactivados porque esta carpeta contiene los datos propios de AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Los puntos de control están desactivados: esta carpeta tiene más de 20.000 archivos sin contar dependencias ni resultados de compilación.",
+  "ui.checkpoint.unavailable.too-large":
+    "Los puntos de control están desactivados: esta carpeta contiene más de 512 MB de archivos.",
+  "ui.checkpoint.unavailable.slow":
+    "Los puntos de control están desactivados por ahora: analizar esta carpeta tardó demasiado. Se volverá a intentar en breve.",
+  "ui.checkpoint.unavailable.no-git":
+    "Los puntos de control están desactivados: Git no está instalado. Instala Git para poder deshacer.",
   "ui.message.copyResponse": "Copiar respuesta",
   "ui.message.copied": "¡Copiado!",
   "ui.message.interrupted": "Interrumpido",

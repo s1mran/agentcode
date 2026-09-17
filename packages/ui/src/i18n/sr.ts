@@ -183,6 +183,30 @@ export const dict = {
   "ui.message.copyMessage": "Копирај поруку",
   "ui.message.forkMessage": "Нова грана у новој сесији",
   "ui.message.revertMessage": "Врати поруку",
+  "ui.message.revertMessage.partial.one": "Врати поруку (датотеке које се не могу вратити: {{count}})",
+  "ui.message.revertMessage.partial.other": "Врати поруку (датотеке које се не могу вратити: {{count}})",
+  "ui.message.revertMessage.partial.few": "Врати поруку (датотеке које се не могу вратити: {{count}})",
+  "ui.checkpoint.skipped.one": "Поништавање не може да врати датотеке измењене овде: {{count}}",
+  "ui.checkpoint.skipped.other": "Поништавање не може да врати датотеке измењене овде: {{count}}",
+  "ui.checkpoint.skipped.few": "Поништавање не може да врати датотеке измењене овде: {{count}}",
+  "ui.checkpoint.reason.ignored": "занемарено, није сачувано",
+  "ui.checkpoint.reason.large": "веће од 2 MB",
+  "ui.checkpoint.reason.outside": "изван фасцикле пројекта",
+  "ui.checkpoint.reason.offline": "датотека у облаку није преузета",
+  "ui.checkpoint.reason.unavailable": "контролне тачке искључене",
+  "ui.checkpoint.unavailable.root":
+    "Контролне тачке су искључене јер је ово корен диска. Поништавање не може да врати ове датотеке.",
+  "ui.checkpoint.unavailable.home":
+    "Контролне тачке су искључене у вашој почетној фасцикли. Отворите фасциклу пројекта да бисте могли да поништавате.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Контролне тачке су искључене јер ова фасцикла садржи сопствене податке AgentCode-а.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Контролне тачке су искључене: ова фасцикла има више од 20.000 датотека без зависности и излаза изградње.",
+  "ui.checkpoint.unavailable.too-large": "Контролне тачке су искључене: ова фасцикла садржи више од 512 MB датотека.",
+  "ui.checkpoint.unavailable.slow":
+    "Контролне тачке су привремено искључене: скенирање ове фасцикле је трајало предуго. Ускоро ће бити поновни покушај.",
+  "ui.checkpoint.unavailable.no-git":
+    "Контролне тачке су искључене: Git није инсталиран. Инсталирајте Git да бисте могли да поништавате.",
   "ui.message.copyResponse": "Копирај одговор",
   "ui.message.copied": "Копирано",
   "ui.message.duration.seconds": "{{count}}с",

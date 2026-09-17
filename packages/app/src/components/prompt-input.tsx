@@ -76,6 +76,8 @@ import { PermissionModePill } from "./prompt-input/permission-mode-pill"
 import { shouldCycleModeOnKey } from "./prompt-input/permission-mode-controls"
 import { resolveModeSelection } from "@/context/permission-mode"
 import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
+import { buildSlashCommands, createSlashResolver, slashTriggers } from "./prompt-input/slash"
+import { shouldOpenSlashPopover, slashNameMatches } from "@opencode-ai/core/util/slash"
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
 import { PromptDragOverlay } from "./prompt-input/drag-overlay"
@@ -698,36 +700,25 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     onSelect: handleAtSelect,
   })
 
-  const slashCommands = createMemo<SlashCommand[]>(() => {
-    const builtin = command.options
-      .filter((opt) => !opt.disabled && !opt.id.startsWith("suggested.") && opt.slash)
-      .map((opt) => ({
-        id: opt.id,
-        trigger: opt.slash!,
-        title: opt.title,
-        description: opt.description,
-        keybind: opt.keybind,
-        type: "builtin" as const,
-      }))
+  const slashCommands = createMemo<SlashCommand[]>(() =>
+    buildSlashCommands({ options: command.options, commands: sync().data.command, t: language.t }),
+  )
 
-    // The engine's plan command stays listed so picking it inserts `/plan `; submit turns it into Plan mode.
-    const custom = sync().data.command.map((cmd) => ({
-      id: `custom.${cmd.name}`,
-      trigger: cmd.name,
-      title: cmd.name,
-      description: cmd.description,
-      type: "custom" as const,
-      // source: cmd.source,
-    }))
-
-    return [...custom, ...builtin]
-  })
-
-  const handleSlashSelect = (cmd: SlashCommand | undefined) => {
+  // Tab completes a name and never runs it; Enter and click run a built-in, and run a custom command unless it takes
+  // arguments, in which case `/name ` is inserted for them.
+  const handleSlashSelect = (cmd: SlashCommand | undefined, via: "enter" | "tab" | "click" = "click") => {
     if (!cmd) return
     const menu = store.slashMenu
     closePopover()
     const images = imageAttachments()
+
+    if (via === "tab" && !menu) {
+      const text = `/${cmd.trigger} `
+      setEditorText(text)
+      prompt.set([{ type: "text", content: text, start: 0, end: text.length }, ...images], text.length)
+      focusEditorEnd()
+      return
+    }
 
     if (cmd.type === "custom") {
       const text = `/${cmd.trigger} `
@@ -738,9 +729,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         focusEditorEnd()
         return
       }
-      setEditorText(text)
-      prompt.set([{ type: "text", content: text, start: 0, end: text.length }, ...images], text.length)
-      focusEditorEnd()
+      if (cmd.hints?.length) {
+        setEditorText(text)
+        prompt.set([{ type: "text", content: text, start: 0, end: text.length }, ...images], text.length)
+        focusEditorEnd()
+        return
+      }
+      const name = `/${cmd.trigger}`
+      setEditorText(name)
+      prompt.set([{ type: "text", content: name, start: 0, end: name.length }, ...images], name.length)
+      void handleSubmit(new Event("submit"))
       return
     }
 
@@ -757,14 +755,24 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const {
     flat: slashFlat,
     active: slashActive,
+    highlighted: slashHighlighted,
     setActive: setSlashActive,
     onInput: slashOnInput,
     onKeyDown: slashOnKeyDown,
   } = useFilteredList<SlashCommand>({
     items: slashCommands,
     key: (x) => x?.id,
-    filterKeys: ["trigger", "title"],
-    onSelect: handleSlashSelect,
+    filterKeys: ["trigger", "keywords", "title"],
+    exact: (item, filter) => slashNameMatches(item, filter),
+    // The searchable menu is a search list, so Enter runs its highlighted row; typed `/name` needs a pick or exact name.
+    requireExplicitEnter: () => !store.slashMenu,
+    onSelect: (cmd) => handleSlashSelect(cmd, "enter"),
+    // No exact or picked command: submit decides, so a typo reports "Unknown command" and a path is sent as text.
+    onEnterUnmatched: (filter) => {
+      if (store.slashMenu || !filter) return
+      closePopover()
+      void handleSubmit(new Event("submit"))
+    },
   })
 
   const createPill = (part: FileAttachmentPart | AgentPart) => {
@@ -850,7 +858,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       if (items.length === 0) return
       const active = slashActive()
       const item = items.find((entry) => entry.id === active) ?? items[0]
-      handleSlashSelect(item)
+      handleSlashSelect(item, "tab")
     }
   }
 
@@ -1011,7 +1019,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       if (atMatch) {
         atOnInput(atMatch[1])
         setStore({ popover: "at", slashMenu: false, slashMenuQuery: "" })
-      } else if (slashMatch) {
+      } else if (slashMatch && shouldOpenSlashPopover(slashMatch[1], slashTriggers(slashCommands()))) {
         slashOnInput(slashMatch[1])
         setStore({ popover: "slash", slashMenu: false, slashMenuQuery: "" })
       } else {
@@ -1231,6 +1239,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       onAbort: props.onAbort,
       onSubmit: props.onSubmit,
       model: props.controls.model.selection,
+      slash: {
+        resolve: createSlashResolver({
+          options: () => command.options,
+          commands: () => sync().data.command,
+          catalog: () => command.catalog,
+        }),
+        run: (id, args) => command.trigger(id, "slash", args),
+      },
     })
 
   const handleKeyDown = (event: KeyboardEvent) => {
@@ -1459,7 +1475,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         setAtActive={setAtActive}
         onAtSelect={handleAtSelect}
         slashFlat={slashFlat()}
-        slashActive={slashActive() ?? undefined}
+        slashActive={slashHighlighted()}
         setSlashActive={setSlashActive}
         onSlashSelect={handleSlashSelect}
         slashMenu={store.slashMenu}

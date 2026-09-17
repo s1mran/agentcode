@@ -339,6 +339,11 @@ export type SnapshotPart = {
   snapshot: string
 }
 
+export type PatchSkippedFile = {
+  file: string
+  reason: "ignored" | "large" | "outside" | "offline" | "unavailable"
+}
+
 export type PatchPart = {
   id: string
   sessionID: string
@@ -346,6 +351,8 @@ export type PatchPart = {
   type: "patch"
   hash: string
   files: Array<string>
+  skipped?: Array<PatchSkippedFile>
+  unavailable?: "root" | "home" | "data-dir" | "too-many-files" | "too-large" | "slow" | "no-git"
 }
 
 export type AgentPart = {

@@ -4,6 +4,7 @@ import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
+import { Tag } from "@opencode-ai/ui/v2/badge-v2"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
@@ -103,7 +104,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
         <PromptInputV2Popover
           emptyLabel={i18n.t("ui.promptInput.noMatchingItems")}
           items={props.controller.suggestions()}
-          activeID={state.popover.type === "closed" ? undefined : state.popover.activeID}
+          activeID={props.controller.highlightedID()}
           search={
             state.popover.type === "command-menu"
               ? {
@@ -116,7 +117,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
               : undefined
           }
           onActiveChange={(item) => props.controller.dispatch({ type: "popover.active", id: item.id })}
-          onSelect={(item) => props.controller.dispatch({ type: "popover.select", item })}
+          onSelect={(item) => props.controller.dispatch({ type: "popover.select", item, via: "click" })}
         />
       </Show>
       <form
@@ -787,16 +788,26 @@ export function PromptInputV2Popover(props: {
               data-suggestion-id={item.id}
               class="flex w-full items-center gap-2 rounded-md px-2 py-1 text-start hover:bg-v2-overlay-simple-overlay-hover"
               classList={{ "bg-v2-overlay-simple-overlay-hover": props.activeID === item.id }}
-              onPointerMove={() => props.onActiveChange(item)}
+              onPointerMove={(event) => {
+                // Hover counts as an explicit pick for Enter, so ignore moves the pointer did not make.
+                if (event.movementX === 0 && event.movementY === 0) return
+                props.onActiveChange(item)
+              }}
               onClick={() => props.onSelect(item)}
             >
               <div class="flex min-w-0 flex-1 items-center gap-2">
                 <PromptInputV2SuggestionIcon item={item} />
                 <span class="shrink-0 text-v2-text-text-base">{item.label}</span>
+                <Show when={item.hint}>
+                  <span class="shrink-0 whitespace-nowrap text-v2-text-text-faint">{item.hint}</span>
+                </Show>
                 <Show when={item.description}>
                   <span class="min-w-0 truncate text-v2-text-text-muted">{item.description}</span>
                 </Show>
               </div>
+              <Show when={item.badge}>
+                <Tag>{item.badge}</Tag>
+              </Show>
               <Show when={item.keybind?.length}>
                 <span class="shrink-0 text-v2-text-text-muted">{item.keybind?.join("+")}</span>
               </Show>

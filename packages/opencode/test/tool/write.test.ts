@@ -1,9 +1,10 @@
 import { afterEach, describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Effect, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import path from "path"
 import fs from "fs/promises"
 import { WriteTool } from "../../src/tool/write"
+import { EditTool } from "../../src/tool/edit"
 import { LSP } from "@/lsp/lsp"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { EventV2Bridge } from "../../src/event-v2-bridge"
@@ -15,6 +16,14 @@ import { SessionID, MessageID } from "../../src/session/schema"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { FileReads } from "../../src/session/file-reads"
+import { ReadTool } from "../../src/tool/read"
+import { Instruction } from "../../src/session/instruction"
+import { Session } from "../../src/session/session"
+import { Ripgrep } from "@opencode-ai/core/ripgrep"
+import { Config } from "@/config/config"
+import { TestConfig } from "../fixture/config"
+import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-write-session"),
@@ -276,4 +285,189 @@ describe("tool.write", () => {
       }),
     )
   })
+})
+
+// Read-before-write ledger (session/file-reads.ts), compiled in with the read tool as the tool registry does.
+const ledgerNodes = [
+  LSP.node,
+  FSUtil.node,
+  EventV2Bridge.node,
+  Format.node,
+  CrossSpawnSpawner.node,
+  Truncate.node,
+  Agent.node,
+  FileReads.node,
+  Instruction.node,
+  Ripgrep.node,
+  Session.node,
+] as const
+const ledger = testEffect(LayerNode.compile(LayerNode.group([...ledgerNodes])))
+// Project config formatters are held until the folder is trusted, so the formatter comes from the config service.
+const formatted = testEffect(
+  LayerNode.compile(LayerNode.group([...ledgerNodes]), [
+    [
+      Config.node,
+      TestConfig.layer({
+        get: () =>
+          Effect.succeed({
+            formatter: { custom: { command: ["sh", "-c", 'printf "formatted\\n" > "$FILE"'], extensions: [".txt"] } },
+          } as ConfigV1.Info),
+      }),
+    ],
+  ]),
+)
+
+const ledgerCtx = (extra: Partial<Tool.Context> = {}): Tool.Context => ({
+  ...ctx,
+  sessionID: SessionID.make("ses_test-write-ledger"),
+  messageID: MessageID.make("msg_ledger"),
+  messages: [],
+  ...extra,
+})
+
+const readWith = Effect.fn("WriteToolTest.read")(function* (
+  filePath: string,
+  next: Tool.Context,
+  range: { offset?: number; limit?: number } = {},
+) {
+  const info = yield* ReadTool
+  const tool = yield* info.init()
+  return yield* tool.execute({ filePath, ...range }, next)
+})
+
+const failWith = Effect.fn("WriteToolTest.failWith")(function* (
+  args: Tool.InferParameters<typeof WriteTool>,
+  next: Tool.Context,
+) {
+  const exit = yield* run(args, next).pipe(Effect.exit)
+  if (Exit.isFailure(exit)) {
+    const err = Cause.squash(exit.cause)
+    return err instanceof Error ? err : new Error(String(err))
+  }
+  throw new Error("expected write to fail")
+})
+
+const text = (filepath: string) => Effect.promise(() => fs.readFile(filepath, "utf-8"))
+
+describe("tool.write read ledger", () => {
+  ledger.instance("overwriting an unread file fails and leaves it unchanged", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "unread.txt")
+      yield* Effect.promise(() => fs.writeFile(filepath, "keep\n"))
+
+      const err = yield* failWith({ filePath: filepath, content: "replaced\n" }, ledgerCtx())
+      expect(err.message).toContain("must read")
+      expect(yield* text(filepath)).toBe("keep\n")
+    }),
+  )
+
+  ledger.instance("a full read allows the overwrite, a partial read does not", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const whole = path.join(test.directory, "whole.txt")
+      const part = path.join(test.directory, "part.txt")
+      yield* Effect.promise(() => fs.writeFile(whole, "a\nb\nc\n"))
+      yield* Effect.promise(() => fs.writeFile(part, "a\nb\nc\n"))
+      const next = ledgerCtx()
+
+      yield* readWith(whole, next)
+      yield* run({ filePath: whole, content: "new\n" }, next)
+      expect(yield* text(whole)).toBe("new\n")
+
+      yield* readWith(part, next, { offset: 1, limit: 2 })
+      const err = yield* failWith({ filePath: part, content: "new\n" }, next)
+      expect(err.message).toContain("read the whole file")
+    }),
+  )
+
+  ledger.instance("an edit after a partial read does not make the whole file read (write.txt)", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "edited.txt")
+      yield* Effect.promise(() =>
+        fs.writeFile(filepath, Array.from({ length: 300 }, (_, i) => `row ${i + 1}`).join("\n") + "\n"),
+      )
+      const next = ledgerCtx()
+      const edit = yield* (yield* EditTool).init()
+
+      yield* readWith(filepath, next, { offset: 1, limit: 100 })
+      yield* edit.execute({ filePath: filepath, oldString: "row 50\n", newString: "row fifty\n" }, next)
+      const err = yield* failWith({ filePath: filepath, content: "new\n" }, next)
+      expect(err.message).toContain("only read lines 1-100")
+      expect(err.message).toContain("read the whole file")
+    }),
+  )
+
+  ledger.instance("new files need no read, and a later write of the same file needs none either", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "fresh.txt")
+      const next = ledgerCtx()
+      const first = yield* run({ filePath: filepath, content: "one\n" }, next)
+      expect(first.metadata.ledger?.[0]?.full).toBe(true)
+      yield* run({ filePath: filepath, content: "two\n" }, next)
+      expect(yield* text(filepath)).toBe("two\n")
+    }),
+  )
+
+  ledger.instance("a file changed since the read must be read again", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "changed.txt")
+      yield* Effect.promise(() => fs.writeFile(filepath, "v1\n"))
+      const next = ledgerCtx()
+      yield* readWith(filepath, next)
+      yield* Effect.promise(() => fs.writeFile(filepath, "v2 external\n"))
+
+      const err = yield* failWith({ filePath: filepath, content: "v3\n" }, next)
+      expect(err.message).toContain("modified since")
+      expect(yield* text(filepath)).toBe("v2 external\n")
+    }),
+  )
+
+  ledger.instance("writes to one file run one after the other", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "locked.txt")
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const asks: string[] = []
+      const first = yield* run(
+        { filePath: filepath, content: "first\n" },
+        ledgerCtx({
+          ask: () =>
+            Effect.gen(function* () {
+              asks.push("first")
+              yield* Deferred.succeed(entered, undefined)
+              yield* Deferred.await(release)
+            }),
+        }),
+      ).pipe(Effect.forkScoped)
+      yield* Deferred.await(entered)
+      const second = yield* run(
+        { filePath: filepath, content: "second\n" },
+        ledgerCtx({ ask: () => Effect.sync(() => void asks.push("second")) }),
+      ).pipe(Effect.forkScoped)
+      yield* Effect.sleep("30 millis")
+      expect(asks).toEqual(["first"])
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(first)
+      yield* Fiber.join(second)
+      expect(asks).toEqual(["first", "second"])
+      expect(yield* text(filepath)).toBe("second\n")
+    }),
+  )
+
+  formatted.instance("notes a formatter rewrite", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "format.txt")
+      const next = ledgerCtx()
+      const result = yield* run({ filePath: filepath, content: "raw\n" }, next)
+      expect(result.output).toContain("the formatter (custom) rewrote")
+      expect(yield* text(filepath)).toBe("formatted\n")
+      yield* run({ filePath: filepath, content: "again\n" }, next)
+    }),
+  )
 })

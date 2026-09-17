@@ -1,8 +1,15 @@
 import { Effect } from "effect"
 import { cmd } from "./cmd"
 import { effectCmd } from "../effect-cmd"
+import { WorkspaceTrustLaunch } from "@opencode-ai/core/trust/launch"
 
 export { extractResponseText, formatPromptTooLargeError, parseGitHubRemote } from "./github.shared"
+
+/** The workspace trust policy for `github run`: headless in GitHub Actions unless OPENCODE_WORKSPACE_TRUST is set. */
+export function githubTrustPolicy(env: NodeJS.ProcessEnv = process.env): WorkspaceTrustLaunch.Policy | undefined {
+  if (WorkspaceTrustLaunch.fromEnv()) return undefined
+  return env.GITHUB_ACTIONS === "true" ? "headless" : undefined
+}
 
 export const GithubInstallCommand = effectCmd({
   command: "install",
@@ -17,6 +24,10 @@ export const GithubInstallCommand = effectCmd({
 export const GithubRunCommand = effectCmd({
   command: "run",
   describe: "run the GitHub agent",
+  // The OPENCODE_WORKSPACE_TRUST variable decides. Without it, a run inside GitHub Actions is headless (workflows
+  // generated before workspace trust have no variable and cannot answer a prompt); elsewhere the default is prompt.
+  // Set untrusted for runs on pull requests from forks.
+  trustPolicy: () => githubTrustPolicy(),
   builder: (yargs) =>
     yargs
       .option("event", {

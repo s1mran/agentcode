@@ -27,6 +27,8 @@ type MessageApi = ServerApi["message"]
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+// Patch parts stay out of the store unless they carry a checkpoint notice (files undo cannot restore).
+const skipPart = (part: Part) => SKIP_PARTS.has(part.type) && !(part.type === "patch" && !!part.skipped?.length)
 const initialMessagePageSize = 20
 const historyMessagePageSize = 200
 const sessionInfoLimit = 2_048
@@ -623,9 +625,7 @@ export function createServerSession(
   ) => {
     for (const item of items) {
       if (!messageIDs.has(item.id)) continue
-      const fetched = load?.clearedMessageParts.has(item.id)
-        ? []
-        : item.part.filter((part) => !SKIP_PARTS.has(part.type))
+      const fetched = load?.clearedMessageParts.has(item.id) ? [] : item.part.filter((part) => !skipPart(part))
       const fetchedIDs = new Set(fetched.map((part) => part.id))
       const pending = pendingParts.get(sessionID)?.get(item.id)
       const touched = new Set([...(load?.touchedParts.get(item.id) ?? []), ...(pending ?? [])])
@@ -1093,7 +1093,7 @@ export function createServerSession(
       }
       case "message.part.updated": {
         const part = (event.properties as { part: Part }).part
-        if (SKIP_PARTS.has(part.type)) return
+        if (skipPart(part)) return
         const messages = data.message[part.sessionID]
         const load = messageLoads.get(part.sessionID)
         const missing = !messages?.some((message) => message.id === part.messageID)
@@ -1320,9 +1320,7 @@ export function createServerSession(
     },
     optimistic: {
       add(input: { sessionID: string; message: Message; parts: Part[] }) {
-        const parts = input.parts
-          .filter((part) => !!part?.id && !SKIP_PARTS.has(part.type))
-          .sort((a, b) => cmp(a.id, b.id))
+        const parts = input.parts.filter((part) => !!part?.id && !skipPart(part)).sort((a, b) => cmp(a.id, b.id))
         const load = messageLoads.get(input.sessionID)
         if (load?.clearedMessageParts.has(input.message.id)) {
           const touched = load.touchedParts.get(input.message.id) ?? new Set<string>()

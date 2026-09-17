@@ -185,6 +185,29 @@ export const dict = {
   "ui.message.copyMessage": "メッセージをコピー",
   "ui.message.forkMessage": "新しいセッションにフォーク",
   "ui.message.revertMessage": "この時点までリセット",
+  "ui.message.revertMessage.partial.one": "この時点までリセット（{{count}} 件のファイルは復元できません）",
+  "ui.message.revertMessage.partial.other": "この時点までリセット（{{count}} 件のファイルは復元できません）",
+  "ui.checkpoint.skipped.one": "ここで変更された {{count}} 件のファイルは元に戻せません",
+  "ui.checkpoint.skipped.other": "ここで変更された {{count}} 件のファイルは元に戻せません",
+  "ui.checkpoint.reason.ignored": "無視されたため保存されていません",
+  "ui.checkpoint.reason.large": "2 MB を超えています",
+  "ui.checkpoint.reason.outside": "プロジェクトフォルダーの外",
+  "ui.checkpoint.reason.offline": "クラウドファイルが未ダウンロード",
+  "ui.checkpoint.reason.unavailable": "チェックポイントはオフ",
+  "ui.checkpoint.unavailable.root":
+    "ドライブのルートのため、チェックポイントはオフです。これらのファイルは元に戻せません。",
+  "ui.checkpoint.unavailable.home":
+    "ホームフォルダーではチェックポイントはオフです。元に戻せるようにするには、プロジェクトフォルダーを開いてください。",
+  "ui.checkpoint.unavailable.data-dir":
+    "このフォルダーには AgentCode 自身のデータが含まれているため、チェックポイントはオフです。",
+  "ui.checkpoint.unavailable.too-many-files":
+    "チェックポイントはオフです: 依存関係とビルド出力を除いても、このフォルダーには 20,000 個を超えるファイルがあります。",
+  "ui.checkpoint.unavailable.too-large":
+    "チェックポイントはオフです: このフォルダーには 512 MB を超えるファイルがあります。",
+  "ui.checkpoint.unavailable.slow":
+    "チェックポイントは一時的にオフです: このフォルダーのスキャンに時間がかかりすぎました。まもなく再試行します。",
+  "ui.checkpoint.unavailable.no-git":
+    "チェックポイントはオフです: Git がインストールされていません。元に戻すには Git をインストールしてください。",
   "ui.message.copyResponse": "応答をコピー",
   "ui.message.copied": "コピーしました！",
   "ui.message.interrupted": "中断",

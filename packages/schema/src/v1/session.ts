@@ -91,11 +91,32 @@ export const SnapshotPart = Schema.Struct({
 }).annotate({ identifier: "SnapshotPart" })
 export type SnapshotPart = Types.DeepMutable<Schema.Schema.Type<typeof SnapshotPart>>
 
+// A file an agent edit touched that the checkpoint could not capture, so undo cannot restore it.
+export const PatchSkippedFile = Schema.Struct({
+  file: Schema.String,
+  reason: Schema.Literals(["ignored", "large", "outside", "offline", "unavailable"]),
+}).annotate({ identifier: "PatchSkippedFile" })
+export type PatchSkippedFile = Types.DeepMutable<Schema.Schema.Type<typeof PatchSkippedFile>>
+
+// Why checkpoints are off for a folder.
+export const CheckpointUnavailable = Schema.Literals([
+  "root",
+  "home",
+  "data-dir",
+  "too-many-files",
+  "too-large",
+  "slow",
+  "no-git",
+])
+export type CheckpointUnavailable = Schema.Schema.Type<typeof CheckpointUnavailable>
+
 export const PatchPart = Schema.Struct({
   ...partBase,
   type: Schema.Literal("patch"),
   hash: Schema.String,
   files: Schema.Array(Schema.String),
+  skipped: optional(Schema.Array(PatchSkippedFile)),
+  unavailable: optional(CheckpointUnavailable),
 }).annotate({ identifier: "PatchPart" })
 export type PatchPart = Types.DeepMutable<Schema.Schema.Type<typeof PatchPart>>
 
@@ -198,6 +219,8 @@ export const CompactionPart = Schema.Struct({
   auto: Schema.Boolean,
   overflow: Schema.optional(Schema.Boolean),
   tail_start_id: Schema.optional(MessageID),
+  // What the user asked a manual compaction to focus on (`/compact <focus>`).
+  instructions: Schema.optional(Schema.String),
 }).annotate({ identifier: "CompactionPart" })
 export type CompactionPart = Types.DeepMutable<Schema.Schema.Type<typeof CompactionPart>>
 

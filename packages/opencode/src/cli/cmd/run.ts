@@ -25,6 +25,7 @@ import { Filesystem } from "@/util/filesystem"
 import { createOpencodeClient, type OpencodeClient, type PermissionRequest, type ToolPart } from "@opencode-ai/sdk/v2"
 import { FormatError, FormatUnknownError } from "../error"
 import { INTERACTIVE_INPUT_ERROR, resolveInteractiveStdin } from "./run/runtime.stdin"
+import { WorkspaceTrustLaunch } from "@opencode-ai/core/trust/launch"
 
 type ModelInput = Parameters<OpencodeClient["session"]["prompt"]>[0]["model"]
 
@@ -294,6 +295,35 @@ async function toolError(part: ToolPart) {
   }
 }
 
+type TrustAnswer = "yes" | "restricted" | "quit"
+
+/** Reads one answer to the --mini trust question: y trusts, r keeps the folder restricted, q (or end of input) quits. */
+async function askTrust(question: string): Promise<TrustAnswer> {
+  const readline = await import("node:readline/promises")
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+  try {
+    for (;;) {
+      const answer = (await rl.question(question).catch(() => "q")).trim().toLowerCase()
+      if (answer === "y" || answer === "yes") return "yes"
+      if (answer === "r" || answer === "restricted") return "restricted"
+      if (answer === "q" || answer === "quit") return "quit"
+    }
+  } finally {
+    rl.close()
+  }
+}
+
+/**
+ * The workspace trust policy for a run. --trust trusts for this process only. Otherwise an OPENCODE_WORKSPACE_TRUST
+ * value decides, and without one a non-interactive run is headless (Claude Code -p parity: project plugins and MCP
+ * servers load, project allow rules do not) while --mini asks.
+ */
+export function runTrustPolicy(args: { trust?: boolean; mini?: boolean }): WorkspaceTrustLaunch.Policy | undefined {
+  if (args.trust) return "trusted"
+  if (WorkspaceTrustLaunch.fromEnv()) return undefined
+  return args.mini ? "prompt" : "headless"
+}
+
 export const RunCommand = effectCmd({
   command: "run [message..]",
   describe: "run opencode with a message",
@@ -303,6 +333,7 @@ export const RunCommand = effectCmd({
   // For --dir without --attach, load instance for the resolved target dir.
   // The handler also chdirs (preserving the legacy order: chdir → file resolution).
   directory: (args) => (args.dir && !args.attach ? path.resolve(process.cwd(), args.dir) : process.cwd()),
+  trustPolicy: runTrustPolicy,
   builder: (yargs: Argv) =>
     yargs
       .positional("message", {
@@ -428,6 +459,11 @@ export const RunCommand = effectCmd({
       .option("permission-mode", {
         type: "string",
         describe: PERMISSION_MODE_DESCRIBE,
+      })
+      .option("trust", {
+        type: "boolean",
+        default: false,
+        describe: "trust this folder for this run only (applies project allow rules; not saved)",
       })
       .option("demo", {
         type: "boolean",
@@ -601,6 +637,14 @@ export const RunCommand = effectCmd({
 
       if (args.fork && !args.continue && !args.session) {
         UI.error("--fork requires --continue or --session")
+        process.exit(1)
+      }
+
+      // --trust sets this process's policy, and an attached server loads the folder with its own.
+      if (args.trust && args.attach) {
+        UI.error(
+          "--trust cannot be used with --attach: trust the folder on the attached server (app, TUI or `agentcode trust`)",
+        )
         process.exit(1)
       }
 
@@ -867,7 +911,41 @@ export const RunCommand = effectCmd({
         return localAgent()
       }
 
+      // Workspace trust: a run never waits for an answer it cannot get. Non-interactive runs print one stderr line when
+      // project configuration was held; --mini on a terminal asks once about a folder nobody has decided on.
+      async function workspaceTrust(sdk: OpencodeClient) {
+        if (args.attach) {
+          const health = await sdk.global
+            .health()
+            .then((x) => x.data)
+            .catch(() => undefined)
+          if (!health?.workspaceTrust) return
+        }
+        const info = await sdk.trust
+          .get()
+          .then((x) => x.data)
+          .catch(() => undefined)
+        if (!info) return
+        const { heldAllowWarning, formatHeld } = await import("./trust")
+        if (interactive && process.stdin.isTTY && info.status === "unknown" && info.policy === "prompt") {
+          const held = info.held.length ? `It supplies:\n${formatHeld(info.held)}\n` : ""
+          const answer = await askTrust(
+            `Trust this folder? ${info.path}\n${held}Only trust folders from people you trust. [y]es / [r]estricted / [q]uit `,
+          )
+          if (answer === "quit") process.exit(0)
+          const approve = info.held.flatMap((item) => (item.kind === "mcp" ? [item.name] : []))
+          const result = await sdk.trust
+            .set({ trusted: answer === "yes", ...(answer === "yes" ? { mcp: { approve } } : {}) })
+            .catch(() => undefined)
+          if (!result || result.error) UI.error("Could not save the workspace trust decision; continuing restricted")
+          return
+        }
+        const warning = heldAllowWarning(info)
+        if (warning) process.stderr.write(warning + EOL)
+      }
+
       async function execute(sdk: OpencodeClient) {
+        await workspaceTrust(sdk)
         const sess = await session(sdk)
         if (!sess?.id) {
           UI.error("Session not found")
@@ -1112,6 +1190,9 @@ export const RunCommand = effectCmd({
           if (auth) headers.set("Authorization", auth)
           return Server.Default().app.fetch(new Request(request, { headers }))
         }) as typeof globalThis.fetch
+        await workspaceTrust(
+          createOpencodeClient({ baseUrl: "http://opencode.internal", fetch: fetchFn, directory: directory ?? root }),
+        )
 
         try {
           return await runInteractiveLocalMode({
@@ -1212,6 +1293,7 @@ export async function runMini(input: MiniCommandInput) {
     dangerouslySkipPermissions: false,
     "permission-mode": input.permissionMode,
     permissionMode: input.permissionMode,
+    trust: false,
     demo: input.demo ?? false,
   })
 }

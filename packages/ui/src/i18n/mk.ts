@@ -178,6 +178,28 @@ export const dict = {
   "ui.message.copyMessage": "Копирај порака",
   "ui.message.forkMessage": "Вилушка до нова сесија",
   "ui.message.revertMessage": "Врати ја пораката",
+  "ui.message.revertMessage.partial.one": "Врати ја пораката ({{count}} датотека не може да се врати)",
+  "ui.message.revertMessage.partial.other": "Врати ја пораката ({{count}} датотеки не може да се вратат)",
+  "ui.checkpoint.skipped.one": "Поништувањето не може да врати {{count}} датотека изменета тука",
+  "ui.checkpoint.skipped.other": "Поништувањето не може да врати {{count}} датотеки изменети тука",
+  "ui.checkpoint.reason.ignored": "игнорирано, не е зачувано",
+  "ui.checkpoint.reason.large": "поголема од 2 MB",
+  "ui.checkpoint.reason.outside": "надвор од папката на проектот",
+  "ui.checkpoint.reason.offline": "датотека во облак што не е преземена",
+  "ui.checkpoint.reason.unavailable": "контролните точки се исклучени",
+  "ui.checkpoint.unavailable.root":
+    "Контролните точки се исклучени бидејќи ова е коренот на диск. Поништувањето не може да ги врати овие датотеки.",
+  "ui.checkpoint.unavailable.home":
+    "Контролните точки се исклучени во вашата домашна папка. Отворете папка на проект за да може да поништувате.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Контролните точки се исклучени бидејќи оваа папка содржи сопствени податоци на AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Контролните точки се исклучени: оваа папка има повеќе од 20.000 датотеки без зависностите и излезот од градењето.",
+  "ui.checkpoint.unavailable.too-large": "Контролните точки се исклучени: оваа папка содржи повеќе од 512 MB датотеки.",
+  "ui.checkpoint.unavailable.slow":
+    "Контролните точки се привремено исклучени: скенирањето на оваа папка траеше предолго. Наскоро ќе се обиде повторно.",
+  "ui.checkpoint.unavailable.no-git":
+    "Контролните точки се исклучени: Git не е инсталиран. Инсталирајте Git за да можете да поништувате.",
   "ui.message.copyResponse": "Копирај одговор",
   "ui.message.copied": "Копирано",
   "ui.message.duration.seconds": "{{count}}с",

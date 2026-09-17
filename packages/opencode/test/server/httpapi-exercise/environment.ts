@@ -11,6 +11,9 @@ process.env.XDG_CONFIG_HOME = path.join(exerciseGlobalRoot, "config")
 process.env.XDG_STATE_HOME = path.join(exerciseGlobalRoot, "state")
 process.env.XDG_CACHE_HOME = path.join(exerciseGlobalRoot, "cache")
 process.env.OPENCODE_DISABLE_SHARE = "true"
+// Scenario projects load their config (the fake LLM provider) as if the folder were trusted, like test/preload.ts.
+// The trust scenarios exercise the routes under that launch policy.
+process.env.OPENCODE_WORKSPACE_TRUST = "trusted"
 export const exerciseConfigDirectory = path.join(exerciseGlobalRoot, "config", "opencode")
 export const exerciseDataDirectory = path.join(exerciseGlobalRoot, "data", "opencode")
 

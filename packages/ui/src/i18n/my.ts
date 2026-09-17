@@ -179,6 +179,28 @@ export const dict = {
   "ui.message.copyMessage": "မက်ဆေ့ဂျ်ကို ကူးယူပါ။",
   "ui.message.forkMessage": "စက်ရှင်အသစ်သို့ ဖြတ်လိုက်ပါ။",
   "ui.message.revertMessage": "မက်ဆေ့ဂျ်ကို ပြန်ပြောင်းပါ။",
+  "ui.message.revertMessage.partial.one": "မက်ဆေ့ဂျ်ကို ပြန်ပြောင်းပါ (ဖိုင် {{count}} ခုကို ပြန်ယူ၍မရပါ)",
+  "ui.message.revertMessage.partial.other": "မက်ဆေ့ဂျ်ကို ပြန်ပြောင်းပါ (ဖိုင် {{count}} ခုကို ပြန်ယူ၍မရပါ)",
+  "ui.checkpoint.skipped.one": "ဤနေရာတွင် ပြောင်းလဲထားသော ဖိုင် {{count}} ခုကို နောက်ပြန်ဖျက်ခြင်းဖြင့် ပြန်ယူ၍မရပါ",
+  "ui.checkpoint.skipped.other": "ဤနေရာတွင် ပြောင်းလဲထားသော ဖိုင် {{count}} ခုကို နောက်ပြန်ဖျက်ခြင်းဖြင့် ပြန်ယူ၍မရပါ",
+  "ui.checkpoint.reason.ignored": "လျစ်လျူရှုထားသည်၊ မသိမ်းဆည်းထားပါ",
+  "ui.checkpoint.reason.large": "2 MB ထက်ကြီးသည်",
+  "ui.checkpoint.reason.outside": "ပရောဂျက်ဖိုင်တွဲ၏ အပြင်ဘက်",
+  "ui.checkpoint.reason.offline": "ဒေါင်းလုဒ်မလုပ်ရသေးသော cloud ဖိုင်",
+  "ui.checkpoint.reason.unavailable": "checkpoint များ ပိတ်ထားသည်",
+  "ui.checkpoint.unavailable.root":
+    "ဤနေရာသည် drive ၏ root ဖြစ်သောကြောင့် checkpoint များ ပိတ်ထားသည်။ နောက်ပြန်ဖျက်ခြင်းဖြင့် ဤဖိုင်များကို ပြန်ယူ၍မရပါ။",
+  "ui.checkpoint.unavailable.home":
+    "သင့် home ဖိုင်တွဲတွင် checkpoint များ ပိတ်ထားသည်။ နောက်ပြန်ဖျက်နိုင်ရန် ပရောဂျက်ဖိုင်တွဲကို ဖွင့်ပါ။",
+  "ui.checkpoint.unavailable.data-dir":
+    "ဤဖိုင်တွဲတွင် AgentCode ၏ ကိုယ်ပိုင်ဒေတာ ပါဝင်သောကြောင့် checkpoint များ ပိတ်ထားသည်။",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Checkpoint များ ပိတ်ထားသည်- dependencies နှင့် build output များကို ချန်လှပ်ပြီးနောက် ဤဖိုင်တွဲတွင် ဖိုင် 20,000 ကျော် ရှိသည်။",
+  "ui.checkpoint.unavailable.too-large": "Checkpoint များ ပိတ်ထားသည်- ဤဖိုင်တွဲတွင် ဖိုင် 512 MB ကျော် ရှိသည်။",
+  "ui.checkpoint.unavailable.slow":
+    "Checkpoint များ ယာယီပိတ်ထားသည်- ဤဖိုင်တွဲကို စစ်ဆေးရန် အချိန်အလွန်ကြာသည်။ မကြာမီ ထပ်မံကြိုးစားပါမည်။",
+  "ui.checkpoint.unavailable.no-git":
+    "Checkpoint များ ပိတ်ထားသည်- Git ထည့်သွင်းထားခြင်း မရှိပါ။ ပြန်ဖျက်နိုင်ရန် Git ကို ထည့်သွင်းပါ။",
   "ui.message.copyResponse": "တုံ့ပြန်မှုကို ကူးယူပါ။",
   "ui.message.copied": "ကူးယူထားသည်။",
   "ui.message.duration.seconds": "{{count}}s",

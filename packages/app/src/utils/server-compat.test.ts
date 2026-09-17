@@ -174,6 +174,24 @@ describe("createCompatibleApi", () => {
   })
   */
 
+  test("sends /compact focus instructions in the V1 summarize body", async () => {
+    const { api, requests } = setup("v1")
+    await api.session.compact({
+      sessionID: "ses_1",
+      model: { providerID: "provider", modelID: "model" },
+      instructions: "focus on auth",
+    })
+    await api.session.compact({ sessionID: "ses_1", model: { providerID: "provider", modelID: "model" } })
+
+    expect(new URL(requests[0]!.url).pathname).toBe("/session/ses_1/summarize")
+    expect(await requests[0]!.json()).toEqual({
+      providerID: "provider",
+      modelID: "model",
+      instructions: "focus on auth",
+    })
+    expect(await requests[1]!.json()).toEqual({ providerID: "provider", modelID: "model" })
+  })
+
   test("translates current file searches to the V1 dirs parameter", async () => {
     const { api, requests } = setup("v1")
     await api.file.find({ location: { directory: "/repo" }, query: "src", type: "file", limit: 20 })

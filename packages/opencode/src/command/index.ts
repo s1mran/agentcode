@@ -63,6 +63,14 @@ export function isBuiltinPlan(command: Info) {
   return command.name === Default.PLAN && builtins.has(command)
 }
 
+/**
+ * Whether the command can share a turn with others in a chain such as `/a /b do XYZ`. A command that runs as a
+ * subtask, switches agent or model, or is the built-in /plan needs a turn of its own.
+ */
+export function chainable(command: Info) {
+  return !command.subtask && !command.agent && !command.model && !isBuiltinPlan(command)
+}
+
 export interface Interface {
   readonly get: (name: string) => Effect.Effect<Info | undefined>
   readonly list: () => Effect.Effect<Info[]>

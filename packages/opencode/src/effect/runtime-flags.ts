@@ -20,6 +20,8 @@ export class Service extends ConfigService.Service<Service>()("@opencode/Runtime
   disableEmbeddedWebUi: bool("OPENCODE_DISABLE_EMBEDDED_WEB_UI"),
   disableExternalSkills: bool("OPENCODE_DISABLE_EXTERNAL_SKILLS"),
   disableLspDownload: bool("OPENCODE_DISABLE_LSP_DOWNLOAD"),
+  // Escape hatch for the read-before-edit check (session/file-reads.ts). Views and notes are still recorded.
+  disableFileReadCheck: bool("OPENCODE_DISABLE_FILE_READ_CHECK"),
   disableClaudeCodePrompt: Config.all({
     broad: bool("OPENCODE_DISABLE_CLAUDE_CODE"),
     direct: bool("OPENCODE_DISABLE_CLAUDE_CODE_PROMPT"),

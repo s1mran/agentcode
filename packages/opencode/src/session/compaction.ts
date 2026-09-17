@@ -181,6 +181,8 @@ export interface Interface {
     model: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
     auto: boolean
     overflow?: boolean
+    /** What the summary should focus on, from `/compact <focus>`. */
+    instructions?: string
   }) => Effect.Effect<void>
 }
 
@@ -378,6 +380,10 @@ const layer = Layer.effect(
       const msgs = structuredClone(selected.head)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
       const conversation = msgs.map(serialize).filter(Boolean).join("\n\n")
+      // `/compact <focus>` stores the focus on the compaction part; it applies to a plugin-replaced prompt too.
+      const focus = compactionPart?.instructions
+        ? `The user asked this summary to focus on:\n${compactionPart.instructions}`
+        : undefined
       const nextPrompt =
         compacting.prompt ??
         [
@@ -386,6 +392,7 @@ const layer = Layer.effect(
             context: [conversation],
           }),
           ...compacting.context,
+          focus,
         ]
           .filter(Boolean)
           .join("\n\n")
@@ -436,7 +443,7 @@ const layer = Layer.effect(
                 type: "text",
                 text: [
                   nextPrompt,
-                  ...(compacting.prompt ? ["The following is the conversation history:", conversation] : []),
+                  ...(compacting.prompt ? [focus, "The following is the conversation history:", conversation] : []),
                 ]
                   .filter(Boolean)
                   .join("\n\n"),
@@ -562,6 +569,7 @@ const layer = Layer.effect(
       model: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
       auto: boolean
       overflow?: boolean
+      instructions?: string
     }) {
       const msg = yield* session.updateMessage({
         id: MessageID.ascending(),
@@ -578,6 +586,7 @@ const layer = Layer.effect(
         type: "compaction",
         auto: input.auto,
         overflow: input.overflow,
+        ...(input.instructions ? { instructions: input.instructions } : {}),
       })
     })
 

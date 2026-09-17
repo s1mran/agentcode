@@ -1,7 +1,11 @@
 Performs exact string replacements in files. 
 
 Usage:
-- You must use your `Read` tool at least once in the conversation before editing. This tool will error if you attempt an edit without reading the file. 
+- You must read the file with the `read` tool in this session before editing it; the edit fails otherwise. A whole-file read always counts. If you only read part of the file (offset/limit, or output capped at 50 KB), the lines this edit replaces must be among the lines you read. Printing the file in a single shell command (cat, head, tail, sed -n, or grep -n/rg -n on that one file) also counts for the lines it printed.
+- Your own successful edits and writes count as reads of the lines they changed (on top of what you had read), so consecutive edits to the same file don't need a re-read.
+- If the file changed on disk since you read the whole file, the edit is applied only when oldString matches the current content exactly (exactly once, or at least once with replaceAll); the result then says the file changed and you should read it again. Otherwise, or if you had only read part of it, the edit fails and asks you to re-read (re-reading just the lines you are changing is enough).
+- Creating a new file (empty oldString on a path that does not exist) needs no read.
+- If a configured formatter rewrites the file afterwards, the result says so.
 - When editing text from Read tool output, ensure you preserve the exact indentation (tabs/spaces) as it appears AFTER the line number prefix. The line number prefix format is: line number + colon + space (e.g., `1: `). Everything after that space is the actual file content to match. Never include any part of the line number prefix in the oldString or newString.
 - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
 - Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.

@@ -1,4 +1,4 @@
-import { Effect, Stream } from "effect"
+import { Effect, Option, Stream } from "effect"
 import os from "os"
 import { createWriteStream } from "node:fs"
 import fsp from "node:fs/promises"
@@ -27,10 +27,13 @@ import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashClassify } from "@/permission/bash-classify"
 import { ProtectedPath } from "@/permission/protected"
 import { SecretScan } from "@/permission/secret-scan"
+import { FileReads } from "../session/file-reads"
 
 export { Parameters } from "./shell/prompt"
 
 const MAX_METADATA_LENGTH = 30_000
+/** Viewers whose output the read ledger can map to lines of the one file they print (session/file-reads.ts). */
+const VIEWERS = new Set(["cat", "head", "tail", "sed", "grep", "egrep", "fgrep", "rg"])
 const CWD = new Set(["cd", "chdir", "popd", "pushd", "push-location", "set-location"])
 const FILES = new Set([
   ...CWD,
@@ -237,6 +240,8 @@ type Entry = {
   guard?: PermissionV1.Guard
   writes: string[]
   commits: Commit[]
+  /** A plain viewer of one static file (cat, head, tail, sed -n, grep, rg), for the read ledger. */
+  views: { name: string; argv: string[]; file: string }[]
 }
 
 type Env = {
@@ -445,7 +450,8 @@ function pathContext(instance: InstanceContext): ProtectedPath.PathContext {
     worktree: instance.worktree,
     directory: instance.directory,
     home: os.homedir(),
-    configDirs: [Global.Path.config],
+    // The trust store and approvals outside version control: a shell redirect or copy into them must hit the floor.
+    configDirs: [Global.Path.config, path.join(Global.Path.data, "trust"), path.join(Global.Path.data, "permission")],
     caseInsensitive: process.platform === "darwin" || process.platform === "win32",
   }
 }
@@ -787,6 +793,8 @@ export const ShellTool = Tool.define(
     const trunc = yield* Truncate.Service
     const plugin = yield* Plugin.Service
     const flags = yield* RuntimeFlags.Service
+    // Optional so isolated tool tests keep working; the tool registry always provides it.
+    const reads = Option.getOrUndefined(yield* Effect.serviceOption(FileReads.Service))
     const defaultTimeoutMs = flags.bashDefaultTimeoutMs ?? 2 * 60 * 1000
 
     const cygpath = Effect.fn("ShellTool.cygpath")(function* (shell: string, text: string) {
@@ -1029,6 +1037,7 @@ export const ShellTool = Tool.define(
         withholdAlways: false,
         writes: [],
         commits: [],
+        views: [],
       }
 
       // Every path argument of a PowerShell writer is checked against the floor (sources included, to stay safe).
@@ -1063,6 +1072,16 @@ export const ShellTool = Tool.define(
           entry.projectWrite = false
           continue
         }
+        if (
+          !env.ps &&
+          !env.cmd &&
+          // sed lists its file twice (the validated reader list and the extracted reads).
+          new Set(c.reads.map((item) => item.path)).size === 1 &&
+          !found.full &&
+          VIEWERS.has(path.posix.basename(c.name).toLowerCase()) &&
+          !entry.views.some((view) => view.file === found.abs)
+        )
+          entry.views.push({ name: c.name, argv: c.argv, file: found.abs })
         if (containsPath(found.abs, env.instance)) continue
         entry.projectWrite = false
         yield* addDir(env, found.abs)
@@ -1254,6 +1273,7 @@ export const ShellTool = Tool.define(
               withholdAlways: true,
               writes: [],
               commits: [],
+              views: [],
             },
           ]
       return asked.map((entry) => ({
@@ -1319,6 +1339,66 @@ export const ShellTool = Tool.define(
         }
       }
       return secrets
+    })
+
+    /**
+     * The one file a command prints, when the whole command is a single read-only viewer of one static file in a
+     * bash-family shell (a leading cd is fine). Pipelines, redirects, other sub-commands and background jobs never
+     * count, and recordView checks the printed lines are really in the output, so the ledger never credits text the
+     * model did not see.
+     */
+    const viewer = (entries: Entry[], env: Env) => {
+      if (env.ps || env.cmd) return
+      // A backgrounded command can exit before its output is complete.
+      if (/(^|[^&|>])&(?![&>])/.test(env.command)) return
+      const asked = entries.filter((entry) => entry.pattern !== undefined)
+      if (asked.length !== 1) return
+      const entry = asked[0]
+      if (!entry.readOnly || entry.views.length !== 1) return
+      return entry.views[0]
+    }
+
+    const version = (file: string) =>
+      fs.stat(file).pipe(
+        Effect.map((info) => ({
+          type: info.type,
+          mtimeMs: info.mtime._tag === "Some" ? info.mtime.value.getTime() : 0,
+          size: Number(info.size),
+        })),
+        Effect.catch(() => Effect.succeed(undefined)),
+      )
+
+    /** Records what a viewer printed as a read. Only a clean, complete run of an unchanged regular file counts. */
+    const recordView = Effect.fn("ShellTool.recordView")(function* (
+      ctx: Tool.Context,
+      viewed: { name: string; argv: string[]; file: string },
+      before: { type: string; mtimeMs: number; size: number } | undefined,
+      result: { output: string; metadata: { exit: number | null; truncated: boolean } },
+    ) {
+      if (!reads || !before || before.type !== "File" || before.size > FileReads.HASH_MAX_BYTES) return
+      if (result.metadata.exit !== 0 || result.metadata.truncated) return
+      const snap = yield* FileReads.read(fs, viewed.file)
+      if (snap.mtimeMs !== before.mtimeMs || snap.size !== before.size) return
+      const seen = FileReads.shellView(viewed.name, viewed.argv, result.output, snap.lines)
+      if (seen === undefined) return
+      const full = seen === "full" || snap.lines === 0 || FileReads.coversAll(seen, snap.lines)
+      if (!full && seen.length === 0) return
+      // Redirected to /dev/null, captured by a substitution, or never run (a function body, a skipped branch): only
+      // lines that actually appear in the output count, whatever the command's shape.
+      if (!FileReads.printed(result.output, snap.text, full ? [[1, snap.lines]] : seen)) return
+      const view: FileReads.View = {
+        file: FileReads.key(viewed.file),
+        mtimeMs: snap.mtimeMs,
+        size: snap.size,
+        hash: snap.hash,
+        lines: snap.lines,
+        ranges: seen === "full" ? [] : seen,
+        full,
+        source: "shell",
+        time: Date.now(),
+      }
+      yield* reads.record(ctx, [view])
+      return view
     })
 
     const shellEnv = Effect.fn("ShellTool.shellEnv")(function* (ctx: Tool.Context, cwd: string) {
@@ -1526,7 +1606,7 @@ export const ShellTool = Tool.define(
               }
               const timeout = params.timeout ?? defaultTimeoutMs
               const ps = Shell.ps(shell)
-              yield* Effect.scoped(
+              const viewed = yield* Effect.scoped(
                 Effect.gen(function* () {
                   const tree = yield* Effect.acquireRelease(parse(params.command, ps), (tree) =>
                     Effect.sync(() => tree.delete()),
@@ -1546,10 +1626,13 @@ export const ShellTool = Tool.define(
                   if (!containsPath(cwd, instanceCtx) && !env.dirs.has(cwd)) env.dirs.set(cwd, undefined)
                   const secrets = yield* scanCommits(entries)
                   yield* ask(ctx, { dirs: env.dirs, entries, secrets }, params, instanceCtx)
+                  return reads ? viewer(entries, env) : undefined
                 }),
               )
+              // Taken before the run, so a file something else changes while the command runs is not credited.
+              const before = viewed ? yield* version(viewed.file) : undefined
 
-              return yield* run(
+              const result = yield* run(
                 {
                   shell,
                   command: params.command,
@@ -1559,6 +1642,13 @@ export const ShellTool = Tool.define(
                 },
                 ctx,
               )
+              // Recording a read must never fail the command.
+              const view = viewed
+                ? yield* recordView(ctx, viewed, before, result).pipe(
+                    Effect.catchCause(() => Effect.succeed(undefined)),
+                  )
+                : undefined
+              return { ...result, metadata: { ...result.metadata, ...(view ? { ledger: [view] } : {}) } }
             }),
         }
       })

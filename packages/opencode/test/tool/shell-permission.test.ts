@@ -176,6 +176,19 @@ describe.skipIf(windows)("tool.shell permission classification", () => {
     ),
   )
 
+  it.live("redirects into the workspace trust store hit the floor", () =>
+    inProject(() =>
+      Effect.gen(function* () {
+        const { Global } = yield* Effect.promise(() => import("@opencode-ai/core/global"))
+        const target = path.join(Global.Path.data, "trust", "workspaces.json")
+        const command = `echo {} > ${target}`
+        const { bash } = yield* inspect(command)
+        expect(hint(bash, command)?.guard).toMatchObject({ level: "floor", category: "protected_path" })
+        expect(bash?.always).toEqual([])
+      }),
+    ),
+  )
+
   it.live("critical removals hit the floor", () =>
     inProject(() =>
       Effect.gen(function* () {

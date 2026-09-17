@@ -13,6 +13,7 @@
  */
 import { expect } from "bun:test"
 import { Effect, Layer } from "effect"
+import type * as Scope from "effect/Scope"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import fs from "fs/promises"
 import path from "path"
@@ -23,7 +24,7 @@ import { MessageV2 } from "../../src/session/message-v2"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { provideTmpdirServer } from "../fixture/fixture"
+import { provideInstance, provideTmpdirServer, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestLLMServer } from "../lib/llm-server"
 
@@ -31,6 +32,8 @@ import { LSP } from "@/lsp/lsp"
 import { MCP } from "../../src/mcp"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { ProviderV2 } from "@opencode-ai/core/provider"
+import { ModelV2 } from "@opencode-ai/core/model"
 
 const mcp = Layer.succeed(
   MCP.Service,
@@ -94,6 +97,9 @@ const it = testEffect(
   ]),
 )
 
+// Pin the custom test provider so the loop never falls back to a real default model over the network.
+const model = { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test-model") }
+
 const providerCfg = (url: string) => ({
   provider: {
     test: {
@@ -146,6 +152,7 @@ it.live("tool execution produces non-empty session diff (snapshot race)", () =>
       yield* prompt.prompt({
         sessionID: session.id,
         agent: "build",
+        model,
         noReply: true,
         parts: [{ type: "text", text: "create the file" }],
       })
@@ -185,5 +192,122 @@ it.live("tool execution produces non-empty session diff (snapshot race)", () =>
       expect(diff.length).toBeGreaterThan(0)
     }),
     { git: true, config: providerCfg },
+  ),
+)
+
+// Like provideTmpdirServer, with an init hook that runs before the instance loads.
+const withServerDir = <A, E, R>(
+  self: (input: { dir: string; llm: TestLLMServer["Service"] }) => Effect.Effect<A, E, R>,
+  options: { git?: boolean; init?: (dir: string) => Effect.Effect<void, never, Scope.Scope> } = {},
+) =>
+  Effect.gen(function* () {
+    const llm = yield* TestLLMServer
+    const dir = yield* tmpdirScoped({ git: options.git, config: providerCfg(llm.url), init: options.init })
+    return yield* self({ dir, llm }).pipe(provideInstance(dir))
+  }).pipe(Effect.provide(testInstanceStoreLayer))
+
+// Runs one agent turn that calls a single tool, then answers with text. Returns the session's parts.
+const runToolTurn = Effect.fnUntraced(function* (input: {
+  llm: TestLLMServer["Service"]
+  tool: string
+  args: Record<string, unknown>
+}) {
+  const prompt = yield* SessionPrompt.Service
+  const sessions = yield* Session.Service
+  const session = yield* sessions.create({
+    title: "checkpoint test",
+    permission: [{ permission: "*", pattern: "*", action: "allow" }],
+  })
+  yield* input.llm.toolMatch((hit) => JSON.stringify(hit.body).includes("change the files"), input.tool, input.args)
+  yield* input.llm.textMatch((hit) => JSON.stringify(hit.body).includes(input.tool), "done")
+  yield* prompt.prompt({
+    sessionID: session.id,
+    agent: "build",
+    model,
+    noReply: true,
+    parts: [{ type: "text", text: "change the files" }],
+  })
+  yield* prompt.loop({ sessionID: session.id })
+  const messages = yield* MessageV2.filterCompactedEffect(session.id)
+  const tool = messages
+    .flatMap((m) => m.parts)
+    .find((p): p is SessionV1.ToolPart => p.type === "tool" && p.tool === input.tool)
+  expect(tool?.state.status).toBe("completed")
+  return { session, messages, parts: messages.flatMap((m) => m.parts) }
+})
+
+const homeAt = (dir: string) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      const previous = process.env.OPENCODE_TEST_HOME
+      process.env.OPENCODE_TEST_HOME = dir
+      return previous
+    }),
+    (previous) =>
+      Effect.sync(() => {
+        if (previous === undefined) delete process.env.OPENCODE_TEST_HOME
+        else process.env.OPENCODE_TEST_HOME = previous
+      }),
+  ).pipe(Effect.asVoid)
+
+const fwd = (...parts: string[]) => path.join(...parts).replaceAll("\\", "/")
+
+it.live("plain folder: tool changes get checkpoints, a patch part and a turn diff", () =>
+  withServerDir(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      const summary = yield* SessionSummary.Service
+      const file = path.join(dir, "race-test.txt")
+      const { session, messages, parts } = yield* runToolTurn({
+        llm,
+        tool: "write",
+        args: { filePath: file, content: "folder checkpoint content\n" },
+      })
+
+      const patch = parts.find((p): p is SessionV1.PatchPart => p.type === "patch")
+      expect(patch?.files).toContain(fwd(file))
+      expect(patch?.hash).toBeTruthy()
+      expect(parts.some((p) => p.type === "step-start" && !!p.snapshot)).toBe(true)
+      expect(parts.some((p) => p.type === "step-finish" && !!p.snapshot)).toBe(true)
+
+      const user = messages.find((msg) => msg.info.role === "user")
+      if (!user) throw new Error("Expected user message")
+      let diff: Array<{ file?: string }> = []
+      for (let i = 0; i < 50; i++) {
+        diff = yield* summary.diff({ sessionID: session.id, messageID: user.info.id })
+        if (diff.length > 0) break
+        yield* Effect.sleep("100 millis")
+      }
+      expect(diff.length).toBeGreaterThan(0)
+    }),
+  ),
+)
+
+it.live("plain folder: a write into an ignored folder is reported as not restorable", () =>
+  withServerDir(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      const file = path.join(dir, "node_modules", "z.js")
+      const { parts } = yield* runToolTurn({ llm, tool: "write", args: { filePath: file, content: "z\n" } })
+      const patch = parts.find((p): p is SessionV1.PatchPart => p.type === "patch")
+      expect(patch?.files).toEqual([])
+      expect(patch?.skipped).toEqual([{ file: fwd(file), reason: "ignored" }])
+    }),
+  ),
+)
+
+it.live("home folder: file tool edits get a checkpoints-off notice", () =>
+  withServerDir(
+    Effect.fnUntraced(function* ({ dir, llm }) {
+      const file = path.join(dir, "notes.txt")
+      const { parts } = yield* runToolTurn({ llm, tool: "write", args: { filePath: file, content: "notes\n" } })
+      const patch = parts.find((p): p is SessionV1.PatchPart => p.type === "patch")
+      expect(patch).toMatchObject({
+        hash: "",
+        files: [],
+        skipped: [{ file, reason: "unavailable" }],
+        unavailable: "home",
+      })
+      expect(parts.some((p) => p.type === "step-start" && !!p.snapshot)).toBe(false)
+    }),
+    { init: homeAt },
   ),
 )

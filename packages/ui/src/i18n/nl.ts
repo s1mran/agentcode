@@ -178,6 +178,27 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Bericht kopiëren",
   "ui.message.forkMessage": "Afsplitsen in nieuwe sessie",
   "ui.message.revertMessage": "Bericht terugdraaien",
+  "ui.message.revertMessage.partial.one": "Bericht terugdraaien ({{count}} bestand kan niet worden hersteld)",
+  "ui.message.revertMessage.partial.other": "Bericht terugdraaien ({{count}} bestanden kunnen niet worden hersteld)",
+  "ui.checkpoint.skipped.one": "Ongedaan maken kan {{count}} hier gewijzigd bestand niet herstellen",
+  "ui.checkpoint.skipped.other": "Ongedaan maken kan {{count}} hier gewijzigde bestanden niet herstellen",
+  "ui.checkpoint.reason.ignored": "genegeerd, niet vastgelegd",
+  "ui.checkpoint.reason.large": "groter dan 2 MB",
+  "ui.checkpoint.reason.outside": "buiten de projectmap",
+  "ui.checkpoint.reason.offline": "cloudbestand niet gedownload",
+  "ui.checkpoint.reason.unavailable": "checkpoints uit",
+  "ui.checkpoint.unavailable.root":
+    "Checkpoints staan uit omdat dit de hoofdmap van een schijf is. Ongedaan maken kan deze bestanden niet herstellen.",
+  "ui.checkpoint.unavailable.home":
+    "Checkpoints staan uit in je thuismap. Open een projectmap om ongedaan maken te kunnen gebruiken.",
+  "ui.checkpoint.unavailable.data-dir": "Checkpoints staan uit omdat deze map de eigen gegevens van AgentCode bevat.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Checkpoints staan uit: deze map heeft meer dan 20.000 bestanden, afhankelijkheden en build-uitvoer niet meegeteld.",
+  "ui.checkpoint.unavailable.too-large": "Checkpoints staan uit: deze map bevat meer dan 512 MB aan bestanden.",
+  "ui.checkpoint.unavailable.slow":
+    "Checkpoints staan voorlopig uit: het scannen van deze map duurde te lang. Er wordt zo opnieuw geprobeerd.",
+  "ui.checkpoint.unavailable.no-git":
+    "Checkpoints staan uit: Git is niet geïnstalleerd. Installeer Git om ongedaan maken te gebruiken.",
   "ui.message.copyResponse": "Antwoord kopiëren",
   "ui.message.copied": "Gekopieerd",
   "ui.message.duration.seconds": "{{count}}s",

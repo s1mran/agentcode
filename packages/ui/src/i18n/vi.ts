@@ -178,6 +178,26 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Sao chép tin nhắn",
   "ui.message.forkMessage": "Tách sang phiên mới",
   "ui.message.revertMessage": "Hoàn nguyên tin nhắn",
+  "ui.message.revertMessage.partial.one": "Hoàn nguyên tin nhắn ({{count}} tệp không thể khôi phục)",
+  "ui.message.revertMessage.partial.other": "Hoàn nguyên tin nhắn ({{count}} tệp không thể khôi phục)",
+  "ui.checkpoint.skipped.one": "Hoàn tác không thể khôi phục {{count}} tệp đã thay đổi ở đây",
+  "ui.checkpoint.skipped.other": "Hoàn tác không thể khôi phục {{count}} tệp đã thay đổi ở đây",
+  "ui.checkpoint.reason.ignored": "bị bỏ qua, không được lưu",
+  "ui.checkpoint.reason.large": "lớn hơn 2 MB",
+  "ui.checkpoint.reason.outside": "bên ngoài thư mục dự án",
+  "ui.checkpoint.reason.offline": "tệp đám mây chưa được tải xuống",
+  "ui.checkpoint.reason.unavailable": "đã tắt điểm kiểm tra",
+  "ui.checkpoint.unavailable.root":
+    "Điểm kiểm tra đã tắt vì đây là thư mục gốc của ổ đĩa. Hoàn tác không thể khôi phục các tệp này.",
+  "ui.checkpoint.unavailable.home":
+    "Điểm kiểm tra đã tắt trong thư mục chính của bạn. Hãy mở một thư mục dự án để có thể hoàn tác.",
+  "ui.checkpoint.unavailable.data-dir": "Điểm kiểm tra đã tắt vì thư mục này chứa dữ liệu riêng của AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Điểm kiểm tra đã tắt: thư mục này có hơn 20.000 tệp sau khi bỏ qua các phần phụ thuộc và kết quả build.",
+  "ui.checkpoint.unavailable.too-large": "Điểm kiểm tra đã tắt: thư mục này chứa hơn 512 MB tệp.",
+  "ui.checkpoint.unavailable.slow":
+    "Điểm kiểm tra tạm thời đã tắt: quét thư mục này mất quá nhiều thời gian. Sẽ thử lại sớm.",
+  "ui.checkpoint.unavailable.no-git": "Điểm kiểm tra đã tắt: Git chưa được cài đặt. Hãy cài Git để có thể hoàn tác.",
   "ui.message.copyResponse": "Sao chép phản hồi",
   "ui.message.copied": "Đã sao chép",
   "ui.message.duration.seconds": "{{count}}s",

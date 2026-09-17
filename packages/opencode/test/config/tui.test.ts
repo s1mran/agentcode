@@ -892,3 +892,39 @@ it.instance("missing tui.json - silently treated as empty (ENOENT path)", () =>
     }),
   ),
 )
+
+it.instance("holds project tui plugins until the folder is trusted, while themes and keybinds still apply", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const test = yield* TestInstance
+      const local = path.join(test.directory, ".opencode")
+      yield* fs.makeDirectory(local, { recursive: true })
+      yield* fs.writeJson(path.join(Global.Path.config, "tui.json"), { plugin: ["global-only@1.0.0"] })
+      yield* fs.writeJson(path.join(local, "tui.json"), {
+        plugin: ["project-only@1.0.0"],
+        keybinds: { "dialog.plugins.install": "shift+i" },
+      })
+
+      const load = (policy: string) =>
+        withEnv(
+          "OPENCODE_WORKSPACE_TRUST",
+          policy,
+          Effect.gen(function* () {
+            const config = yield* getTuiConfig(test.directory)
+            return {
+              plugins: (config.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item)),
+              keybind: config.keybinds.get("dialog.plugins.install")?.[0]?.key,
+            }
+          }),
+        )
+
+      const restricted = yield* load("prompt")
+      expect(restricted.plugins).toEqual(["global-only@1.0.0"])
+      expect(restricted.keybind).toBe("shift+i")
+
+      const trusted = yield* load("trusted")
+      expect(trusted.plugins).toEqual(["global-only@1.0.0", "project-only@1.0.0"])
+    }),
+  ),
+)

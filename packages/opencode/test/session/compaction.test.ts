@@ -278,8 +278,8 @@ function compactionProcessLayer(options?: CompactionProcessOptions) {
   ])
 }
 
-function createSummaryCompaction(sessionID: SessionID) {
-  return SessionCompaction.use.create({ sessionID, agent: "build", model: ref, auto: false })
+function createSummaryCompaction(sessionID: SessionID, instructions?: string) {
+  return SessionCompaction.use.create({ sessionID, agent: "build", model: ref, auto: false, instructions })
 }
 
 function readCompactionPart(sessionID: SessionID) {
@@ -357,6 +357,20 @@ function autocontinue(enabled: boolean) {
       if (name !== "experimental.compaction.autocontinue") return Effect.succeed(output)
       return Effect.sync(() => {
         ;(output as { enabled: boolean }).enabled = enabled
+        return output
+      })
+    },
+    list: () => Effect.succeed([]),
+    init: () => Effect.void,
+  })
+}
+
+function compactionPrompt(prompt: string) {
+  return Layer.mock(Plugin.Service)({
+    trigger: <Name extends string, Input, Output>(name: Name, _input: Input, output: Output) => {
+      if (name !== "experimental.session.compacting") return Effect.succeed(output)
+      return Effect.sync(() => {
+        ;(output as { prompt?: string }).prompt = prompt
         return output
       })
     },
@@ -590,6 +604,30 @@ describe("session.compaction.create", () => {
           auto: true,
           overflow: true,
         })
+      }),
+    ),
+  )
+
+  it.live(
+    "stores focus instructions on a manual compaction part",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const compact = yield* SessionCompaction.Service
+        const ssn = yield* SessionNs.Service
+        const info = yield* ssn.create({})
+
+        yield* compact.create({
+          sessionID: info.id,
+          agent: "build",
+          model: ref,
+          auto: false,
+          instructions: "focus on auth",
+        })
+        yield* compact.create({ sessionID: info.id, agent: "build", model: ref, auto: false })
+
+        const msgs = yield* ssn.messages({ sessionID: info.id })
+        expect(msgs[0].parts[0]).toMatchObject({ type: "compaction", instructions: "focus on auth" })
+        expect(msgs[1].parts[0]).not.toHaveProperty("instructions")
       }),
     ),
   )
@@ -1010,6 +1048,77 @@ describe("session.compaction.process", () => {
         expect(part?.tail_start_id).toBeUndefined()
         expect(captured).toContain("yyyy")
       }).pipe(withCompaction({ llm: stub.llmLayer, config: cfg({ tail_turns: 1, preserve_recent_tokens: 20 }) }))
+    },
+    { git: true },
+  )
+
+  itCompaction.instance(
+    "adds the user's focus instructions to the summary prompt",
+    () => {
+      const stub = llm()
+      const captured: string[] = []
+      stub.push(reply("summary", (input) => captured.push(JSON.stringify(input.messages))))
+      stub.push(reply("summary", (input) => captured.push(JSON.stringify(input.messages))))
+      return Effect.gen(function* () {
+        const ssn = yield* SessionNs.Service
+        const focused = yield* ssn.create({})
+        yield* createUserMessage(focused.id, "hello")
+        yield* createSummaryCompaction(focused.id, "focus on auth")
+        const focusedMsgs = yield* ssn.messages({ sessionID: focused.id })
+        yield* SessionCompaction.use.process({
+          parentID: focusedMsgs.at(-1)!.info.id,
+          messages: focusedMsgs,
+          sessionID: focused.id,
+          auto: false,
+        })
+
+        const plain = yield* ssn.create({})
+        yield* createUserMessage(plain.id, "hello")
+        yield* createSummaryCompaction(plain.id)
+        const plainMsgs = yield* ssn.messages({ sessionID: plain.id })
+        yield* SessionCompaction.use.process({
+          parentID: plainMsgs.at(-1)!.info.id,
+          messages: plainMsgs,
+          sessionID: plain.id,
+          auto: false,
+        })
+
+        expect(captured).toHaveLength(2)
+        expect(captured[0]).toContain("The user asked this summary to focus on:\\nfocus on auth")
+        expect(captured[1]).not.toContain("The user asked this summary to focus on")
+        expect(captured[0]!.replace("\\n\\nThe user asked this summary to focus on:\\nfocus on auth", "")).toBe(
+          captured[1],
+        )
+      }).pipe(withCompaction({ llm: stub.llmLayer }))
+    },
+    { git: true },
+  )
+
+  itCompaction.instance(
+    "adds focus instructions to a plugin-replaced summary prompt",
+    () => {
+      const stub = llm()
+      let captured = ""
+      stub.push(reply("summary", (input) => (captured = JSON.stringify(input.messages))))
+      return Effect.gen(function* () {
+        const ssn = yield* SessionNs.Service
+        const session = yield* ssn.create({})
+        yield* createUserMessage(session.id, "hello")
+        yield* createSummaryCompaction(session.id, "focus on auth")
+        const msgs = yield* ssn.messages({ sessionID: session.id })
+        yield* SessionCompaction.use.process({
+          parentID: msgs.at(-1)!.info.id,
+          messages: msgs,
+          sessionID: session.id,
+          auto: false,
+        })
+
+        expect(captured).toContain("CUSTOM SUMMARY PROMPT")
+        expect(captured.indexOf("CUSTOM SUMMARY PROMPT")).toBeLessThan(captured.indexOf("focus on auth"))
+        expect(captured.indexOf("focus on auth")).toBeLessThan(
+          captured.indexOf("The following is the conversation history:"),
+        )
+      }).pipe(withCompaction({ llm: stub.llmLayer, plugin: compactionPrompt("CUSTOM SUMMARY PROMPT") }))
     },
     { git: true },
   )

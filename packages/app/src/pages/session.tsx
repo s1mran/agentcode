@@ -1,4 +1,4 @@
-import type { FilePart, Project, UserMessage, VcsFileDiff } from "@opencode-ai/sdk/v2"
+import type { FilePart, UserMessage, VcsFileDiff } from "@opencode-ai/sdk/v2"
 import { getFilename } from "@opencode-ai/core/util/path"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { createQuery, skipToken, useMutation, useQueryClient } from "@tanstack/solid-query"
@@ -35,7 +35,6 @@ import { Tabs } from "@opencode-ai/ui/tabs"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { previewSelectedLines } from "@opencode-ai/session-ui/pierre/selection-bridge"
-import { Button } from "@opencode-ai/ui/button"
 import { showToast } from "@/utils/toast"
 import { base64Encode, checksum } from "@opencode-ai/core/util/encode"
 import { useLocation, useNavigate, useParams, useSearchParams } from "@solidjs/router"
@@ -84,7 +83,6 @@ import {
 import { SessionSidePanel } from "@/pages/session/session-side-panel"
 import { sessionPanelLayout } from "@/pages/session/session-panel-layout"
 import { SessionReviewEmptyChangesV2 } from "@opencode-ai/session-ui/v2/session-review-empty-changes-v2"
-import { SessionReviewEmptyNoGitV2 } from "@opencode-ai/session-ui/v2/session-review-empty-no-git-v2"
 import { SessionReviewV2SidebarToggle } from "@opencode-ai/session-ui/v2/session-review-v2"
 import { ReviewPanelV2 } from "@/pages/session/v2/review-panel-v2"
 import { createReviewPanelV2State } from "@/pages/session/v2/review-panel-v2-state"
@@ -650,10 +648,6 @@ export default function Page() {
   }, desktopReviewOpen())
 
   const turnDiffs = createMemo(() => list(lastUserMessage()?.summary?.diffs))
-  const nogit = createMemo(() => {
-    const project = sync().project
-    return !!project && project.vcs !== "git"
-  })
   const changesOptions = createMemo<ChangeMode[]>(() => {
     const list: ChangeMode[] = []
     const project = sync().project
@@ -825,45 +819,6 @@ export default function Page() {
 
     autoScroll.pause()
     scrollToMessage(msgs[targetIndex], "auto")
-  }
-
-  function upsert(next: Project) {
-    const list = serverSync().data.project
-    sync().set("project", next.id)
-    const idx = list.findIndex((item) => item.id === next.id)
-    if (idx >= 0) {
-      serverSync().set(
-        "project",
-        list.map((item, i) => (i === idx ? { ...item, ...next } : item)),
-      )
-      return
-    }
-    const at = list.findIndex((item) => item.id > next.id)
-    if (at >= 0) {
-      serverSync().set("project", [...list.slice(0, at), next, ...list.slice(at)])
-      return
-    }
-    serverSync().set("project", [...list, next])
-  }
-
-  const gitMutation = useMutation(() => ({
-    mutationFn: () => sdk().client.project.initGit(),
-    onSuccess: (x) => {
-      if (!x.data) return
-      upsert(x.data)
-    },
-    onError: (err) => {
-      showToast({
-        variant: "error",
-        title: language.t("common.requestFailed"),
-        description: formatServerError(err, language.t),
-      })
-    },
-  }))
-
-  function initGit() {
-    if (gitMutation.isPending) return
-    gitMutation.mutate()
   }
 
   let inputRef!: HTMLDivElement
@@ -1209,25 +1164,23 @@ export default function Page() {
     </div>
   )
 
-  const createGit = (input: { emptyClass: string }) => (
-    <div class={input.emptyClass}>
-      <div class="flex flex-col gap-3">
-        <div class="text-14-medium text-text-strong">{language.t("session.review.noVcs.createGit.title")}</div>
-        <div class="text-14-regular text-text-base max-w-md" style={{ "line-height": "var(--line-height-normal)" }}>
-          {language.t("session.review.noVcs.createGit.description")}
-        </div>
-      </div>
-      <Button size="large" disabled={gitMutation.isPending} onClick={initGit}>
-        {gitMutation.isPending
-          ? language.t("session.review.noVcs.createGit.actionLoading")
-          : language.t("session.review.noVcs.createGit.action")}
-      </Button>
-    </div>
-  )
+  // Turn diffs come from checkpoints. When they were off for the last turn, say why instead of "No changes".
+  const turnCheckpointOff = createMemo(() => {
+    const user = lastUserMessage()
+    if (!user) return
+    for (const message of messages()) {
+      if (message.role !== "assistant" || message.id < user.id) continue
+      for (const part of sync().data.part[message.id] ?? []) {
+        if (part.type === "patch" && part.unavailable) return part.unavailable
+      }
+    }
+  })
 
   const reviewEmptyText = createMemo(() => {
     if (reviewMode() === "git") return language.t("session.review.noUncommittedChanges")
     if (reviewMode() === "branch") return language.t("session.review.noBranchChanges")
+    const off = reviewMode() === "turn" ? turnCheckpointOff() : undefined
+    if (off) return language.t(`ui.checkpoint.unavailable.${off}`)
     return language.t("session.review.noChanges")
   })
 
@@ -1237,10 +1190,8 @@ export default function Page() {
       return empty(reviewEmptyText())
     }
 
-    if (reviewMode() === "turn") {
-      if (nogit()) return createGit(input)
-      return empty(reviewEmptyText())
-    }
+    // Checkpoints work without git, so turn mode never asks for "git init".
+    if (reviewMode() === "turn") return empty(reviewEmptyText())
 
     return (
       <div class={input.emptyClass}>
@@ -1253,8 +1204,8 @@ export default function Page() {
     if ((reviewMode() === "git" || reviewMode() === "branch") && !reviewReady()) {
       return <div class="px-6 py-4 text-text-weak">{language.t("session.review.loadingChanges")}</div>
     }
-    if (reviewMode() === "turn" && nogit()) {
-      return <SessionReviewEmptyNoGitV2 pending={gitMutation.isPending} onInitGit={initGit} />
+    if (reviewMode() === "turn" && turnCheckpointOff()) {
+      return <div class="px-6 py-4 text-text-weak">{reviewEmptyText()}</div>
     }
     return <SessionReviewEmptyChangesV2 />
   }

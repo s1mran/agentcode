@@ -61,6 +61,7 @@ import { PermissionSaved } from "@opencode-ai/core/permission/saved"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { ProjectCopy } from "@opencode-ai/core/project/copy"
 import { PtyTicket } from "@opencode-ai/core/pty/ticket"
+import { WorkspaceTrust } from "@/trust"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionV2 } from "@opencode-ai/core/session"
@@ -98,6 +99,7 @@ import { ptyConnectHandlers, ptyHandlers } from "./handlers/pty"
 import { questionHandlers } from "./handlers/question"
 import { sessionHandlers } from "./handlers/session"
 import { syncHandlers } from "./handlers/sync"
+import { trustHandlers } from "./handlers/trust"
 import { tuiHandlers } from "./handlers/tui"
 import { handlers } from "@opencode-ai/server/handlers"
 import { buildLocationServiceMap, LocationServiceMap } from "@opencode-ai/core/location-services"
@@ -166,6 +168,7 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
     providerHandlers,
     sessionHandlers,
     syncHandlers,
+    trustHandlers,
     tuiHandlers,
     workspaceHandlers,
   ]),
@@ -266,6 +269,7 @@ const app = LayerNode.group([
   ProjectV2.node,
   ProjectCopy.node,
   PtyTicket.node,
+  WorkspaceTrust.node,
 ])
 
 export function createRoutes(

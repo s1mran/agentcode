@@ -7,6 +7,8 @@ import { CYCLE_MODES, modeLabelKey } from "@/context/permission-mode"
 import { createPermissionModeControl } from "./composer/session-composer-controls"
 import { useSessionLayout } from "./session-layout"
 import { createSessionOwnership } from "./session-ownership"
+import { pickModel } from "@/utils/model-query"
+import { showToast } from "@/utils/toast"
 
 /** Keys other than Tab reach this command only from the composer editor; the editors own Shift+Tab themselves. */
 const composerKeybind = (event: KeyboardEvent) => {
@@ -34,7 +36,7 @@ export const useComposerCommands = (input: { model?: ModelSelection } = {}) => {
   const agentCommand = withCategory(language.t("command.category.agent"))
   const permissionsCommand = withCategory(language.t("command.category.permissions"))
 
-  const chooseModel = async () => {
+  const chooseModel = async (filter?: string) => {
     const owner = sessionOwnership.capture()
     const editor = document.querySelector<HTMLElement>('[data-component="prompt-input"]')
     const selection = window.getSelection()
@@ -52,8 +54,42 @@ export const useComposerCommands = (input: { model?: ModelSelection } = {}) => {
     }
     const { DialogSelectModel } = await import("@/components/dialog-select-model")
     owner.run(() => {
-      void dialog.show(() => <DialogSelectModel model={model} />, restoreComposer)
+      void dialog.show(() => <DialogSelectModel model={model} filter={filter} />, restoreComposer)
     })
+  }
+
+  // `/model <query>` switches to the best match; with no match the picker opens with the query filled in.
+  const selectModel = (query: string) => {
+    const result = pickModel(query, {
+      models: model.list(),
+      recent: model.recent().filter((item): item is NonNullable<typeof item> => !!item),
+      visible: (item) => model.visible({ modelID: item.id, providerID: item.provider.id }),
+    })
+    const picked = result.model
+    if (!picked) {
+      showToast({ variant: "error", title: language.t("toast.model.noMatch.title", { query }) })
+      void chooseModel(query)
+      return
+    }
+    model.set({ modelID: picked.id, providerID: picked.provider.id }, { recent: true })
+    showToast({
+      title: language.t("toast.model.selected.title", { name: picked.name }),
+      description: result.others ? language.t("toast.model.selected.others", { count: result.others }) : undefined,
+    })
+  }
+
+  // `/agent <name>` selects an agent by exact name, then by a unique prefix.
+  const selectAgent = (query: string) => {
+    const needle = query.trim().toLowerCase()
+    const agents = local.agent.list()
+    const exact = agents.find((item) => item.name.toLowerCase() === needle)
+    const prefixed = agents.filter((item) => item.name.toLowerCase().startsWith(needle))
+    const match = exact ?? (prefixed.length === 1 ? prefixed[0] : undefined)
+    if (!match) {
+      showToast({ variant: "error", title: language.t("toast.agent.noMatch.title", { query }) })
+      return
+    }
+    local.agent.set(match.name)
   }
 
   const modeCommands = () => {
@@ -95,7 +131,8 @@ export const useComposerCommands = (input: { model?: ModelSelection } = {}) => {
       description: language.t("command.model.choose.description"),
       keybind: "mod+'",
       slash: "model",
-      onSelect: chooseModel,
+      argumentHint: language.t("command.model.choose.hint"),
+      onSelect: (_, args) => (args ? selectModel(args) : void chooseModel()),
     }),
     modelCommand({
       id: "model.variant.cycle",
@@ -110,8 +147,9 @@ export const useComposerCommands = (input: { model?: ModelSelection } = {}) => {
       description: language.t("command.agent.cycle.description"),
       keybind: "mod+.",
       slash: "agent",
+      argumentHint: language.t("command.agent.cycle.hint"),
       disabled: !local.agent.visible(),
-      onSelect: () => local.agent.move(1),
+      onSelect: (_, args) => (args ? selectAgent(args) : local.agent.move(1)),
     }),
     agentCommand({
       id: "agent.cycle.reverse",

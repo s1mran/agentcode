@@ -1,12 +1,18 @@
+import { shouldOpenSlashPopover } from "@opencode-ai/core/util/slash"
 import type { PromptInputV2HistoryEntry, PromptInputV2PersistedState, PromptInputV2Suggestion } from "./types"
+
+/** How a suggestion was chosen: Enter runs, Tab only completes, click runs. */
+export type PromptInputV2SelectVia = "enter" | "tab" | "click"
 
 export type PromptInputV2InteractionState = {
   mode: "normal" | "shell"
+  // `explicit` marks a command the user picked with the arrow keys, ctrl-n/p or the pointer; only then does Enter run
+  // the active item instead of an exact name match.
   popover:
     | { type: "closed" }
     | { type: "context"; query: string; activeID?: string }
-    | { type: "command-inline"; query: string; activeID?: string }
-    | { type: "command-menu"; query: string; activeID?: string }
+    | { type: "command-inline"; query: string; activeID?: string; explicit?: boolean }
+    | { type: "command-menu"; query: string; activeID?: string; explicit?: boolean }
   drag: "idle" | "active"
   focus: "editor" | "command-search" | "external"
   activeContextID?: string
@@ -15,15 +21,24 @@ export type PromptInputV2InteractionState = {
 }
 
 export type PromptInputV2InteractionEvent =
-  | { type: "input.changed"; value: string; persist?: boolean }
+  | { type: "input.changed"; value: string; persist?: boolean; triggers?: readonly string[] }
   | { type: "commands.open" }
   | { type: "context.open" }
   | { type: "popover.query"; value: string }
   | { type: "popover.results"; ids: string[] }
   | { type: "popover.active"; id: string }
   | { type: "popover.close" }
-  | { type: "popover.select"; item: PromptInputV2Suggestion }
-  | { type: "key.down"; key: string; ctrl: boolean; composing: boolean; ids: string[]; empty?: boolean }
+  | { type: "popover.select"; item: PromptInputV2Suggestion; via?: PromptInputV2SelectVia }
+  | {
+      type: "key.down"
+      key: string
+      ctrl: boolean
+      composing: boolean
+      ids: string[]
+      empty?: boolean
+      /** The command whose name or alias exactly matches the command popover's query. */
+      exactID?: string
+    }
   | { type: "mode.shell" }
   | { type: "mode.normal" }
   | { type: "drag.enter" }
@@ -36,7 +51,7 @@ export type PromptInputV2InteractionCommand =
   | { type: "draft.setText"; value: string }
   | { type: "mention.add"; item: PromptInputV2Suggestion }
   | { type: "popover.filter"; popover: "command" | "context"; query: string }
-  | { type: "suggestion.select"; id: string }
+  | { type: "suggestion.select"; id: string; via: PromptInputV2SelectVia }
   | { type: "focus.editor" }
   | { type: "focus.command-search" }
 
@@ -61,7 +76,9 @@ export function transitionPromptInputV2(
   event: PromptInputV2InteractionEvent,
   persisted: PromptInputV2PersistedState,
 ): PromptInputV2Transition {
-  if (event.type === "input.changed") return inputChanged(state, event.value, event.persist !== false, persisted.cursor)
+  if (event.type === "input.changed") {
+    return inputChanged(state, event.value, event.persist !== false, persisted.cursor, event.triggers)
+  }
   if (event.type === "commands.open") return openCommands(state, persisted)
   if (event.type === "context.open") return openContext(state, persisted)
   if (event.type === "popover.query") return queryChanged(state, event.value)
@@ -86,6 +103,7 @@ function inputChanged(
   value: string,
   persist: boolean,
   cursor: number | undefined,
+  triggers: readonly string[] | undefined,
 ): PromptInputV2Transition {
   const setText: PromptInputV2InteractionCommand[] = persist ? [{ type: "draft.setText", value }] : []
   if (state.mode === "normal" && value === "!") {
@@ -103,7 +121,8 @@ function inputChanged(
   }
 
   const command = value.match(/^\/(\S*)$/)
-  if (command) {
+  // A path such as `/Users/me/a.ts` keeps the popover closed so Enter sends it as text.
+  if (command && shouldOpenSlashPopover(command[1] ?? "", triggers)) {
     const query = command[1] ?? ""
     return changed({ ...state, popover: { type: "command-inline", query }, focus: "editor" }, [
       ...setText,
@@ -148,7 +167,7 @@ function openContext(
 function queryChanged(state: PromptInputV2InteractionState, query: string): PromptInputV2Transition {
   if (state.popover.type === "closed") return unchanged(state)
   const popover = state.popover.type === "context" ? "context" : "command"
-  return changed({ ...state, popover: { ...state.popover, query, activeID: undefined } }, [
+  return changed({ ...state, popover: { ...activate(state.popover, undefined), query } }, [
     { type: "popover.filter", popover, query },
   ])
 }
@@ -157,12 +176,15 @@ function resultsChanged(state: PromptInputV2InteractionState, ids: string[]): Pr
   if (state.popover.type === "closed") return unchanged(state)
   const activeID = state.popover.activeID && ids.includes(state.popover.activeID) ? state.popover.activeID : ids[0]
   if (activeID === state.popover.activeID) return unchanged(state)
-  return changed({ ...state, popover: { ...state.popover, activeID } })
+  return changed({ ...state, popover: activate(state.popover, activeID) })
 }
 
 function activeChanged(state: PromptInputV2InteractionState, id: string): PromptInputV2Transition {
-  if (state.popover.type === "closed" || state.popover.activeID === id) return unchanged(state)
-  return changed({ ...state, popover: { ...state.popover, activeID: id } })
+  if (state.popover.type === "closed") return unchanged(state)
+  // Pointer hover over a command is an explicit pick.
+  const explicit = state.popover.type !== "context"
+  if (state.popover.activeID === id && (!explicit || popoverExplicit(state.popover))) return unchanged(state)
+  return changed({ ...state, popover: activate(state.popover, id, explicit) })
 }
 
 function suggestionSelected(
@@ -206,9 +228,23 @@ function keyDown(
   if (event.key === "Escape") {
     return changed({ ...state, popover: { type: "closed" }, focus: "editor" }, [{ type: "focus.editor" }], true)
   }
-  if (event.key === "Tab" || (event.key === "Enter" && !event.composing)) {
+  if (event.key === "Tab") {
     if (!state.popover.activeID) return unchanged(state, true)
-    return unchanged(state, true, [{ type: "suggestion.select", id: state.popover.activeID }])
+    return unchanged(state, true, [{ type: "suggestion.select", id: state.popover.activeID, via: "tab" }])
+  }
+  if (event.key === "Enter" && !event.composing) {
+    if (state.popover.type === "context") {
+      if (!state.popover.activeID) return unchanged(state, true)
+      return unchanged(state, true, [{ type: "suggestion.select", id: state.popover.activeID, via: "enter" }])
+    }
+    // Enter runs the highlighted row: in the searchable menu the active row, in the inline popover only a picked
+    // command or an exact name, so a partial `/name` is left for submit to report as unknown.
+    const target = highlightedSuggestionID(state.popover, event.exactID)
+    if (target) return unchanged(state, true, [{ type: "suggestion.select", id: target, via: "enter" }])
+    if (state.popover.type === "command-inline" && state.popover.query) {
+      return changed({ ...state, popover: { type: "closed" } }, [], false)
+    }
+    return unchanged(state, true)
   }
   const direction =
     event.key === "ArrowDown" || (event.ctrl && event.key === "n")
@@ -217,14 +253,43 @@ function keyDown(
         ? -1
         : 0
   if (!direction || event.ids.length === 0) return unchanged(state)
-  const current = state.popover.activeID ? event.ids.indexOf(state.popover.activeID) : -1
+  // Arrows move from the highlighted row, so the first press in an unhighlighted inline popover lands on the first row.
+  const highlighted = highlightedSuggestionID(state.popover, event.exactID)
+  const current = highlighted ? event.ids.indexOf(highlighted) : -1
   const index =
     current < 0
       ? direction === 1
         ? 0
         : event.ids.length - 1
       : (current + direction + event.ids.length) % event.ids.length
-  return changed({ ...state, popover: { ...state.popover, activeID: event.ids[index] } }, [], true)
+  return changed(
+    { ...state, popover: activate(state.popover, event.ids[index], state.popover.type !== "context") },
+    [],
+    true,
+  )
+}
+
+/**
+ * The suggestion to show as highlighted, which is the one Enter runs: the active row of the context popover and the
+ * searchable command menu, and in the inline command popover only a picked command or the exact name match.
+ */
+export function highlightedSuggestionID(popover: PromptInputV2InteractionState["popover"], exactID?: string) {
+  if (popover.type === "closed") return
+  if (popover.type !== "command-inline" || popover.explicit) return popover.activeID ?? exactID
+  return exactID
+}
+
+type OpenPopover = Exclude<PromptInputV2InteractionState["popover"], { type: "closed" }>
+
+function popoverExplicit(popover: OpenPopover) {
+  return popover.type !== "context" && !!popover.explicit
+}
+
+/** Sets the active item; `explicit` is kept on command popovers only when true, and dropped otherwise. */
+function activate(popover: OpenPopover, activeID: string | undefined, explicit = false): OpenPopover {
+  if (popover.type === "context") return { ...popover, activeID }
+  const { explicit: _previous, ...rest } = popover
+  return explicit ? { ...rest, activeID, explicit: true } : { ...rest, activeID }
 }
 
 function promptText(persisted: PromptInputV2PersistedState) {

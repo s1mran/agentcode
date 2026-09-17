@@ -201,3 +201,33 @@ export function notFound(message: string) {
     data: { message },
   })
 }
+
+/** A workspace trust change that needs the folder to be trusted first (approving one project MCP server). */
+export class WorkspaceTrustRequiredError extends Schema.TaggedErrorClass<WorkspaceTrustRequiredError>()(
+  "WorkspaceTrustRequiredError",
+  {
+    path: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 400 },
+) {}
+
+/** The trust store could not be written (for example a corrupt workspaces.json that is never overwritten). */
+export class WorkspaceTrustStoreError extends Schema.TaggedErrorClass<WorkspaceTrustStoreError>()(
+  "WorkspaceTrustStoreError",
+  {
+    message: Schema.String,
+  },
+  { httpApiStatus: 500 },
+) {}
+
+/** A project MCP server that waits for workspace trust or approval is never started on request. */
+export class McpApprovalRequiredError extends Schema.TaggedErrorClass<McpApprovalRequiredError>()(
+  "McpApprovalRequiredError",
+  {
+    name: Schema.String,
+    reason: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 409 },
+) {}

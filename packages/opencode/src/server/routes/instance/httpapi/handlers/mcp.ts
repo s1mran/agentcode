@@ -2,7 +2,7 @@ import { MCP } from "@/mcp"
 import { Effect, Schema } from "effect"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
-import { McpServerNotFoundError } from "../errors"
+import { McpApprovalRequiredError, McpServerNotFoundError } from "../errors"
 import { AddPayload, AuthCallbackPayload, StatusMap, UnsupportedOAuthError } from "../groups/mcp"
 
 export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handlers) =>
@@ -73,15 +73,23 @@ export const mcpHandlers = HttpApiBuilder.group(InstanceHttpApi, "mcp", (handler
     })
 
     const connect = Effect.fn("McpHttpApi.connect")(function* (ctx: { params: { name: string } }) {
-      yield* mcp
-        .connect(ctx.params.name)
-        .pipe(
-          Effect.catchTag("MCP.NotFoundError", (error) =>
-            Effect.fail(
-              new McpServerNotFoundError({ name: error.name, message: `MCP server not found: ${error.name}` }),
-            ),
+      yield* mcp.connect(ctx.params.name).pipe(
+        Effect.catchTag("MCP.NotFoundError", (error) =>
+          Effect.fail(new McpServerNotFoundError({ name: error.name, message: `MCP server not found: ${error.name}` })),
+        ),
+        Effect.catchTag("MCP.ApprovalRequiredError", (error) =>
+          Effect.fail(
+            new McpApprovalRequiredError({
+              name: error.name,
+              reason: error.reason,
+              message:
+                error.reason === "untrusted"
+                  ? `MCP server ${error.name} comes from this folder's configuration and waits for workspace trust`
+                  : `MCP server ${error.name} from this folder's configuration needs approval before it can start`,
+            }),
           ),
-        )
+        ),
+      )
       return true
     })
 

@@ -180,6 +180,26 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "सन्देश प्रतिलिपि गर्नुहोस्",
   "ui.message.forkMessage": "नयाँ सत्रको लागि फोर्क",
   "ui.message.revertMessage": "सन्देश उल्टाउनुहोस्",
+  "ui.message.revertMessage.partial.one": "सन्देश उल्टाउनुहोस् ({{count}} फाइल पुनर्स्थापना गर्न सकिँदैन)",
+  "ui.message.revertMessage.partial.other": "सन्देश उल्टाउनुहोस् ({{count}} फाइल पुनर्स्थापना गर्न सकिँदैन)",
+  "ui.checkpoint.skipped.one": "पूर्ववतले यहाँ परिवर्तन गरिएका {{count}} फाइल पुनर्स्थापना गर्न सक्दैन",
+  "ui.checkpoint.skipped.other": "पूर्ववतले यहाँ परिवर्तन गरिएका {{count}} फाइल पुनर्स्थापना गर्न सक्दैन",
+  "ui.checkpoint.reason.ignored": "बेवास्ता गरियो, सुरक्षित गरिएन",
+  "ui.checkpoint.reason.large": "2 MB भन्दा ठूलो",
+  "ui.checkpoint.reason.outside": "परियोजना फोल्डर बाहिर",
+  "ui.checkpoint.reason.offline": "क्लाउड फाइल डाउनलोड गरिएको छैन",
+  "ui.checkpoint.reason.unavailable": "चेकपोइन्ट बन्द",
+  "ui.checkpoint.unavailable.root":
+    "यो ड्राइभको रुट भएकाले चेकपोइन्ट बन्द छन्। पूर्ववतले यी फाइलहरू पुनर्स्थापना गर्न सक्दैन।",
+  "ui.checkpoint.unavailable.home":
+    "तपाईंको होम फोल्डरमा चेकपोइन्ट बन्द छन्। पूर्ववत प्रयोग गर्न परियोजना फोल्डर खोल्नुहोस्।",
+  "ui.checkpoint.unavailable.data-dir": "यो फोल्डरमा AgentCode को आफ्नै डेटा भएकाले चेकपोइन्ट बन्द छन्।",
+  "ui.checkpoint.unavailable.too-many-files":
+    "चेकपोइन्ट बन्द छन्: निर्भरता र बिल्ड आउटपुट छोडेपछि पनि यो फोल्डरमा 20,000 भन्दा बढी फाइल छन्।",
+  "ui.checkpoint.unavailable.too-large": "चेकपोइन्ट बन्द छन्: यो फोल्डरमा 512 MB भन्दा बढी फाइल छन्।",
+  "ui.checkpoint.unavailable.slow":
+    "चेकपोइन्ट अहिलेलाई बन्द छन्: यो फोल्डर स्क्यान गर्न धेरै समय लाग्यो। छिट्टै फेरि प्रयास गरिनेछ।",
+  "ui.checkpoint.unavailable.no-git": "चेकपोइन्ट बन्द छन्: Git स्थापना गरिएको छैन। पूर्ववत गर्न Git स्थापना गर्नुहोस्।",
   "ui.message.copyResponse": "प्रतिक्रिया प्रतिलिपि गर्नुहोस्",
   "ui.message.copied": "प्रतिलिपि गरियो",
   "ui.message.duration.seconds": "{{count}}s",

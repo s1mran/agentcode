@@ -26,6 +26,7 @@ import { TextReveal } from "@opencode-ai/ui/text-reveal"
 import { createAutoScroll } from "@opencode-ai/ui/hooks"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
 import { normalize } from "./session-diff"
+import { checkpointNotice } from "./checkpoint-notice"
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -110,6 +111,7 @@ function partState(part: PartType, showReasoningSummaries: boolean) {
     if (showReasoningSummaries && part.text?.trim()) return "visible" as const
     return
   }
+  if (part.type === "patch") return checkpointNotice(part) ? ("visible" as const) : undefined
   if (PART_MAPPING[part.type]) return "visible" as const
   return
 }

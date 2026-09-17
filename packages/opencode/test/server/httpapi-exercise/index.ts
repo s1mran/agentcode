@@ -115,6 +115,24 @@ const scenarios: Scenario[] = [
       },
       "status",
     ),
+  http.protected.get("/global/trust", "global.trust.list").global().json(200, array),
+  http.protected
+    .delete("/global/trust", "global.trust.forget")
+    .global()
+    .mutating()
+    .at(() => ({ path: "/global/trust", body: { path: path.join(exerciseGlobalRoot, "httpapi-undecided") } }))
+    .json(
+      200,
+      (body) => {
+        check(body === false, "forgetting a folder with no decision should return false")
+      },
+      "status",
+    ),
+  http.protected
+    .delete("/global/trust", "global.trust.forget.invalid")
+    .global()
+    .at(() => ({ path: "/global/trust", body: {} }))
+    .status(400),
   http.protected.get("/path", "path.get").json(200, (body, ctx) => {
     object(body)
     check(body.directory === ctx.directory, "directory should resolve from x-opencode-directory")
@@ -430,6 +448,65 @@ const scenarios: Scenario[] = [
     .post("/mcp/{name}/disconnect", "mcp.disconnect")
     .mutating()
     .at((ctx) => ({ path: route("/mcp/{name}/disconnect", { name: "httpapi-missing" }), headers: ctx.headers() }))
+    .json(404, object, "status"),
+  http.protected.get("/trust", "trust.get").json(200, (body) => {
+    object(body)
+    check(body.kind === "repository", "a git scenario project should be keyed as a repository")
+    check(body.policy === "trusted" && body.effective === "full", "the exercise launch policy should trust the folder")
+    array(body.held)
+  }),
+  http.protected
+    .post("/trust", "trust.set")
+    .mutating()
+    .at((ctx) => ({ path: "/trust", headers: ctx.headers(), body: { trusted: true } }))
+    .jsonEffect(
+      200,
+      (body, ctx) =>
+        Effect.gen(function* () {
+          object(body)
+          check(body.status === "trusted", "trust set should record the folder as trusted")
+          const listed = yield* Effect.promise(async () => {
+            const { WorkspaceTrustStore } = await import("../../../src/trust/store")
+            return Bun.file(WorkspaceTrustStore.file()).text()
+          })
+          check(listed.includes(JSON.stringify(ctx.directory).slice(1, -1)), "trust set should write the trust store")
+        }),
+      "status",
+    ),
+  http.protected
+    .post("/trust", "trust.set.invalid")
+    .at((ctx) => ({ path: "/trust", headers: ctx.headers(), body: { trusted: "yes" } }))
+    .status(400),
+  http.protected
+    .delete("/trust", "trust.forget")
+    .mutating()
+    .json(
+      200,
+      (body) => {
+        object(body)
+        check(typeof body.path === "string" && typeof body.status === "string", "trust forget should return a decision")
+      },
+      "status",
+    ),
+  http.protected
+    .delete("/trust/mcp", "trust.resetMcp")
+    .mutating()
+    .json(
+      200,
+      (body) => {
+        object(body)
+        check(typeof body.effective === "string", "trust MCP reset should return a decision")
+      },
+      "status",
+    ),
+  http.protected
+    .post("/trust/mcp/{name}", "trust.mcp")
+    .mutating()
+    .at((ctx) => ({
+      path: route("/trust/mcp/{name}", { name: "httpapi-missing" }),
+      headers: ctx.headers(),
+      body: { approve: true },
+    }))
     .json(404, object, "status"),
   http.protected.get("/pty/shells", "pty.shells").json(200, array),
   http.protected.get("/pty", "pty.list").json(200, array),

@@ -2,6 +2,7 @@ import type { Argv } from "yargs"
 import { Effect, Schema } from "effect"
 import type { AppServices } from "@/effect/app-runtime"
 import type { InstanceStore } from "@/project/instance-store"
+import { WorkspaceTrustLaunch } from "@opencode-ai/core/trust/launch"
 import { cmd, type WithDoubleDash } from "./cmd/cmd"
 
 /**
@@ -46,6 +47,11 @@ interface EffectCmdOpts<Args, A> {
   instance?: boolean | ((args: Args) => boolean)
   /** Defaults to process.cwd(). Override for commands that take a directory positional. */
   directory?: (args: Args) => string
+  /**
+   * The workspace trust policy this invocation's in-process instance loads with (see WorkspaceTrustLaunch). Applied
+   * before the instance loads; `undefined` leaves the OPENCODE_WORKSPACE_TRUST variable or the `prompt` default.
+   */
+  trustPolicy?: (args: Args) => WorkspaceTrustLaunch.Policy | undefined
   handler: (args: WithDoubleDash<Args>) => Effect.Effect<A, CliError, AppServices | InstanceStore.Service>
 }
 
@@ -76,6 +82,8 @@ export const effectCmd = <Args, A>(opts: EffectCmdOpts<Args, A>) =>
       const { AppRuntime } = await import("@/effect/app-runtime")
       // yargs typing wraps Args in ArgumentsCamelCase<WithDoubleDash<...>>; cast at the boundary.
       const args = rawArgs as unknown as WithDoubleDash<Args>
+      const policy = opts.trustPolicy?.(args)
+      if (policy) WorkspaceTrustLaunch.set(policy)
       const useInstance = typeof opts.instance === "function" ? opts.instance(args) : opts.instance !== false
       if (!useInstance) {
         await AppRuntime.runPromise(opts.handler(args))

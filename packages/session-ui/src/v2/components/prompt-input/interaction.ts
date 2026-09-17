@@ -1,6 +1,7 @@
 import { createEffect, on, type Accessor } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { useFilteredList } from "@opencode-ai/ui/hooks"
+import { slashNameMatches } from "@opencode-ai/core/util/slash"
 import { createPromptInputV2Attachments, type PromptInputV2AttachmentConfig } from "./attachments"
 import { createPromptInputV2Store, type PromptInputV2StoreInput } from "./store"
 import type {
@@ -14,9 +15,11 @@ import type {
 } from "./types"
 import {
   createPromptInputV2InteractionState,
+  highlightedSuggestionID,
   transitionPromptInputV2,
   type PromptInputV2InteractionCommand,
   type PromptInputV2InteractionEvent,
+  type PromptInputV2SelectVia,
 } from "./machine"
 
 export type PromptInputV2SelectControl = {
@@ -65,7 +68,14 @@ export function createPromptInputV2Controller(input: {
   openContext?: (key: string) => void
   onContextRemove?: (item: PromptInputV2Comment) => void
   onEditor?: (element: HTMLElement) => void
-  onSuggestionSelect?: (item: PromptInputV2Suggestion) => (() => void) | void
+  /**
+   * Returns an action to run instead of inserting the suggestion. `via` says how it was chosen (Tab only completes) and
+   * `menu` whether it came from the searchable command menu of a populated draft.
+   */
+  onSuggestionSelect?: (
+    item: PromptInputV2Suggestion,
+    ctx: { via: PromptInputV2SelectVia; menu: boolean },
+  ) => (() => void) | void
   view: PromptInputV2ViewConfig
   attachments?: PromptInputV2AttachmentConfig
 }) {
@@ -133,10 +143,19 @@ export function createPromptInputV2Controller(input: {
   const commandList = useFilteredList<PromptInputV2Suggestion>({
     items: () => input.commands(),
     key: (item) => item.id,
-    filterKeys: ["trigger", "title"],
+    filterKeys: ["trigger", "keywords", "title"],
+    exact: (item, filter) => matchesCommand(item, filter),
   })
   const list = () => (state.popover.type === "context" ? contextList : commandList)
   const suggestions = () => list().flat()
+  // The command whose name or alias is exactly the query. The full list is the fallback while filtering catches up.
+  const exactCommand = () => {
+    if (state.popover.type !== "command-inline" && state.popover.type !== "command-menu") return
+    const query = state.popover.query
+    if (!query) return
+    const match = (item: PromptInputV2Suggestion) => item.kind === "command" && matchesCommand(item, query)
+    return suggestions().find(match) ?? input.commands().find(match)
+  }
 
   const execute = (command: PromptInputV2InteractionCommand) => {
     if (command.type === "draft.setText") {
@@ -152,8 +171,10 @@ export function createPromptInputV2Controller(input: {
       return
     }
     if (command.type === "suggestion.select") {
-      const item = suggestions().find((entry) => entry.id === command.id)
-      if (item) dispatch({ type: "popover.select", item })
+      const item =
+        suggestions().find((entry) => entry.id === command.id) ??
+        (state.popover.type === "context" ? undefined : input.commands().find((entry) => entry.id === command.id))
+      if (item) dispatch({ type: "popover.select", item, via: command.via })
       return
     }
     if (command.type === "focus.editor") requestAnimationFrame(() => editor?.focus())
@@ -162,7 +183,13 @@ export function createPromptInputV2Controller(input: {
   function dispatch(event: PromptInputV2InteractionEvent) {
     const mode = state.mode
     const result = transitionPromptInputV2(state, event, draft.state)
-    const action = event.type === "popover.select" ? input.onSuggestionSelect?.(event.item) : undefined
+    const action =
+      event.type === "popover.select"
+        ? input.onSuggestionSelect?.(event.item, {
+            via: event.via ?? "click",
+            menu: state.popover.type === "command-menu",
+          })
+        : undefined
     if (event.type === "popover.select") {
       if (!action || state.popover.type !== "command-menu") result.commands.forEach(execute)
       if (action && event.item.kind === "command" && state.popover.type !== "command-menu") {
@@ -204,6 +231,7 @@ export function createPromptInputV2Controller(input: {
       composing: event.isComposing,
       ids: suggestions().map((item) => item.id),
       empty: draft.state.prompt.every((part) => !("content" in part) || part.content.length === 0),
+      exactID: exactCommand()?.id,
     })
     if (handled) event.preventDefault()
     if (handled && event.key !== "Enter" && event.key !== "Tab" && state.popover.type !== "closed") {
@@ -293,6 +321,8 @@ export function createPromptInputV2Controller(input: {
     state,
     view: input.view,
     suggestions,
+    /** The suggestion shown as highlighted, which is the one Enter runs. */
+    highlightedID: () => highlightedSuggestionID(state.popover, exactCommand()?.id),
     dispatch,
     onKeyDown,
     value() {
@@ -340,7 +370,8 @@ export function createPromptInputV2Controller(input: {
     restoreFocus,
     onInput(value: string, prompt?: PromptInputV2PersistedState["prompt"], cursor?: number) {
       if (prompt) draft.setPrompt(prompt, cursor)
-      dispatch({ type: "input.changed", value, persist: !prompt })
+      const triggers = input.commands().flatMap((item) => [item.trigger ?? "", ...(item.aliases ?? [])])
+      dispatch({ type: "input.changed", value, persist: !prompt, triggers })
     },
     onCursor(cursor: number) {
       draft.setCursor(cursor)
@@ -433,6 +464,10 @@ export function createPromptInputV2Controller(input: {
 }
 
 export type PromptInputV2Interaction = ReturnType<typeof createPromptInputV2Controller>
+
+function matchesCommand(item: PromptInputV2Suggestion, query: string) {
+  return slashNameMatches({ trigger: item.trigger ?? "", aliases: item.aliases }, query)
+}
 
 function canNavigateHistory(direction: "up" | "down", text: string, cursor: number, inHistory: boolean) {
   const position = Math.max(0, Math.min(cursor, text.length))

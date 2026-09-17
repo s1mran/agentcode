@@ -165,6 +165,26 @@ export const dict: Record<Keys, string> = {
   "ui.message.copyMessage": "Kopier melding",
   "ui.message.forkMessage": "Forgren til ny sesjon",
   "ui.message.revertMessage": "Tilbakestill til dette punktet",
+  "ui.message.revertMessage.partial.one": "Tilbakestill til dette punktet ({{count}} fil kan ikke gjenopprettes)",
+  "ui.message.revertMessage.partial.other": "Tilbakestill til dette punktet ({{count}} filer kan ikke gjenopprettes)",
+  "ui.checkpoint.skipped.one": "Angre kan ikke gjenopprette {{count}} fil som ble endret her",
+  "ui.checkpoint.skipped.other": "Angre kan ikke gjenopprette {{count}} filer som ble endret her",
+  "ui.checkpoint.reason.ignored": "ignorert, ikke lagret",
+  "ui.checkpoint.reason.large": "større enn 2 MB",
+  "ui.checkpoint.reason.outside": "utenfor prosjektmappen",
+  "ui.checkpoint.reason.offline": "skyfil ikke lastet ned",
+  "ui.checkpoint.reason.unavailable": "sjekkpunkter av",
+  "ui.checkpoint.unavailable.root":
+    "Sjekkpunkter er slått av fordi dette er roten av en disk. Angre kan ikke gjenopprette disse filene.",
+  "ui.checkpoint.unavailable.home": "Sjekkpunkter er slått av i hjemmemappen. Åpne en prosjektmappe for å kunne angre.",
+  "ui.checkpoint.unavailable.data-dir": "Sjekkpunkter er slått av fordi denne mappen inneholder AgentCodes egne data.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Sjekkpunkter er slått av: denne mappen har mer enn 20 000 filer når avhengigheter og byggeresultater er utelatt.",
+  "ui.checkpoint.unavailable.too-large": "Sjekkpunkter er slått av: denne mappen inneholder mer enn 512 MB med filer.",
+  "ui.checkpoint.unavailable.slow":
+    "Sjekkpunkter er slått av inntil videre: skanning av denne mappen tok for lang tid. Det prøves igjen snart.",
+  "ui.checkpoint.unavailable.no-git":
+    "Sjekkpunkter er slått av: Git er ikke installert. Installer Git for å kunne angre.",
   "ui.message.copyResponse": "Kopier svar",
   "ui.message.copied": "Kopiert!",
   "ui.message.interrupted": "Avbrutt",

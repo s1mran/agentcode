@@ -194,6 +194,32 @@ export const dict = {
   "ui.message.copyMessage": "Kopiuj wiadomość",
   "ui.message.forkMessage": "Rozwidlij do nowej sesji",
   "ui.message.revertMessage": "Cofnij wiadomość",
+  "ui.message.revertMessage.partial.one": "Cofnij wiadomość (pliki, których nie można przywrócić: {{count}})",
+  "ui.message.revertMessage.partial.other": "Cofnij wiadomość (pliki, których nie można przywrócić: {{count}})",
+  "ui.message.revertMessage.partial.few": "Cofnij wiadomość (pliki, których nie można przywrócić: {{count}})",
+  "ui.message.revertMessage.partial.many": "Cofnij wiadomość (pliki, których nie można przywrócić: {{count}})",
+  "ui.checkpoint.skipped.one": "Cofanie nie przywróci plików zmienionych tutaj: {{count}}",
+  "ui.checkpoint.skipped.other": "Cofanie nie przywróci plików zmienionych tutaj: {{count}}",
+  "ui.checkpoint.skipped.few": "Cofanie nie przywróci plików zmienionych tutaj: {{count}}",
+  "ui.checkpoint.skipped.many": "Cofanie nie przywróci plików zmienionych tutaj: {{count}}",
+  "ui.checkpoint.reason.ignored": "zignorowany, nie zapisano",
+  "ui.checkpoint.reason.large": "większy niż 2 MB",
+  "ui.checkpoint.reason.outside": "poza folderem projektu",
+  "ui.checkpoint.reason.offline": "plik w chmurze nie został pobrany",
+  "ui.checkpoint.reason.unavailable": "punkty kontrolne wyłączone",
+  "ui.checkpoint.unavailable.root":
+    "Punkty kontrolne są wyłączone, ponieważ to katalog główny dysku. Cofanie nie przywróci tych plików.",
+  "ui.checkpoint.unavailable.home":
+    "Punkty kontrolne są wyłączone w folderze domowym. Otwórz folder projektu, aby móc cofać zmiany.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Punkty kontrolne są wyłączone, ponieważ ten folder zawiera własne dane AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Punkty kontrolne są wyłączone: ten folder ma ponad 20 000 plików po pominięciu zależności i wyników kompilacji.",
+  "ui.checkpoint.unavailable.too-large": "Punkty kontrolne są wyłączone: ten folder zawiera ponad 512 MB plików.",
+  "ui.checkpoint.unavailable.slow":
+    "Punkty kontrolne są na razie wyłączone: skanowanie tego folderu trwało zbyt długo. Wkrótce nastąpi ponowna próba.",
+  "ui.checkpoint.unavailable.no-git":
+    "Punkty kontrolne są wyłączone: Git nie jest zainstalowany. Zainstaluj Git, aby móc cofać zmiany.",
   "ui.message.copyResponse": "Kopiuj odpowiedź",
   "ui.message.copied": "Skopiowano!",
   "ui.message.interrupted": "Przerwano",

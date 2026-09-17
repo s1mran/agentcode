@@ -187,6 +187,31 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Kopiraj sporočilo",
   "ui.message.forkMessage": "Odcepi v novo sejo",
   "ui.message.revertMessage": "Razveljavi sporočilo",
+  "ui.message.revertMessage.partial.one": "Razveljavi sporočilo (datoteke, ki jih ni mogoče obnoviti: {{count}})",
+  "ui.message.revertMessage.partial.other": "Razveljavi sporočilo (datoteke, ki jih ni mogoče obnoviti: {{count}})",
+  "ui.message.revertMessage.partial.two": "Razveljavi sporočilo (datoteke, ki jih ni mogoče obnoviti: {{count}})",
+  "ui.message.revertMessage.partial.few": "Razveljavi sporočilo (datoteke, ki jih ni mogoče obnoviti: {{count}})",
+  "ui.checkpoint.skipped.one": "Razveljavitev ne more obnoviti datotek, spremenjenih tukaj: {{count}}",
+  "ui.checkpoint.skipped.other": "Razveljavitev ne more obnoviti datotek, spremenjenih tukaj: {{count}}",
+  "ui.checkpoint.skipped.two": "Razveljavitev ne more obnoviti datotek, spremenjenih tukaj: {{count}}",
+  "ui.checkpoint.skipped.few": "Razveljavitev ne more obnoviti datotek, spremenjenih tukaj: {{count}}",
+  "ui.checkpoint.reason.ignored": "prezrto, ni zajeto",
+  "ui.checkpoint.reason.large": "večje od 2 MB",
+  "ui.checkpoint.reason.outside": "zunaj mape projekta",
+  "ui.checkpoint.reason.offline": "datoteka v oblaku ni prenesena",
+  "ui.checkpoint.reason.unavailable": "kontrolne točke izklopljene",
+  "ui.checkpoint.unavailable.root":
+    "Kontrolne točke so izklopljene, ker je to koren pogona. Razveljavitev ne more obnoviti teh datotek.",
+  "ui.checkpoint.unavailable.home":
+    "Kontrolne točke so izklopljene v vaši domači mapi. Odprite mapo projekta, da boste lahko razveljavljali.",
+  "ui.checkpoint.unavailable.data-dir": "Kontrolne točke so izklopljene, ker ta mapa vsebuje lastne podatke AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Kontrolne točke so izklopljene: ta mapa ima brez odvisnosti in izhoda gradnje več kot 20.000 datotek.",
+  "ui.checkpoint.unavailable.too-large": "Kontrolne točke so izklopljene: ta mapa vsebuje več kot 512 MB datotek.",
+  "ui.checkpoint.unavailable.slow":
+    "Kontrolne točke so začasno izklopljene: pregled te mape je trajal predolgo. Kmalu bo sledil nov poskus.",
+  "ui.checkpoint.unavailable.no-git":
+    "Kontrolne točke so izklopljene: Git ni nameščen. Namestite Git, da boste lahko razveljavljali.",
   "ui.message.copyResponse": "Kopiraj odgovor",
   "ui.message.copied": "Kopirano",
   "ui.message.duration.seconds": "{{count}}s",

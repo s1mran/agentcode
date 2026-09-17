@@ -178,6 +178,28 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "წერილის კოპირება",
   "ui.message.forkMessage": "ახალ სესიად განშტოება",
   "ui.message.revertMessage": "წერილის დაბრუნება",
+  "ui.message.revertMessage.partial.one": "წერილის დაბრუნება ({{count}} ფაილის აღდგენა შეუძლებელია)",
+  "ui.message.revertMessage.partial.other": "წერილის დაბრუნება ({{count}} ფაილის აღდგენა შეუძლებელია)",
+  "ui.checkpoint.skipped.one": "გაუქმება არ შეძლებს აქ შეცვლილი {{count}} ფაილის აღდგენას",
+  "ui.checkpoint.skipped.other": "გაუქმება არ შეძლებს აქ შეცვლილი {{count}} ფაილის აღდგენას",
+  "ui.checkpoint.reason.ignored": "იგნორირებულია, არ შეინახა",
+  "ui.checkpoint.reason.large": "2 MB-ზე დიდი",
+  "ui.checkpoint.reason.outside": "პროექტის საქაღალდის გარეთ",
+  "ui.checkpoint.reason.offline": "ღრუბლის ფაილი არ არის ჩამოტვირთული",
+  "ui.checkpoint.reason.unavailable": "საკონტროლო წერტილები გამორთულია",
+  "ui.checkpoint.unavailable.root":
+    "საკონტროლო წერტილები გამორთულია, რადგან ეს დისკის ძირეული საქაღალდეა. გაუქმება ამ ფაილებს არ აღადგენს.",
+  "ui.checkpoint.unavailable.home":
+    "საკონტროლო წერტილები გამორთულია თქვენს საწყის საქაღალდეში. გაუქმებისთვის გახსენით პროექტის საქაღალდე.",
+  "ui.checkpoint.unavailable.data-dir":
+    "საკონტროლო წერტილები გამორთულია, რადგან ეს საქაღალდე შეიცავს AgentCode-ის საკუთარ მონაცემებს.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "საკონტროლო წერტილები გამორთულია: დამოკიდებულებებისა და ბილდის შედეგების გარეშე ამ საქაღალდეში 20 000-ზე მეტი ფაილია.",
+  "ui.checkpoint.unavailable.too-large": "საკონტროლო წერტილები გამორთულია: ეს საქაღალდე 512 MB-ზე მეტ ფაილს შეიცავს.",
+  "ui.checkpoint.unavailable.slow":
+    "საკონტროლო წერტილები დროებით გამორთულია: ამ საქაღალდის სკანირებას ძალიან დიდი დრო დასჭირდა. მალე ხელახლა ვცდილობთ.",
+  "ui.checkpoint.unavailable.no-git":
+    "საკონტროლო წერტილები გამორთულია: Git არ არის დაინსტალირებული. დააინსტალირეთ Git, რომ გააუქმება შეძლოთ.",
   "ui.message.copyResponse": "პასუხის კოპირება",
   "ui.message.copied": "კოპირებულია",
   "ui.message.duration.seconds": "{{count}} წმ",

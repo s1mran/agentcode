@@ -182,6 +182,31 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Copiază mesajul",
   "ui.message.forkMessage": "Deschide într-o sesiune nouă",
   "ui.message.revertMessage": "Revino la mesaj",
+  "ui.message.revertMessage.partial.one": "Revino la mesaj (fișiere care nu pot fi restaurate: {{count}})",
+  "ui.message.revertMessage.partial.other": "Revino la mesaj (fișiere care nu pot fi restaurate: {{count}})",
+  "ui.message.revertMessage.partial.few": "Revino la mesaj (fișiere care nu pot fi restaurate: {{count}})",
+  "ui.checkpoint.skipped.one": "Anularea nu poate restaura fișierele modificate aici: {{count}}",
+  "ui.checkpoint.skipped.other": "Anularea nu poate restaura fișierele modificate aici: {{count}}",
+  "ui.checkpoint.skipped.few": "Anularea nu poate restaura fișierele modificate aici: {{count}}",
+  "ui.checkpoint.reason.ignored": "ignorat, necapturat",
+  "ui.checkpoint.reason.large": "mai mare de 2 MB",
+  "ui.checkpoint.reason.outside": "în afara folderului proiectului",
+  "ui.checkpoint.reason.offline": "fișier din cloud nedescărcat",
+  "ui.checkpoint.reason.unavailable": "puncte de control dezactivate",
+  "ui.checkpoint.unavailable.root":
+    "Punctele de control sunt dezactivate deoarece aceasta este rădăcina unei unități. Anularea nu poate restaura aceste fișiere.",
+  "ui.checkpoint.unavailable.home":
+    "Punctele de control sunt dezactivate în folderul personal. Deschide un folder de proiect pentru a putea anula.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Punctele de control sunt dezactivate deoarece acest folder conține datele proprii ale AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Punctele de control sunt dezactivate: acest folder are peste 20.000 de fișiere, fără dependențe și rezultate de build.",
+  "ui.checkpoint.unavailable.too-large":
+    "Punctele de control sunt dezactivate: acest folder conține peste 512 MB de fișiere.",
+  "ui.checkpoint.unavailable.slow":
+    "Punctele de control sunt dezactivate deocamdată: scanarea acestui folder a durat prea mult. Se va încerca din nou în curând.",
+  "ui.checkpoint.unavailable.no-git":
+    "Punctele de control sunt dezactivate: Git nu este instalat. Instalați Git pentru a putea anula.",
   "ui.message.copyResponse": "Copiază răspunsul",
   "ui.message.copied": "Copiat",
   "ui.message.duration.seconds": "{{count}}s",

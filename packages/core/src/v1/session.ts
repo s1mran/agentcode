@@ -22,6 +22,8 @@ export {
   Part,
   PartID,
   PatchPart,
+  PatchSkippedFile,
+  CheckpointUnavailable,
   Range,
   ReasoningPart,
   ResourceSource,

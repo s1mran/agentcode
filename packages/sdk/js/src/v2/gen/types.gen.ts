@@ -585,6 +585,11 @@ export type SnapshotPart = {
   snapshot: string
 }
 
+export type PatchSkippedFile = {
+  file: string
+  reason: "ignored" | "large" | "outside" | "offline" | "unavailable"
+}
+
 export type PatchPart = {
   id: string
   sessionID: string
@@ -592,6 +597,8 @@ export type PatchPart = {
   type: "patch"
   hash: string
   files: Array<string>
+  skipped?: Array<PatchSkippedFile>
+  unavailable?: "root" | "home" | "data-dir" | "too-many-files" | "too-large" | "slow" | "no-git"
 }
 
 export type AgentPart = {
@@ -627,6 +634,7 @@ export type CompactionPart = {
   auto: boolean
   overflow?: boolean
   tail_start_id?: string
+  instructions?: string
 }
 
 export type Part =
@@ -2047,6 +2055,14 @@ export type Config = {
   }
 }
 
+export type GlobalTrustEntry = {
+  path: string
+  kind: "repository" | "directory"
+  trusted: boolean
+  time: number
+  sessionOnly: boolean
+}
+
 export type Model = {
   id: string
   providerID: string
@@ -2423,12 +2439,24 @@ export type McpStatusNeedsClientRegistration = {
   error: string
 }
 
+export type McpStatusPendingApproval = {
+  status: "pending_approval"
+  reason: "untrusted" | "pending" | "changed"
+  source: string
+}
+
+export type McpStatusRejected = {
+  status: "rejected"
+}
+
 export type McpStatus =
   | McpStatusConnected
   | McpStatusDisabled
   | McpStatusFailed
   | McpStatusNeedsAuth
   | McpStatusNeedsClientRegistration
+  | McpStatusPendingApproval
+  | McpStatusRejected
 
 export type McpUnsupportedOAuthError = {
   error: string
@@ -2437,6 +2465,13 @@ export type McpUnsupportedOAuthError = {
 export type McpServerNotFoundError = {
   _tag: "McpServerNotFoundError"
   name: string
+  message: string
+}
+
+export type McpApprovalRequiredError = {
+  _tag: "McpApprovalRequiredError"
+  name: string
+  reason: string
   message: string
 }
 
@@ -2632,6 +2667,89 @@ export type SubtaskPartInput = {
 export type SessionBusyError = {
   _tag: "SessionBusyError"
   sessionID: string
+  message: string
+}
+
+export type TrustHeldPlugin = {
+  kind: "plugin"
+  spec: string
+  source: string
+}
+
+export type TrustHeldTool = {
+  kind: "tool"
+  file: string
+}
+
+export type TrustHeldMcp = {
+  kind: "mcp"
+  name: string
+  type: "local" | "remote"
+  command?: Array<string>
+  url?: string
+  source: string
+  reason: "untrusted" | "pending" | "changed" | "rejected"
+  fingerprint: string
+}
+
+export type TrustHeldPermission = {
+  kind: "permission"
+  permission: string
+  pattern: string
+  source: string
+  agent?: string
+}
+
+export type TrustHeldCommand = {
+  kind: "command"
+  name: string
+  source: string
+}
+
+export type TrustHeldSetting = {
+  kind: "setting"
+  key: string
+  source: string
+  detail?: string
+}
+
+export type TrustHeldItem =
+  | TrustHeldPlugin
+  | TrustHeldTool
+  | TrustHeldMcp
+  | TrustHeldPermission
+  | TrustHeldCommand
+  | TrustHeldSetting
+
+export type TrustInfo = {
+  path: string
+  kind: "repository" | "directory"
+  status: "trusted" | "untrusted" | "unknown"
+  source?: "stored" | "parent" | "session" | "launch"
+  policy: "prompt" | "headless" | "trusted" | "untrusted"
+  effective: "full" | "headless" | "restricted"
+  sessionOnly: boolean
+  held: Array<TrustHeldItem>
+  mcp: {
+    approved: Array<string>
+    rejected: Array<string>
+  }
+}
+
+export type TrustDecision = {
+  path: string
+  status: "trusted" | "untrusted" | "unknown"
+  effective: "full" | "headless" | "restricted"
+}
+
+export type WorkspaceTrustStoreError = {
+  _tag: "WorkspaceTrustStoreError"
+  message: string
+}
+
+export type WorkspaceTrustRequiredError = {
+  _tag: "WorkspaceTrustRequiredError"
+  path: string
   message: string
 }
 
@@ -7285,6 +7403,7 @@ export type GlobalHealthResponses = {
     healthy: true
     version: string
     permissionModes?: true
+    workspaceTrust?: true
   }
 }
 
@@ -7389,6 +7508,58 @@ export type GlobalDisposeResponses = {
 }
 
 export type GlobalDisposeResponse = GlobalDisposeResponses[keyof GlobalDisposeResponses]
+
+export type GlobalTrustForgetData = {
+  body?: {
+    path: string
+  }
+  path?: never
+  query?: never
+  url: "/global/trust"
+}
+
+export type GlobalTrustForgetErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalTrustForgetError = GlobalTrustForgetErrors[keyof GlobalTrustForgetErrors]
+
+export type GlobalTrustForgetResponses = {
+  /**
+   * Whether a decision was removed
+   */
+  200: boolean
+}
+
+export type GlobalTrustForgetResponse = GlobalTrustForgetResponses[keyof GlobalTrustForgetResponses]
+
+export type GlobalTrustListData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/trust"
+}
+
+export type GlobalTrustListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalTrustListError = GlobalTrustListErrors[keyof GlobalTrustListErrors]
+
+export type GlobalTrustListResponses = {
+  /**
+   * Workspace trust decisions
+   */
+  200: Array<GlobalTrustEntry>
+}
+
+export type GlobalTrustListResponse = GlobalTrustListResponses[keyof GlobalTrustListResponses]
 
 export type GlobalUpgradeData = {
   body?: {
@@ -8694,6 +8865,10 @@ export type McpConnectErrors = {
    * McpServerNotFoundError
    */
   404: McpServerNotFoundError
+  /**
+   * McpApprovalRequiredError
+   */
+  409: McpApprovalRequiredError
 }
 
 export type McpConnectError = McpConnectErrors[keyof McpConnectErrors]
@@ -10147,6 +10322,7 @@ export type SessionSummarizeData = {
     providerID: string
     modelID: string
     auto?: boolean
+    instructions?: string
   }
   path: {
     sessionID: string
@@ -10659,6 +10835,177 @@ export type SyncHistoryListResponses = {
 }
 
 export type SyncHistoryListResponse = SyncHistoryListResponses[keyof SyncHistoryListResponses]
+
+export type TrustForgetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/trust"
+}
+
+export type TrustForgetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * WorkspaceTrustStoreError
+   */
+  500: WorkspaceTrustStoreError
+}
+
+export type TrustForgetError = TrustForgetErrors[keyof TrustForgetErrors]
+
+export type TrustForgetResponses = {
+  /**
+   * Trust decision removed
+   */
+  200: TrustDecision
+}
+
+export type TrustForgetResponse = TrustForgetResponses[keyof TrustForgetResponses]
+
+export type TrustGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/trust"
+}
+
+export type TrustGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type TrustGetError = TrustGetErrors[keyof TrustGetErrors]
+
+export type TrustGetResponses = {
+  /**
+   * Workspace trust state
+   */
+  200: TrustInfo
+}
+
+export type TrustGetResponse = TrustGetResponses[keyof TrustGetResponses]
+
+export type TrustSetData = {
+  body?: {
+    trusted: boolean
+    remember?: boolean
+    mcp?: {
+      approve?: Array<string>
+      reject?: Array<string>
+    }
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/trust"
+}
+
+export type TrustSetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * WorkspaceTrustStoreError
+   */
+  500: WorkspaceTrustStoreError
+}
+
+export type TrustSetError = TrustSetErrors[keyof TrustSetErrors]
+
+export type TrustSetResponses = {
+  /**
+   * Trust decision recorded
+   */
+  200: TrustDecision
+}
+
+export type TrustSetResponse = TrustSetResponses[keyof TrustSetResponses]
+
+export type TrustResetMcpData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/trust/mcp"
+}
+
+export type TrustResetMcpErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * WorkspaceTrustStoreError
+   */
+  500: WorkspaceTrustStoreError
+}
+
+export type TrustResetMcpError = TrustResetMcpErrors[keyof TrustResetMcpErrors]
+
+export type TrustResetMcpResponses = {
+  /**
+   * MCP server choices cleared
+   */
+  200: TrustDecision
+}
+
+export type TrustResetMcpResponse = TrustResetMcpResponses[keyof TrustResetMcpResponses]
+
+export type TrustMcpData = {
+  body?: {
+    approve: boolean
+  }
+  path: {
+    name: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/trust/mcp/{name}"
+}
+
+export type TrustMcpErrors = {
+  /**
+   * WorkspaceTrustRequiredError | InvalidRequestError
+   */
+  400: WorkspaceTrustRequiredError | InvalidRequestError
+  /**
+   * McpServerNotFoundError
+   */
+  404: McpServerNotFoundError
+  /**
+   * WorkspaceTrustStoreError
+   */
+  500: WorkspaceTrustStoreError
+}
+
+export type TrustMcpError = TrustMcpErrors[keyof TrustMcpErrors]
+
+export type TrustMcpResponses = {
+  /**
+   * MCP server choice recorded
+   */
+  200: TrustDecision
+}
+
+export type TrustMcpResponse = TrustMcpResponses[keyof TrustMcpResponses]
 
 export type TuiAppendPromptData = {
   body?: {

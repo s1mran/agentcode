@@ -178,6 +178,27 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Afritaðu skilaboð",
   "ui.message.forkMessage": "Kvísla í nýja setu",
   "ui.message.revertMessage": "Afturkalla að skilaboðum",
+  "ui.message.revertMessage.partial.one": "Afturkalla að skilaboðum ({{count}} skrá er ekki hægt að endurheimta)",
+  "ui.message.revertMessage.partial.other": "Afturkalla að skilaboðum ({{count}} skrár er ekki hægt að endurheimta)",
+  "ui.checkpoint.skipped.one": "Afturkalla getur ekki endurheimt {{count}} skrá sem var breytt hér",
+  "ui.checkpoint.skipped.other": "Afturkalla getur ekki endurheimt {{count}} skrár sem var breytt hér",
+  "ui.checkpoint.reason.ignored": "hunsað, ekki vistað",
+  "ui.checkpoint.reason.large": "stærri en 2 MB",
+  "ui.checkpoint.reason.outside": "utan verkefnismöppunnar",
+  "ui.checkpoint.reason.offline": "skýjaskrá ekki sótt",
+  "ui.checkpoint.reason.unavailable": "vistunarpunktar óvirkir",
+  "ui.checkpoint.unavailable.root":
+    "Vistunarpunktar eru óvirkir því þetta er rót drifs. Afturkalla getur ekki endurheimt þessar skrár.",
+  "ui.checkpoint.unavailable.home":
+    "Vistunarpunktar eru óvirkir í heimamöppunni. Opnaðu verkefnismöppu til að geta afturkallað.",
+  "ui.checkpoint.unavailable.data-dir": "Vistunarpunktar eru óvirkir því þessi mappa inniheldur eigin gögn AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Vistunarpunktar eru óvirkir: þessi mappa hefur fleiri en 20.000 skrár fyrir utan kóðasöfn og smíðaúttak.",
+  "ui.checkpoint.unavailable.too-large": "Vistunarpunktar eru óvirkir: þessi mappa geymir meira en 512 MB af skrám.",
+  "ui.checkpoint.unavailable.slow":
+    "Vistunarpunktar eru óvirkir í bili: skönnun þessarar möppu tók of langan tíma. Reynt verður aftur fljótlega.",
+  "ui.checkpoint.unavailable.no-git":
+    "Vistunarpunktar eru óvirkir: Git er ekki uppsett. Settu upp Git til að geta afturkallað.",
   "ui.message.copyResponse": "Afritaðu svar",
   "ui.message.copied": "Afritað",
   "ui.message.duration.seconds": "{{count}}s",

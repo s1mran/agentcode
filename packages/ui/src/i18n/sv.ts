@@ -178,6 +178,28 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Kopiera meddelandet",
   "ui.message.forkMessage": "Förgrena meddelandet till en ny session",
   "ui.message.revertMessage": "Återställ meddelandet",
+  "ui.message.revertMessage.partial.one": "Återställ meddelandet ({{count}} fil kan inte återställas)",
+  "ui.message.revertMessage.partial.other": "Återställ meddelandet ({{count}} filer kan inte återställas)",
+  "ui.checkpoint.skipped.one": "Ångra kan inte återställa {{count}} fil som ändrades här",
+  "ui.checkpoint.skipped.other": "Ångra kan inte återställa {{count}} filer som ändrades här",
+  "ui.checkpoint.reason.ignored": "ignorerad, inte sparad",
+  "ui.checkpoint.reason.large": "större än 2 MB",
+  "ui.checkpoint.reason.outside": "utanför projektmappen",
+  "ui.checkpoint.reason.offline": "molnfil inte nedladdad",
+  "ui.checkpoint.reason.unavailable": "kontrollpunkter av",
+  "ui.checkpoint.unavailable.root":
+    "Kontrollpunkter är avstängda eftersom detta är roten på en enhet. Ångra kan inte återställa de här filerna.",
+  "ui.checkpoint.unavailable.home":
+    "Kontrollpunkter är avstängda i hemmappen. Öppna en projektmapp för att kunna ångra.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Kontrollpunkter är avstängda eftersom den här mappen innehåller AgentCodes egna data.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Kontrollpunkter är avstängda: den här mappen har fler än 20 000 filer när beroenden och byggutdata hoppas över.",
+  "ui.checkpoint.unavailable.too-large": "Kontrollpunkter är avstängda: den här mappen innehåller mer än 512 MB filer.",
+  "ui.checkpoint.unavailable.slow":
+    "Kontrollpunkter är avstängda tills vidare: det tog för lång tid att söka igenom mappen. Ett nytt försök görs snart.",
+  "ui.checkpoint.unavailable.no-git":
+    "Kontrollpunkter är avstängda: Git är inte installerat. Installera Git för att kunna ångra.",
   "ui.message.copyResponse": "Kopiera svaret",
   "ui.message.copied": "Kopierad",
   "ui.message.duration.seconds": "{{count}}s",

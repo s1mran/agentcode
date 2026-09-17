@@ -186,6 +186,32 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Kopírovať správu",
   "ui.message.forkMessage": "Vytvoriť novú reláciu",
   "ui.message.revertMessage": "Vrátiť správu",
+  "ui.message.revertMessage.partial.one": "Vrátiť správu (súbory, ktoré nemožno obnoviť: {{count}})",
+  "ui.message.revertMessage.partial.other": "Vrátiť správu (súbory, ktoré nemožno obnoviť: {{count}})",
+  "ui.message.revertMessage.partial.few": "Vrátiť správu (súbory, ktoré nemožno obnoviť: {{count}})",
+  "ui.message.revertMessage.partial.many": "Vrátiť správu (súbory, ktoré nemožno obnoviť: {{count}})",
+  "ui.checkpoint.skipped.one": "Späť nedokáže obnoviť súbory zmenené tu: {{count}}",
+  "ui.checkpoint.skipped.other": "Späť nedokáže obnoviť súbory zmenené tu: {{count}}",
+  "ui.checkpoint.skipped.few": "Späť nedokáže obnoviť súbory zmenené tu: {{count}}",
+  "ui.checkpoint.skipped.many": "Späť nedokáže obnoviť súbory zmenené tu: {{count}}",
+  "ui.checkpoint.reason.ignored": "ignorované, nezachytené",
+  "ui.checkpoint.reason.large": "väčší ako 2 MB",
+  "ui.checkpoint.reason.outside": "mimo priečinka projektu",
+  "ui.checkpoint.reason.offline": "cloudový súbor nie je stiahnutý",
+  "ui.checkpoint.reason.unavailable": "kontrolné body vypnuté",
+  "ui.checkpoint.unavailable.root":
+    "Kontrolné body sú vypnuté, pretože ide o koreň disku. Späť nedokáže tieto súbory obnoviť.",
+  "ui.checkpoint.unavailable.home":
+    "Kontrolné body sú vo vašom domovskom priečinku vypnuté. Otvorte priečinok projektu, aby ste mohli vracať zmeny.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Kontrolné body sú vypnuté, pretože tento priečinok obsahuje vlastné údaje AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Kontrolné body sú vypnuté: tento priečinok má po vynechaní závislostí a výstupov zostavenia viac ako 20 000 súborov.",
+  "ui.checkpoint.unavailable.too-large": "Kontrolné body sú vypnuté: tento priečinok obsahuje viac ako 512 MB súborov.",
+  "ui.checkpoint.unavailable.slow":
+    "Kontrolné body sú dočasne vypnuté: prehľadanie tohto priečinka trvalo príliš dlho. Čoskoro sa to skúsi znova.",
+  "ui.checkpoint.unavailable.no-git":
+    "Kontrolné body sú vypnuté: Git nie je nainštalovaný. Nainštalujte Git, aby ste mohli vracať zmeny.",
   "ui.message.copyResponse": "Kopírovať odpoveď",
   "ui.message.copied": "Skopírované",
   "ui.message.duration.seconds": "{{count}} s",

@@ -105,7 +105,9 @@ export const loadMcpQuery = (
   >({
     queryKey: [scope, directory, "mcp"] as const,
     queryFn: async () => {
-      if ((await protocol) === "v1" && legacy) return (await legacy.mcp.status()).data ?? {}
+      // Engines that enforce workspace trust also report pending_approval and rejected (see global-sync/mcp.ts McpStatus).
+      if ((await protocol) === "v1" && legacy)
+        return ((await legacy.mcp.status()).data ?? {}) as Record<string, McpServer["status"]>
       return api
         .list({ location: { directory } })
         .then((result) => Object.fromEntries(result.data.map((server) => [server.name, server.status])))
@@ -690,6 +692,12 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     session,
     homeSessions,
     mcp: {
+      /** Approves or rejects a held project MCP server in a trusted folder. The folder's instance reloads. */
+      approve: async (directory: string, name: string, approve: boolean) => {
+        const key = directoryKey(directory)
+        await sdkFor(key).trust.mcp({ name, approve })
+        await queryClient.refetchQueries(queryOptionsApi.mcp(key))
+      },
       toggle: async (directory: string, name: string) => {
         const key = directoryKey(directory)
         const sdk = sdkFor(key)
@@ -718,6 +726,9 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
             await queryClient.refetchQueries(queryOptionsApi.mcp(key))
             await queryClient.refetchQueries(queryOptionsApi.mcpResources(key))
           },
+          // A server from the folder's configuration that waits for approval is approved through the trust dialog
+          // (see mcp.approve), never started by a toggle.
+          approve: async () => {},
         })
       },
     },

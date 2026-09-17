@@ -183,6 +183,30 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Kopiraj poruku",
   "ui.message.forkMessage": "Odvoji u novu sesiju",
   "ui.message.revertMessage": "Vrati poruku",
+  "ui.message.revertMessage.partial.one": "Vrati poruku (datoteke koje se ne mogu vratiti: {{count}})",
+  "ui.message.revertMessage.partial.other": "Vrati poruku (datoteke koje se ne mogu vratiti: {{count}})",
+  "ui.message.revertMessage.partial.few": "Vrati poruku (datoteke koje se ne mogu vratiti: {{count}})",
+  "ui.checkpoint.skipped.one": "Poništavanje ne može vratiti datoteke promijenjene ovdje: {{count}}",
+  "ui.checkpoint.skipped.other": "Poništavanje ne može vratiti datoteke promijenjene ovdje: {{count}}",
+  "ui.checkpoint.skipped.few": "Poništavanje ne može vratiti datoteke promijenjene ovdje: {{count}}",
+  "ui.checkpoint.reason.ignored": "zanemareno, nije spremljeno",
+  "ui.checkpoint.reason.large": "veće od 2 MB",
+  "ui.checkpoint.reason.outside": "izvan mape projekta",
+  "ui.checkpoint.reason.offline": "datoteka u oblaku nije preuzeta",
+  "ui.checkpoint.reason.unavailable": "kontrolne točke isključene",
+  "ui.checkpoint.unavailable.root":
+    "Kontrolne točke su isključene jer je ovo korijen diska. Poništavanje ne može vratiti ove datoteke.",
+  "ui.checkpoint.unavailable.home":
+    "Kontrolne točke su isključene u vašoj početnoj mapi. Otvorite mapu projekta kako biste mogli poništavati.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Kontrolne točke su isključene jer ova mapa sadrži vlastite podatke AgentCodea.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Kontrolne točke su isključene: ova mapa ima više od 20.000 datoteka nakon preskakanja ovisnosti i izlaza izgradnje.",
+  "ui.checkpoint.unavailable.too-large": "Kontrolne točke su isključene: ova mapa sadrži više od 512 MB datoteka.",
+  "ui.checkpoint.unavailable.slow":
+    "Kontrolne točke su privremeno isključene: skeniranje ove mape trajalo je predugo. Uskoro će se pokušati ponovno.",
+  "ui.checkpoint.unavailable.no-git":
+    "Kontrolne točke su isključene: Git nije instaliran. Instalirajte Git kako biste mogli poništavati.",
   "ui.message.copyResponse": "Kopiraj odgovor",
   "ui.message.copied": "Kopirano",
   "ui.message.duration.seconds": "{{count}}s",

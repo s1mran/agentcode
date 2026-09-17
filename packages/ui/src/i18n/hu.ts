@@ -180,6 +180,29 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Üzenet másolása",
   "ui.message.forkMessage": "Elágazás az új munkamenethez",
   "ui.message.revertMessage": "Üzenet visszaállítása",
+  "ui.message.revertMessage.partial.one": "Üzenet visszaállítása ({{count}} fájl nem állítható helyre)",
+  "ui.message.revertMessage.partial.other": "Üzenet visszaállítása ({{count}} fájl nem állítható helyre)",
+  "ui.checkpoint.skipped.one": "A visszavonás nem tud helyreállítani {{count}} itt módosított fájlt",
+  "ui.checkpoint.skipped.other": "A visszavonás nem tud helyreállítani {{count}} itt módosított fájlt",
+  "ui.checkpoint.reason.ignored": "figyelmen kívül hagyva, nincs mentve",
+  "ui.checkpoint.reason.large": "nagyobb mint 2 MB",
+  "ui.checkpoint.reason.outside": "a projektmappán kívül",
+  "ui.checkpoint.reason.offline": "le nem töltött felhőfájl",
+  "ui.checkpoint.reason.unavailable": "ellenőrzőpontok kikapcsolva",
+  "ui.checkpoint.unavailable.root":
+    "Az ellenőrzőpontok ki vannak kapcsolva, mert ez egy meghajtó gyökere. A visszavonás nem tudja helyreállítani ezeket a fájlokat.",
+  "ui.checkpoint.unavailable.home":
+    "Az ellenőrzőpontok ki vannak kapcsolva a kezdőmappában. Nyisson meg egy projektmappát a visszavonáshoz.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Az ellenőrzőpontok ki vannak kapcsolva, mert ez a mappa az AgentCode saját adatait tartalmazza.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Az ellenőrzőpontok ki vannak kapcsolva: ebben a mappában a függőségek és a buildkimenet nélkül is több mint 20 000 fájl van.",
+  "ui.checkpoint.unavailable.too-large":
+    "Az ellenőrzőpontok ki vannak kapcsolva: ez a mappa több mint 512 MB fájlt tartalmaz.",
+  "ui.checkpoint.unavailable.slow":
+    "Az ellenőrzőpontok egyelőre ki vannak kapcsolva: a mappa átvizsgálása túl sokáig tartott. Hamarosan újra próbálkozunk.",
+  "ui.checkpoint.unavailable.no-git":
+    "Az ellenőrzőpontok ki vannak kapcsolva: a Git nincs telepítve. A visszavonáshoz telepítse a Gitet.",
   "ui.message.copyResponse": "Válasz másolása",
   "ui.message.copied": "Másolva",
   "ui.message.duration.seconds": "{{count}}s",

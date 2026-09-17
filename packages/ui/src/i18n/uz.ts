@@ -181,6 +181,27 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Xabarni nusxalash",
   "ui.message.forkMessage": "Yangi seansga tarmoqlash",
   "ui.message.revertMessage": "Xabarni qaytarish",
+  "ui.message.revertMessage.partial.one": "Xabarni qaytarish ({{count}} ta faylni tiklab bo'lmaydi)",
+  "ui.message.revertMessage.partial.other": "Xabarni qaytarish ({{count}} ta faylni tiklab bo'lmaydi)",
+  "ui.checkpoint.skipped.one": "Bekor qilish bu yerda o'zgartirilgan {{count}} ta faylni tiklay olmaydi",
+  "ui.checkpoint.skipped.other": "Bekor qilish bu yerda o'zgartirilgan {{count}} ta faylni tiklay olmaydi",
+  "ui.checkpoint.reason.ignored": "e'tiborsiz qoldirildi, saqlanmadi",
+  "ui.checkpoint.reason.large": "2 MB dan katta",
+  "ui.checkpoint.reason.outside": "loyiha jildidan tashqarida",
+  "ui.checkpoint.reason.offline": "bulutdagi fayl yuklab olinmagan",
+  "ui.checkpoint.reason.unavailable": "nazorat nuqtalari o'chiq",
+  "ui.checkpoint.unavailable.root":
+    "Bu diskning ildizi bo'lgani uchun nazorat nuqtalari o'chiq. Bekor qilish bu fayllarni tiklay olmaydi.",
+  "ui.checkpoint.unavailable.home":
+    "Uy jildingizda nazorat nuqtalari o'chiq. Bekor qilishdan foydalanish uchun loyiha jildini oching.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Bu jildda AgentCode'ning o'z ma'lumotlari borligi uchun nazorat nuqtalari o'chiq.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Nazorat nuqtalari o'chiq: bog'liqliklar va build natijalari hisobga olinmaganda bu jildda 20 000 dan ortiq fayl bor.",
+  "ui.checkpoint.unavailable.too-large": "Nazorat nuqtalari o'chiq: bu jildda 512 MB dan ortiq fayl bor.",
+  "ui.checkpoint.unavailable.slow":
+    "Nazorat nuqtalari vaqtincha o'chiq: bu jildni tekshirish juda uzoq davom etdi. Tez orada qayta urinib ko'riladi.",
+  "ui.checkpoint.unavailable.no-git": "Nazorat nuqtalari o'chiq: Git o'rnatilmagan. Bekor qilish uchun Git o'rnating.",
   "ui.message.copyResponse": "Javobni nusxalash",
   "ui.message.copied": "Koʻchirildi",
   "ui.message.duration.seconds": "{{count}}s",

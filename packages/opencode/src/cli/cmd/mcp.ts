@@ -20,6 +20,9 @@ import { Global } from "@opencode-ai/core/global"
 import { modify, applyEdits } from "jsonc-parser"
 import { Filesystem } from "@/util/filesystem"
 import { Effect } from "effect"
+import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { WorkspaceTrust } from "@/trust"
+import { approveAddedMcp } from "./trust"
 
 function getAuthStatusIcon(status: MCP.AuthStatus): string {
   switch (status) {
@@ -75,7 +78,8 @@ function listState() {
       Object.fromEntries(configuredServers(config).map(([name]) => [name, mcp.hasStoredTokens(name)])),
       { concurrency: "unbounded" },
     )
-    return { config, statuses, stored }
+    const held = (yield* cfg.trust()).held.flatMap((item) => (item.kind === "mcp" ? [item] : []))
+    return { config, statuses, stored, held }
   })
 }
 
@@ -102,6 +106,7 @@ export const McpCommand = cmd({
       .command(McpAuthCommand)
       .command(McpLogoutCommand)
       .command(McpDebugCommand)
+      .command(McpResetProjectChoicesCommand)
       .demandCommand(),
   async handler() {},
 })
@@ -114,10 +119,12 @@ export const McpListCommand = effectCmd({
     UI.empty()
     prompts.intro("MCP Servers")
 
-    const { config, statuses, stored } = yield* listState()
+    const { config, statuses, stored, held } = yield* listState()
     const servers = configuredServers(config)
+    // Project servers held by workspace trust are listed, never connected.
+    const pending = held.filter((item) => !(item.name in (config.mcp ?? {})))
 
-    if (servers.length === 0) {
+    if (servers.length === 0 && pending.length === 0) {
       prompts.log.warn("No MCP servers configured")
       prompts.outro("Add servers with: opencode mcp add")
       return
@@ -151,6 +158,15 @@ export const McpListCommand = effectCmd({
         statusIcon = "✗"
         statusText = "needs client registration"
         hint = "\n    " + status.error
+      } else if (status.status === "pending_approval") {
+        statusIcon = "⏸"
+        statusText =
+          status.reason === "changed"
+            ? "changed since approval (run agentcode here to review)"
+            : "pending approval (run agentcode here to review)"
+      } else if (status.status === "rejected") {
+        statusIcon = "✘"
+        statusText = "rejected"
       } else {
         statusIcon = "✗"
         statusText = "failed"
@@ -163,8 +179,35 @@ export const McpListCommand = effectCmd({
       )
     }
 
-    prompts.outro(`${servers.length} server(s)`)
+    for (const item of pending) {
+      const [icon, text] =
+        item.reason === "rejected"
+          ? ["✘", "rejected"]
+          : item.reason === "changed"
+            ? ["⏸", "changed since approval (run agentcode here to review)"]
+            : ["⏸", "pending approval (run agentcode here to review)"]
+      const typeHint = item.type === "remote" ? (item.url ?? "") : (item.command ?? []).join(" ")
+      prompts.log.info(`${icon} ${item.name} ${UI.Style.TEXT_DIM}${text}\n    ${UI.Style.TEXT_DIM}${typeHint}`)
+    }
+
+    prompts.outro(`${servers.length + pending.length} server(s)`)
   }),
+})
+
+export const McpResetProjectChoicesCommand = effectCmd({
+  command: "reset-project-choices",
+  describe: "clear the approved and rejected MCP servers of this folder's configuration",
+  handler: Effect.fn("Cli.mcp.resetProjectChoices")(
+    function* () {
+      const ctx = yield* InstanceRef
+      if (!ctx) return yield* Effect.die("InstanceRef not provided")
+      const state = yield* (yield* WorkspaceTrust.Service)
+        .resetMcp(ctx)
+        .pipe(Effect.catch((error) => Effect.die(new Error(error.message))))
+      UI.println(`MCP server choices cleared for ${state.path}; project servers ask for approval again`)
+    },
+    Effect.provide(AppNodeBuilder.build(WorkspaceTrust.node)),
+  ),
 })
 
 export const McpAuthCommand = effectCmd({
@@ -570,6 +613,7 @@ export const McpAddCommand = effectCmd({
         }
 
         await addMcpToConfig(name, mcpConfig, configPath)
+        if (configPath === projectConfigPath) await approveAddedMcp(ctx.directory, name, mcpConfig)
         prompts.log.success(`MCP server "${name}" added to ${configPath}`)
         prompts.outro("MCP server added successfully")
         return
@@ -648,6 +692,7 @@ export const McpAddCommand = effectCmd({
         }
 
         await addMcpToConfig(name, mcpConfig, configPath)
+        if (configPath === projectConfigPath) await approveAddedMcp(ctx.directory, name, mcpConfig)
         prompts.log.success(`MCP server "${name}" added to ${configPath}`)
       }
 

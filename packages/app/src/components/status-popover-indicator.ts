@@ -1,17 +1,23 @@
 import type { LspStatus } from "@opencode-ai/sdk/v2/client"
-import type { McpServer } from "@opencode-ai/client/promise"
+import type { McpStatus } from "@/context/global-sync/mcp"
 
-export function hasServiceNeedingAttention(input: { mcp: Array<McpServer["status"]["status"]> }) {
-  return input.mcp.some((status) => status === "needs_auth" || status === "needs_client_registration")
+// A server pending workspace-trust approval needs the user's attention; it is not a failure.
+export function hasServiceNeedingAttention(input: { mcp: Array<McpStatus> }) {
+  return input.mcp.some(
+    (status) => status === "needs_auth" || status === "needs_client_registration" || status === "pending_approval",
+  )
 }
 
-export function hasNonBlockingServiceIssue(input: {
-  mcp: Array<McpServer["status"]["status"]>
-  lsp: Array<LspStatus["status"]>
-}) {
+export function hasNonBlockingServiceIssue(input: { mcp: Array<McpStatus>; lsp: Array<LspStatus["status"]> }) {
   return (
-    input.mcp.some((status) => status !== "connected" && status !== "pending" && status !== "disabled") ||
-    input.lsp.some((status) => status === "error")
+    input.mcp.some(
+      (status) =>
+        status !== "connected" &&
+        status !== "pending" &&
+        status !== "disabled" &&
+        status !== "pending_approval" &&
+        status !== "rejected",
+    ) || input.lsp.some((status) => status === "error")
   )
 }
 

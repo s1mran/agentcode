@@ -142,7 +142,7 @@ const layer = Layer.effect(
     const fs = yield* FSUtil.Service
     const spawner = yield* ChildProcessSpawner
     const modes = yield* PermissionMode.make({ sessions, config })
-    const local = yield* PermissionLocalStore.make({ fs, spawner })
+    const local = yield* PermissionLocalStore.make({ fs, spawner, config })
     const state = yield* InstanceState.make<State>(
       Effect.fn("Permission.state")(function* (ctx) {
         void ctx
@@ -209,6 +209,8 @@ const layer = Layer.effect(
           path.join(home, ".config", "agentcode"),
           // Approvals of directories outside version control live here; writing them must never be silent.
           path.join(Global.Path.data, "permission"),
+          // Workspace trust decisions: a tool must never be able to trust a folder for itself.
+          path.join(Global.Path.data, "trust"),
         ],
         caseInsensitive,
       }
@@ -302,6 +304,12 @@ const layer = Layer.effect(
         reason: evaluation.decision.reason,
       })
 
+    const projectSaveHeld = Effect.fnUntraced(function* () {
+      const instance = yield* InstanceState.context
+      if (!instance.project.vcs) return false
+      return (yield* config.trust()).state.effective === "restricted"
+    })
+
     const ask = Effect.fn("Permission.ask")(function* (input: PermissionV1.AskInput) {
       const { pending } = yield* InstanceState.get(state)
       const evaluation = yield* evaluateRequest(input)
@@ -325,7 +333,7 @@ const layer = Layer.effect(
         : input.permission === "external_directory"
           ? input.always.filter((pattern) => !broadFolder(pattern))
           : [...input.always]
-      const scope = offered.length
+      const wanted = offered.length
         ? scopeFor(
             input.permission,
             evaluation.mode,
@@ -333,6 +341,9 @@ const layer = Layer.effect(
             evaluation.decisions.map((item) => item.decision),
           )
         : undefined
+      // An untrusted repository's settings.local.json is neither read nor written, so a project-wide save would be a
+      // promise the store cannot keep: the answer lasts for the session instead.
+      const scope = wanted === "project" && (yield* projectSaveHeld()) ? "session" : wanted
       // A saved "*" is a tool-level allow, which never beats a tool-level ask: offering it would save a rule that
       // can never answer this prompt.
       const saved = scope === "project" ? offered : scope === "session" ? input.patterns : []

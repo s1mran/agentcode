@@ -10,7 +10,7 @@ import fsNode from "fs/promises"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { Auth } from "../auth"
 import { Env } from "../env"
-import { applyEdits, modify } from "jsonc-parser"
+import { applyEdits, modify, parse as parseJsonc, type ParseError as JsoncParseError } from "jsonc-parser"
 import { InstallationLocal, InstallationVersion } from "@opencode-ai/core/installation/version"
 import { existsSync } from "fs"
 import { Account } from "@/account/account"
@@ -37,6 +37,11 @@ import { ConfigPlugin } from "./plugin"
 import { ConfigVariable } from "./variable"
 import { Npm } from "@opencode-ai/core/npm"
 import { withTransientReadRetry } from "@/util/effect-http-client"
+import { Glob } from "@opencode-ai/core/util/glob"
+import type { ConfigMCPV1 } from "@opencode-ai/core/v1/config/mcp"
+import { WorkspaceTrust } from "@/trust"
+import { WorkspaceTrustRestrict } from "@/trust/restrict"
+import { CredentialEnv } from "@/trust/credential-env"
 
 // Custom merge function that concatenates array fields instead of replacing them
 // Keep remeda's deep conditional merge type out of hot config-loading paths; TS profiling showed it dominates here.
@@ -50,6 +55,19 @@ function mergeConfigConcatArrays(target: Info, source: Info): Info {
     merged.instructions = Array.from(new Set([...target.instructions, ...source.instructions]))
   }
   return merged
+}
+
+// The MCP entries of a loaded config as written, before {env:} and {file:} substitution, by the object loadConfig
+// returned. Approval fingerprints are computed from these, so a server's identity is the same in every trust mode
+// (which substitute differently) and never includes a secret value.
+const writtenMcp = new WeakMap<object, Record<string, unknown>>()
+
+function writtenMcpEntries(text: string) {
+  if (!text.includes("{env:") && !text.includes("{file:")) return
+  const errors: JsoncParseError[] = []
+  const data = parseJsonc(text, errors, { allowTrailingComma: true })
+  if (errors.length || !isRecord(data) || !isRecord(data.mcp)) return
+  return data.mcp
 }
 
 function normalizeLoadedConfig(data: unknown) {
@@ -149,11 +167,32 @@ type Info = ConfigV1.Info & {
   plugin_origins?: ConfigPlugin.Origin[]
 }
 
+export type McpOrigin = { source: string; project: boolean }
+
+export type Trust = {
+  state: WorkspaceTrust.TrustState
+  /** Project configuration that did not apply because of the trust state. */
+  held: WorkspaceTrustRestrict.HeldItem[]
+  /** Which config source defined each MCP server that applies; project servers get a credential-free environment. */
+  mcpOrigins: Record<string, McpOrigin>
+}
+
 type State = {
   config: Info
   directories: string[]
+  /** `directories` without the project folders whose code is held (custom tools are imported only from these). */
+  trustedDirectories: string[]
   deps: Fiber.Fiber<void>[]
   consoleState: ConsoleState
+  trust: Trust
+}
+
+type LoadOptions = {
+  redact?: (name: string) => boolean
+  fileRoot?: string
+  onRedact?: (token: string) => void
+  /** False skips writing `$schema` back into the file. */
+  writeSchema?: boolean
 }
 
 export interface Interface {
@@ -165,6 +204,11 @@ export interface Interface {
   readonly invalidate: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
   readonly waitForDependencies: () => Effect.Effect<void>
+  /** The workspace trust state this instance loaded with, and what it held. */
+  readonly trust: () => Effect.Effect<Trust>
+  /** The source of an MCP server entry that applies, or undefined for servers config does not define. */
+  readonly mcpOrigin: (name: string) => Effect.Effect<McpOrigin | undefined>
+  readonly trustedDirectories: () => Effect.Effect<string[]>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Config") {}
@@ -216,6 +260,7 @@ const layer = Layer.effect(
     const env = yield* Env.Service
     const npmSvc = yield* Npm.Service
     const http = yield* HttpClient.HttpClient
+    const trustSvc = yield* WorkspaceTrust.Service
 
     const readConfigFile = (filepath: string) => fs.readFileStringSafe(filepath).pipe(Effect.orDie)
 
@@ -249,21 +294,25 @@ const layer = Layer.effect(
       text: string,
       options: { path: string } | { dir: string; source: string },
       env?: Record<string, string>,
+      load: LoadOptions = {},
     ) {
       const source = "path" in options ? options.path : options.source
+      const substitution = { env, redact: load.redact, fileRoot: load.fileRoot, onRedact: load.onRedact }
       const expanded = yield* Effect.promise(() =>
         ConfigVariable.substitute(
           "path" in options
-            ? { text, type: "path", path: options.path, env }
-            : { text, type: "virtual", ...options, env },
+            ? { text, type: "path", path: options.path, ...substitution }
+            : { text, type: "virtual", ...options, ...substitution },
         ),
       )
       const parsed = ConfigParse.jsonc(expanded, source)
       const data = ConfigParse.schema(ConfigV1.Info, normalizeLoadedConfig(parsed), source)
+      const written = writtenMcpEntries(text)
+      if (written) writtenMcp.set(data, written)
       if (!("path" in options)) return data
 
       yield* Effect.promise(() => resolveLoadedPlugins(data, options.path))
-      if (!data.$schema) {
+      if (!data.$schema && load.writeSchema !== false) {
         data.$schema = "https://opencode.ai/config.json"
         const updated = text.replace(/^\s*\{/, '{\n  "$schema": "https://opencode.ai/config.json",')
         yield* fs.writeFileString(options.path, updated).pipe(Effect.catch(() => Effect.void))
@@ -271,11 +320,11 @@ const layer = Layer.effect(
       return data
     })
 
-    const loadFile = Effect.fnUntraced(function* (filepath: string, env?: Record<string, string>) {
+    const loadFile = Effect.fnUntraced(function* (filepath: string, env?: Record<string, string>, load?: LoadOptions) {
       yield* Effect.logInfo("loading", { path: filepath })
       const text = yield* readConfigFile(filepath)
       if (!text) return {} as Info
-      return yield* loadConfig(text, { path: filepath }, env)
+      return yield* loadConfig(text, { path: filepath }, env, load)
     })
 
     const loadGlobal = Effect.fnUntraced(function* (env?: Record<string, string>) {
@@ -350,6 +399,8 @@ const layer = Layer.effect(
 
     const loadInstanceState = Effect.fn("Config.loadInstanceState")(
       function* (ctx: InstanceContext) {
+        const trustState = yield* trustSvc.state(ctx)
+        const effective = trustState.effective
         const auth = yield* authSvc.all().pipe(Effect.orDie)
 
         let result: Info = {}
@@ -408,17 +459,90 @@ const layer = Layer.effect(
           return path.basename(dir) === ".opencode"
         }
 
+        // Workspace trust (see src/trust). Unless the folder is fully trusted, project sources pass through
+        // restrictSource before they merge, and what it removes is recorded in `held` for clients to show.
+        const held: WorkspaceTrustRestrict.HeldItem[] = []
+        const trustScope: WorkspaceTrustRestrict.Scope = {
+          roots: [trustState.path, ctx.directory, ...(ctx.worktree === "/" ? [] : [ctx.worktree])],
+          directory: ctx.directory,
+          home: Global.Path.home,
+          worktree: ctx.worktree,
+        }
+        const redactions: { source: string; name: string }[] = []
+        // Substitution rules for a config file the project ships. In restricted mode every credential-like variable
+        // and every file outside the trust root reads as empty. A trusted folder or a headless run can already run the
+        // project's own code, so its config substitutes like the user's (Claude Code expands variables in project
+        // server config and only strips credentials from the server's process environment).
+        const loadOptions = (source: string, project: boolean): LoadOptions | undefined => {
+          if (!project) return undefined
+          if (effective !== "restricted") return { writeSchema: effective === "full" }
+          return {
+            redact: (name) => {
+              const hit = CredentialEnv.isCovered(name) || CredentialEnv.isCredentialName(name)
+              if (hit) redactions.push({ source, name: `{env:${name}}` })
+              return hit
+            },
+            fileRoot: trustState.path,
+            onRedact: (token) => redactions.push({ source, name: token }),
+            writeSchema: false,
+          }
+        }
+        const logRedactions = Effect.fnUntraced(function* () {
+          for (const item of redactions.splice(0)) {
+            yield* Effect.logWarning("project config substitution read as empty", {
+              source: item.source,
+              reference: item.name,
+            })
+          }
+        })
+
+        // MCP bookkeeping across every source, before restriction: `shadowMcp` is what cfg.mcp would be with the
+        // folder trusted, `lastOrigin` which source wrote each name last, `userMcp` what non-project sources alone
+        // define, and `mergedOrigins` the source of each entry that actually merged.
+        const shadowMcp: Record<string, unknown> = {}
+        // The same merge from the entries as written (see writtenMcp), for fingerprints and what clients display.
+        const identityMcp: Record<string, unknown> = {}
+        const lastOrigin: Record<string, McpOrigin> = {}
+        const userMcp: Record<string, unknown> = {}
+        const userOrigins: Record<string, McpOrigin> = {}
+        const mergedOrigins: Record<string, McpOrigin> = {}
+        const trackMcp = (
+          source: string,
+          entries: Info["mcp"],
+          project: boolean,
+          written?: Record<string, unknown>,
+        ) => {
+          for (const [name, entry] of Object.entries(entries ?? {})) {
+            shadowMcp[name] = mergeDeep((shadowMcp[name] ?? {}) as object, entry)
+            const literal = written?.[name]
+            identityMcp[name] = mergeDeep((identityMcp[name] ?? {}) as object, isRecord(literal) ? literal : entry)
+            lastOrigin[name] = { source, project }
+            if (project) continue
+            userMcp[name] = mergeDeep((userMcp[name] ?? {}) as object, entry)
+            userOrigins[name] = { source, project }
+          }
+        }
+
         const merge = Effect.fnUntraced(function* (source: string, loaded: Info, kind?: ConfigPlugin.Scope) {
           let next = loaded
+          const project = isProjectSource(source, kind)
           bypassDisabled ||= next.disable_bypass_permissions === true
           // A repository must not be able to start sessions with every permission check switched off.
-          if (next.default_permission_mode === "bypassPermissions" && isProjectSource(source, kind)) {
+          if (next.default_permission_mode === "bypassPermissions" && project) {
             next = { ...next }
             delete next.default_permission_mode
             yield* Effect.logWarning("default_permission_mode bypassPermissions ignored from project config", {
               source,
             })
           }
+          trackMcp(source, next.mcp, project, writtenMcp.get(loaded))
+          if (project && effective !== "full") {
+            const restricted = WorkspaceTrustRestrict.restrictSource(next, effective, source, trustScope)
+            next = restricted.info
+            // MCP servers are decided after every source has merged, from their final shape.
+            held.push(...restricted.held.filter((item) => item.kind !== "mcp"))
+          }
+          for (const name of Object.keys(next.mcp ?? {})) mergedOrigins[name] = { source, project }
           result = mergeConfigConcatArrays(result, next)
           yield* mergePluginOrigins(source, next.plugin, kind)
         })
@@ -469,13 +593,17 @@ const layer = Layer.effect(
         yield* merge(Global.Path.config, global, "global")
 
         if (Flag.OPENCODE_CONFIG) {
-          yield* merge(Flag.OPENCODE_CONFIG, yield* loadFile(Flag.OPENCODE_CONFIG, authEnv))
+          const options = loadOptions(Flag.OPENCODE_CONFIG, isProjectSource(Flag.OPENCODE_CONFIG))
+          yield* merge(Flag.OPENCODE_CONFIG, yield* loadFile(Flag.OPENCODE_CONFIG, authEnv, options))
+          yield* logRedactions()
           yield* Effect.logDebug("loaded custom config", { path: Flag.OPENCODE_CONFIG })
         }
 
         if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
           for (const file of yield* ConfigPaths.files("opencode", ctx.directory, ctx.worktree).pipe(Effect.orDie)) {
-            yield* merge(file, yield* loadFile(file, authEnv), "local")
+            const options = loadOptions(file, isProjectSource(file, "local"))
+            yield* merge(file, yield* loadFile(file, authEnv, options), "local")
+            yield* logRedactions()
           }
         }
 
@@ -490,18 +618,50 @@ const layer = Layer.effect(
         }
 
         const deps: Fiber.Fiber<void>[] = []
+        const trustedDirectories: string[] = []
 
         for (const dir of directories) {
+          // A project `.opencode` folder: its code (plugins, custom tools, the dependency install) waits for trust.
+          const projectDir = isProjectSource(path.join(dir, "opencode.json"))
+          const restrictedDir = projectDir && effective === "restricted"
           if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
             for (const file of ["opencode.json", "opencode.jsonc"]) {
               const source = path.join(dir, file)
               yield* Effect.logDebug(`loading config from ${source}`)
-              yield* merge(source, yield* loadFile(source, authEnv))
+              yield* merge(source, yield* loadFile(source, authEnv, loadOptions(source, projectDir)))
+              yield* logRedactions()
               result.agent ??= {}
               result.mode ??= {}
               result.plugin ??= []
             }
           }
+
+          if (restrictedDir) {
+            let commands = yield* Effect.promise(() => ConfigCommand.load(dir))
+            const restrictedCommands = WorkspaceTrustRestrict.restrictCommands(commands, dir)
+            commands = restrictedCommands.commands
+            const agents = WorkspaceTrustRestrict.restrictAgents(
+              yield* Effect.promise(() => ConfigAgent.load(dir)),
+              dir,
+            )
+            const modes = WorkspaceTrustRestrict.restrictAgents(
+              yield* Effect.promise(() => ConfigAgent.loadMode(dir)),
+              dir,
+            )
+            held.push(...restrictedCommands.held, ...agents.held, ...modes.held)
+            result.command = mergeDeep(result.command ?? {}, commands)
+            result.agent = mergeDeep(result.agent ?? {}, agents.agents)
+            result.agent = mergeDeep(result.agent ?? {}, modes.agents)
+            for (const spec of yield* Effect.promise(() => ConfigPlugin.load(dir))) {
+              held.push({ kind: "plugin", spec: ConfigPlugin.pluginSpecifier(spec), source: dir })
+            }
+            const tools = yield* Effect.promise(() =>
+              Glob.scan("{tool,tools}/*.{js,ts}", { cwd: dir, absolute: true, dot: true, symlink: true }),
+            )
+            for (const file of tools) held.push({ kind: "tool", file })
+            continue
+          }
+          trustedDirectories.push(dir)
 
           yield* ensureGitignore(dir).pipe(Effect.orDie)
 
@@ -527,8 +687,23 @@ const layer = Layer.effect(
           deps.push(dep)
 
           result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
-          result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(dir)))
-          result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(dir)))
+          if (projectDir && effective === "headless") {
+            // Claude Code -p parity: project agents load, their allow rules do not.
+            const agents = WorkspaceTrustRestrict.restrictAgents(
+              yield* Effect.promise(() => ConfigAgent.load(dir)),
+              dir,
+            )
+            const modes = WorkspaceTrustRestrict.restrictAgents(
+              yield* Effect.promise(() => ConfigAgent.loadMode(dir)),
+              dir,
+            )
+            held.push(...agents.held, ...modes.held)
+            result.agent = mergeDeep(result.agent ?? {}, agents.agents)
+            result.agent = mergeDeep(result.agent ?? {}, modes.agents)
+          } else {
+            result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(dir)))
+            result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(dir)))
+          }
           // Auto-discovered plugins under `.opencode/plugin(s)` are already local files, so ConfigPlugin.load
           // returns normalized Specs and we only need to attach origin metadata here.
           const list = yield* Effect.promise(() => ConfigPlugin.load(dir))
@@ -610,7 +785,54 @@ const layer = Layer.effect(
             source: managed.source,
           })
           bypassDisabled ||= next.disable_bypass_permissions === true
+          trackMcp(managed.source, next.mcp, false)
+          for (const name of Object.keys(next.mcp ?? {}))
+            mergedOrigins[name] = { source: managed.source, project: false }
           result = mergeConfigConcatArrays(result, next)
+        }
+
+        // Project MCP servers, decided from their final merged shape. Restricted: held (they never merged). Trusted:
+        // a server applies when the user approved this exact command or url; a new one waits as pending, a changed one
+        // as changed, a rejected one stays rejected. A headless run (in a trusted folder too, so trusting a folder never
+        // loads less) and a launch-trusted run connect every server the user has not rejected. A held name falls back to
+        // the user's own definition of it, if any. Fingerprints come from the entries as written, not substituted.
+        const mcpOrigins: Record<string, McpOrigin> = { ...mergedOrigins }
+        for (const [name, origin] of Object.entries(lastOrigin)) {
+          if (!origin.project) continue
+          if (!WorkspaceTrustRestrict.isMcpConfigured(shadowMcp[name])) continue
+          const identity = identityMcp[name]
+          const entry = WorkspaceTrustRestrict.isMcpConfigured(identity) ? identity : shadowMcp[name]
+          const fingerprint = WorkspaceTrustRestrict.mcpFingerprint(entry as ConfigMCPV1.Info)
+          const approved = trustState.mcp.approved[name]
+          const reason: WorkspaceTrustRestrict.McpReason | undefined =
+            effective === "restricted"
+              ? "untrusted"
+              : trustState.mcp.rejected.includes(name)
+                ? "rejected"
+                : trustState.policy === "headless" || trustState.source === "launch"
+                  ? undefined
+                  : approved === undefined
+                    ? "pending"
+                    : approved === fingerprint
+                      ? undefined
+                      : "changed"
+          if (!reason) continue
+          held.push(WorkspaceTrustRestrict.heldMcp(name, entry as ConfigMCPV1.Info, origin.source, reason))
+          if (effective === "restricted") continue
+          if (userMcp[name] !== undefined) {
+            result.mcp = { ...result.mcp, [name]: userMcp[name] as NonNullable<Info["mcp"]>[string] }
+            mcpOrigins[name] = userOrigins[name]
+            continue
+          }
+          if (result.mcp) delete result.mcp[name]
+          delete mcpOrigins[name]
+        }
+        if (held.length) {
+          yield* Effect.logInfo("workspace trust held project configuration", {
+            path: trustState.path,
+            effective,
+            held: WorkspaceTrustRestrict.summarize(held),
+          })
         }
         if (bypassDisabled) result.disable_bypass_permissions = true
         else delete result.disable_bypass_permissions
@@ -692,12 +914,14 @@ const layer = Layer.effect(
         return {
           config: result,
           directories,
+          trustedDirectories,
           deps,
           consoleState: {
             consoleManagedProviders: Array.from(consoleManagedProviders),
             activeOrgName,
             switchableOrgCount: 0,
           },
+          trust: { state: trustState, held, mcpOrigins },
         }
       },
       Effect.provideService(FSUtil.Service, fs),
@@ -715,6 +939,18 @@ const layer = Layer.effect(
 
     const directories = Effect.fn("Config.directories")(function* () {
       return yield* InstanceState.use(state, (s) => s.directories)
+    })
+
+    const trust = Effect.fn("Config.trust")(function* () {
+      return yield* InstanceState.use(state, (s) => s.trust)
+    })
+
+    const mcpOrigin = Effect.fn("Config.mcpOrigin")(function* (name: string) {
+      return yield* InstanceState.use(state, (s) => s.trust.mcpOrigins[name])
+    })
+
+    const trustedDirectories = Effect.fn("Config.trustedDirectories")(function* () {
+      return yield* InstanceState.use(state, (s) => s.trustedDirectories)
     })
 
     const getConsoleState = Effect.fn("Config.getConsoleState")(function* () {
@@ -774,6 +1010,9 @@ const layer = Layer.effect(
       invalidate,
       directories,
       waitForDependencies,
+      trust,
+      mcpOrigin,
+      trustedDirectories,
     })
   }),
 )
@@ -781,7 +1020,7 @@ const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [FSUtil.node, Auth.node, Account.node, Env.node, Npm.node, httpClient],
+  deps: [FSUtil.node, Auth.node, Account.node, Env.node, Npm.node, httpClient, WorkspaceTrust.node],
 })
 
 export * as Config from "./config"

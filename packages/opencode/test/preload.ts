@@ -83,6 +83,10 @@ delete process.env["OTEL_EXPORTER_OTLP_ENDPOINT"]
 delete process.env["OTEL_EXPORTER_OTLP_HEADERS"]
 delete process.env["OTEL_RESOURCE_ATTRIBUTES"]
 
+// Existing config, plugin and MCP tests load project content as if the folder were trusted. Workspace trust tests set
+// their own policy with WorkspaceTrustLaunch.set and clear it afterwards.
+process.env["OPENCODE_WORKSPACE_TRUST"] = "trusted"
+
 // Use in-memory sqlite
 process.env["OPENCODE_DB"] = ":memory:"
 

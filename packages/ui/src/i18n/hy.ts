@@ -178,6 +178,27 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Պատճենել հաղորդագրությունը",
   "ui.message.forkMessage": "Ստեղծել նոր նիստի ճյուղ",
   "ui.message.revertMessage": "Վերադարձնել հաղորդագրությունը",
+  "ui.message.revertMessage.partial.one": "Վերադարձնել հաղորդագրությունը ({{count}} ֆայլ հնարավոր չէ վերականգնել)",
+  "ui.message.revertMessage.partial.other": "Վերադարձնել հաղորդագրությունը ({{count}} ֆայլ հնարավոր չէ վերականգնել)",
+  "ui.checkpoint.skipped.one": "Հետարկումը չի կարող վերականգնել այստեղ փոփոխված {{count}} ֆայլ",
+  "ui.checkpoint.skipped.other": "Հետարկումը չի կարող վերականգնել այստեղ փոփոխված {{count}} ֆայլ",
+  "ui.checkpoint.reason.ignored": "անտեսված, չի պահպանվել",
+  "ui.checkpoint.reason.large": "2 MB-ից մեծ",
+  "ui.checkpoint.reason.outside": "նախագծի թղթապանակից դուրս",
+  "ui.checkpoint.reason.offline": "ամպային ֆայլը ներբեռնված չէ",
+  "ui.checkpoint.reason.unavailable": "ստուգակետերն անջատված են",
+  "ui.checkpoint.unavailable.root":
+    "Ստուգակետերն անջատված են, քանի որ սա սկավառակի արմատն է։ Հետարկումը չի կարող վերականգնել այս ֆայլերը։",
+  "ui.checkpoint.unavailable.home":
+    "Ստուգակետերն անջատված են ձեր տնային թղթապանակում։ Հետարկման համար բացեք նախագծի թղթապանակ։",
+  "ui.checkpoint.unavailable.data-dir":
+    "Ստուգակետերն անջատված են, քանի որ այս թղթապանակը պարունակում է AgentCode-ի սեփական տվյալները։",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Ստուգակետերն անջատված են. կախվածություններն ու կառուցման արդյունքները բաց թողնելուց հետո այս թղթապանակում կա ավելի քան 20 000 ֆայլ։",
+  "ui.checkpoint.unavailable.too-large": "Ստուգակետերն անջատված են. այս թղթապանակում կա ավելի քան 512 MB ֆայլ։",
+  "ui.checkpoint.unavailable.slow":
+    "Ստուգակետերը ժամանակավորապես անջատված են. այս թղթապանակի ստուգումը շատ երկար տևեց։ Շուտով նորից փորձ կարվի։",
+  "ui.checkpoint.unavailable.no-git": "Ստուգակետերն անջատված են. Git-ը տեղադրված չէ։ Հետարկելու համար տեղադրեք Git։",
   "ui.message.copyResponse": "Պատճենել պատասխանը",
   "ui.message.copied": "Պատճենված",
   "ui.message.duration.seconds": "{{count}} վ",

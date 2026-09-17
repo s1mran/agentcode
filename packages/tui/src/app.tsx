@@ -87,6 +87,8 @@ import { win32DisableProcessedInput, win32FlushInputBuffer } from "./terminal-wi
 import { destroyRenderer } from "./util/renderer"
 import { cliErrorMessage, errorFormat } from "./util/error"
 import { applyLaunchPermissionMode } from "./context/permission-auto"
+import { shouldAskTrust } from "./context/workspace-trust"
+import { DialogWorkspaceTrust } from "./component/dialog-workspace-trust"
 
 registerOpencodeSpinner()
 
@@ -549,6 +551,22 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         toast.show({ message: "Failed to fork session", variant: "error" })
       }
     })
+  })
+
+  // Workspace trust: ask once at startup about a folder nobody has decided on. Until it is answered (or after Escape)
+  // the engine keeps the folder restricted, so nothing waits on this.
+  let trustAsked = false
+  createEffect(() => {
+    if (trustAsked || sync.status !== "complete") return
+    trustAsked = true
+    void sdk.client.trust
+      .get()
+      .then((result) => {
+        const info = result.data
+        if (!info || !shouldAskTrust(info)) return
+        dialog.replace(() => <DialogWorkspaceTrust info={info} />)
+      })
+      .catch(() => {})
   })
 
   createEffect(

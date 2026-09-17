@@ -182,6 +182,29 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Kopēt ziņu",
   "ui.message.forkMessage": "Atzarot jaunā sesijā",
   "ui.message.revertMessage": "Atjaunot ziņu",
+  "ui.message.revertMessage.partial.one": "Atjaunot ziņu (neatjaunojami faili: {{count}})",
+  "ui.message.revertMessage.partial.other": "Atjaunot ziņu (neatjaunojami faili: {{count}})",
+  "ui.message.revertMessage.partial.zero": "Atjaunot ziņu (neatjaunojami faili: {{count}})",
+  "ui.checkpoint.skipped.one": "Atsaukšana nevar atjaunot šeit mainītos failus: {{count}}",
+  "ui.checkpoint.skipped.other": "Atsaukšana nevar atjaunot šeit mainītos failus: {{count}}",
+  "ui.checkpoint.skipped.zero": "Atsaukšana nevar atjaunot šeit mainītos failus: {{count}}",
+  "ui.checkpoint.reason.ignored": "ignorēts, nav saglabāts",
+  "ui.checkpoint.reason.large": "lielāks par 2 MB",
+  "ui.checkpoint.reason.outside": "ārpus projekta mapes",
+  "ui.checkpoint.reason.offline": "mākoņa fails nav lejupielādēts",
+  "ui.checkpoint.reason.unavailable": "kontrolpunkti izslēgti",
+  "ui.checkpoint.unavailable.root":
+    "Kontrolpunkti ir izslēgti, jo šī ir diska sakne. Atsaukšana nevar atjaunot šos failus.",
+  "ui.checkpoint.unavailable.home":
+    "Kontrolpunkti ir izslēgti jūsu mājas mapē. Atveriet projekta mapi, lai varētu atsaukt.",
+  "ui.checkpoint.unavailable.data-dir": "Kontrolpunkti ir izslēgti, jo šajā mapē ir paša AgentCode dati.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Kontrolpunkti ir izslēgti: šajā mapē ir vairāk nekā 20 000 failu, neskaitot atkarības un būvējuma izvadi.",
+  "ui.checkpoint.unavailable.too-large": "Kontrolpunkti ir izslēgti: šajā mapē ir vairāk nekā 512 MB failu.",
+  "ui.checkpoint.unavailable.slow":
+    "Kontrolpunkti pagaidām ir izslēgti: šīs mapes skenēšana aizņēma pārāk ilgu laiku. Drīz tiks mēģināts vēlreiz.",
+  "ui.checkpoint.unavailable.no-git":
+    "Kontrolpunkti ir izslēgti: Git nav instalēts. Instalējiet Git, lai varētu atsaukt.",
   "ui.message.copyResponse": "Kopēt atbildi",
   "ui.message.copied": "Nokopēts",
   "ui.message.duration.seconds": "{{count}} s",

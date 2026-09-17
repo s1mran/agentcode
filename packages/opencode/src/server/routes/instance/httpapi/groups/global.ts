@@ -14,6 +14,21 @@ const GlobalHealth = Schema.Struct({
   // Advertises that this engine resolves permission modes (session permissionMode, plan_exit), so clients can tell it
   // apart from servers that silently ignore the field.
   permissionModes: Schema.optional(Schema.Literal(true)),
+  // Advertises GET/POST /trust and restricted mode for untrusted folders, so clients show the trust dialog only on
+  // engines that enforce it.
+  workspaceTrust: Schema.optional(Schema.Literal(true)),
+})
+
+export const GlobalTrustEntry = Schema.Struct({
+  path: Schema.String,
+  kind: Schema.Literals(["repository", "directory"]),
+  trusted: Schema.Boolean,
+  time: Schema.Finite,
+  sessionOnly: Schema.Boolean,
+}).annotate({ identifier: "GlobalTrustEntry" })
+
+export const GlobalTrustForgetInput = Schema.Struct({
+  path: Schema.String,
 })
 
 const SyncEventSchemas = EventManifest.Latest.values()
@@ -71,6 +86,7 @@ export const GlobalPaths = {
   config: "/global/config",
   dispose: "/global/dispose",
   upgrade: "/global/upgrade",
+  trust: "/global/trust",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -121,6 +137,26 @@ export const GlobalApi = HttpApi.make("global").add(
           identifier: "global.dispose",
           summary: "Dispose instance",
           description: "Clean up and dispose all OpenCode instances, releasing all resources.",
+        }),
+      ),
+      HttpApiEndpoint.get("trustList", GlobalPaths.trust, {
+        success: described(Schema.Array(GlobalTrustEntry), "Workspace trust decisions"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.trust.list",
+          summary: "List workspace trust decisions",
+          description: "List every stored workspace trust decision, and the ones kept for this session only.",
+        }),
+      ),
+      HttpApiEndpoint.delete("trustForget", GlobalPaths.trust, {
+        payload: GlobalTrustForgetInput,
+        success: described(Schema.Boolean, "Whether a decision was removed"),
+        error: HttpApiError.BadRequest,
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.trust.forget",
+          summary: "Forget a workspace trust decision",
+          description: "Remove the trust decision stored for a folder path. Loaded instances it covered are disposed.",
         }),
       ),
       HttpApiEndpoint.post("upgrade", GlobalPaths.upgrade, {

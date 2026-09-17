@@ -86,6 +86,10 @@ import type {
   GlobalEventResponses,
   GlobalHealthErrors,
   GlobalHealthResponses,
+  GlobalTrustForgetErrors,
+  GlobalTrustForgetResponses,
+  GlobalTrustListErrors,
+  GlobalTrustListResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
@@ -238,6 +242,16 @@ import type {
   ToolIdsResponses,
   ToolListErrors,
   ToolListResponses,
+  TrustForgetErrors,
+  TrustForgetResponses,
+  TrustGetErrors,
+  TrustGetResponses,
+  TrustMcpErrors,
+  TrustMcpResponses,
+  TrustResetMcpErrors,
+  TrustResetMcpResponses,
+  TrustSetErrors,
+  TrustSetResponses,
   TuiAppendPromptErrors,
   TuiAppendPromptResponses,
   TuiClearPromptErrors,
@@ -1316,6 +1330,44 @@ export class Config extends HeyApiClient {
   }
 }
 
+export class Trust extends HeyApiClient {
+  /**
+   * Forget a workspace trust decision
+   *
+   * Remove the trust decision stored for a folder path. Loaded instances it covered are disposed.
+   */
+  public forget<ThrowOnError extends boolean = false>(
+    parameters?: {
+      path?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "path" }] }])
+    return (options?.client ?? this.client).delete<GlobalTrustForgetResponses, GlobalTrustForgetErrors, ThrowOnError>({
+      url: "/global/trust",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List workspace trust decisions
+   *
+   * List every stored workspace trust decision, and the ones kept for this session only.
+   */
+  public list<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalTrustListResponses, GlobalTrustListErrors, ThrowOnError>({
+      url: "/global/trust",
+      ...options,
+    })
+  }
+}
+
 export class Global extends HeyApiClient {
   /**
    * Get health
@@ -1380,6 +1432,11 @@ export class Global extends HeyApiClient {
   private _config?: Config
   get config(): Config {
     return (this._config ??= new Config({ client: this.client }))
+  }
+
+  private _trust?: Trust
+  get trust(): Trust {
+    return (this._trust ??= new Trust({ client: this.client }))
   }
 }
 
@@ -4064,6 +4121,7 @@ export class Session2 extends HeyApiClient {
       providerID?: string
       modelID?: string
       auto?: boolean
+      instructions?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -4078,6 +4136,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "providerID" },
             { in: "body", key: "modelID" },
             { in: "body", key: "auto" },
+            { in: "body", key: "instructions" },
           ],
         },
       ],
@@ -4584,6 +4643,181 @@ export class Sync extends HeyApiClient {
   private _history?: History
   get history(): History {
     return (this._history ??= new History({ client: this.client }))
+  }
+}
+
+export class Trust2 extends HeyApiClient {
+  /**
+   * Forget workspace trust
+   *
+   * Remove the trust decision for this folder, so it is asked again. Covered instances reload.
+   */
+  public forget<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<TrustForgetResponses, TrustForgetErrors, ThrowOnError>({
+      url: "/trust",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get workspace trust
+   *
+   * Whether this folder is trusted, the effective mode this instance loaded with, and the project configuration held until it is trusted.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<TrustGetResponses, TrustGetErrors, ThrowOnError>({
+      url: "/trust",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Trust or restrict this folder
+   *
+   * Record a workspace trust decision, approving or rejecting held project MCP servers by name. Every loaded instance the decision covers reloads after the response.
+   */
+  public set<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      trusted?: boolean
+      remember?: boolean
+      mcp?: {
+        approve?: Array<string>
+        reject?: Array<string>
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "trusted" },
+            { in: "body", key: "remember" },
+            { in: "body", key: "mcp" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<TrustSetResponses, TrustSetErrors, ThrowOnError>({
+      url: "/trust",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Reset project MCP server choices
+   *
+   * Clear the approved and rejected MCP servers of this folder's configuration, so they ask for approval again. The instance reloads.
+   */
+  public resetMcp<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<TrustResetMcpResponses, TrustResetMcpErrors, ThrowOnError>({
+      url: "/trust/mcp",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Approve or reject a project MCP server
+   *
+   * Approve or reject one held MCP server from this folder's configuration. The folder must be trusted.
+   */
+  public mcp<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      directory?: string
+      workspace?: string
+      approve?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "approve" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<TrustMcpResponses, TrustMcpErrors, ThrowOnError>({
+      url: "/trust/mcp/{name}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
   }
 }
 
@@ -7218,6 +7452,11 @@ export class OpencodeClient extends HeyApiClient {
   private _sync?: Sync
   get sync(): Sync {
     return (this._sync ??= new Sync({ client: this.client }))
+  }
+
+  private _trust?: Trust2
+  get trust(): Trust2 {
+    return (this._trust ??= new Trust2({ client: this.client }))
   }
 
   private _tui?: Tui

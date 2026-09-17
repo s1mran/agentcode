@@ -27,6 +27,15 @@ export interface SlashCommand {
   keybind?: string
   type: "builtin" | "custom"
   source?: "command" | "mcp" | "skill"
+  /** Other names that run this command, matched exactly and searchable through `keywords`. */
+  aliases?: string[]
+  keywords?: string
+  /** The argument hint shown after the name, such as `[focus instructions]`. */
+  hint?: string
+  /** The source badge: built-in, custom, skill or mcp. */
+  badge?: string
+  /** The command's argument placeholders ($1, $ARGUMENTS). */
+  hints?: string[]
 }
 
 type PromptPopoverProps = {
@@ -40,7 +49,7 @@ type PromptPopoverProps = {
   slashFlat: SlashCommand[]
   slashActive?: string
   setSlashActive: (id: string) => void
-  onSlashSelect: (item: SlashCommand) => void
+  onSlashSelect: (item: SlashCommand, via?: "click") => void
   slashMenu: boolean
   slashMenuQuery: string
   onSlashMenuInput: (value: string) => void
@@ -300,8 +309,12 @@ export const PromptPopover: Component<PromptPopoverProps> = (props) => {
                         "bg-v2-overlay-simple-overlay-hover": props.newLayoutDesigns && props.slashActive === cmd.id,
                         "bg-surface-raised-base-hover": !props.newLayoutDesigns && props.slashActive === cmd.id,
                       }}
-                      onClick={() => props.onSlashSelect(cmd)}
-                      onPointerMove={() => props.setSlashActive(cmd.id)}
+                      onClick={() => props.onSlashSelect(cmd, "click")}
+                      onPointerMove={(event) => {
+                        // Hover counts as an explicit pick for Enter, so ignore moves the pointer did not make.
+                        if (event.movementX === 0 && event.movementY === 0) return
+                        props.setSlashActive(cmd.id)
+                      }}
                     >
                       <div class="flex items-center gap-2 min-w-0">
                         <span
@@ -316,6 +329,20 @@ export const PromptPopover: Component<PromptPopoverProps> = (props) => {
                         >
                           /{cmd.trigger}
                         </span>
+                        <Show when={cmd.hint}>
+                          <span
+                            class="whitespace-nowrap"
+                            classList={{
+                              "text-[13px] leading-[calc(var(--font-size-base)*1.8)] tracking-[-0.04px] [font-weight:440]":
+                                props.newLayoutDesigns,
+                              "text-v2-text-text-faint": props.newLayoutDesigns,
+                              "text-14-regular": !props.newLayoutDesigns,
+                              "text-text-weak": !props.newLayoutDesigns,
+                            }}
+                          >
+                            {cmd.hint}
+                          </span>
+                        </Show>
                         <Show when={cmd.description}>
                           <span
                             class="truncate"
@@ -332,26 +359,16 @@ export const PromptPopover: Component<PromptPopoverProps> = (props) => {
                         </Show>
                       </div>
                       <div class="flex items-center gap-2 shrink-0">
-                        <Show when={cmd.type === "custom" && cmd.source !== "command"}>
+                        <Show when={cmd.badge}>
                           <Show
                             when={props.newLayoutDesigns}
                             fallback={
                               <span class="text-11-regular px-1.5 py-0.5 rounded bg-surface-base text-text-subtle">
-                                {cmd.source === "skill"
-                                  ? props.t("prompt.slash.badge.skill")
-                                  : cmd.source === "mcp"
-                                    ? props.t("prompt.slash.badge.mcp")
-                                    : props.t("prompt.slash.badge.custom")}
+                                {cmd.badge}
                               </span>
                             }
                           >
-                            <Tag>
-                              {cmd.source === "skill"
-                                ? props.t("prompt.slash.badge.skill")
-                                : cmd.source === "mcp"
-                                  ? props.t("prompt.slash.badge.mcp")
-                                  : props.t("prompt.slash.badge.custom")}
-                            </Tag>
+                            <Tag>{cmd.badge}</Tag>
                           </Show>
                         </Show>
                         <Show when={props.newLayoutDesigns ? keybindParts().length > 0 : keybind()}>

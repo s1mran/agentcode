@@ -127,6 +127,10 @@ function part(part: SessionV1.Part): SessionV1.Part {
         ...part,
         hash: redact("patch", part.id, part.hash),
         files: part.files.map((item: string, i: number) => redact("patch-file", `${part.id}-${i}`, item)),
+        skipped: part.skipped?.map((item, i: number) => ({
+          ...item,
+          file: redact("patch-skipped-file", `${part.id}-${i}`, item.file),
+        })),
       }
     case "snapshot":
       return {

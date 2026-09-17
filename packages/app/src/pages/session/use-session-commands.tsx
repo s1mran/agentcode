@@ -13,6 +13,7 @@ import { useTerminal } from "@/context/terminal"
 import { showToast } from "@/utils/toast"
 import { downloadSessionExport, fetchSessionExport, sessionExportFilename } from "@/utils/session-export"
 import { findLast } from "@opencode-ai/core/util/array"
+import { getFilename } from "@opencode-ai/core/util/path"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { extractPromptFromParts } from "@/utils/prompt"
 import { Message, Part, UserMessage } from "@opencode-ai/sdk/v2"
@@ -224,7 +225,14 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       )
   }
 
-  const exportSession = async () => {
+  // `/export <filename>` names the download; any directory is dropped and `.json` is appended when missing.
+  const exportFilename = (requested: string | undefined, info: Parameters<typeof sessionExportFilename>[0]) => {
+    const name = getFilename(requested?.trim())
+    if (!name) return sessionExportFilename(info)
+    return name.toLowerCase().endsWith(".json") ? name : `${name}.json`
+  }
+
+  const exportSession = async (requested?: string) => {
     const sessionID = params.id
     if (!sessionID) return
     try {
@@ -232,7 +240,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
         sessionID,
         client: sdk().client,
       })
-      const filename = sessionExportFilename(data.info)
+      const filename = exportFilename(requested, data.info)
       downloadSessionExport(filename, data)
       showToast({
         variant: "success",
@@ -366,7 +374,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     })
   }
 
-  const compact = async () => {
+  const compact = async (args?: string) => {
     const sessionID = params.id
     if (!sessionID) return
 
@@ -382,6 +390,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     await sdk().api.session.compact({
       sessionID,
       model: { providerID: model.provider.id, modelID: model.id },
+      instructions: args?.trim() || undefined,
     })
   }
 
@@ -422,6 +431,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       title: language.t("command.session.new"),
       keybind: "mod+shift+s",
       slash: "new",
+      slashAliases: ["clear", "reset"],
       onSelect: (source) => {
         if (settings.general.newLayoutDesigns()) {
           command.trigger("tab.new", source)
@@ -435,6 +445,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       title: language.t("command.session.undo"),
       description: language.t("command.session.undo.description"),
       slash: "undo",
+      slashAliases: ["rewind", "checkpoint"],
       disabled: !params.id || visibleUserMessages().length === 0,
       onSelect: undo,
     }),
@@ -451,8 +462,10 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       title: language.t("command.session.compact"),
       description: language.t("command.session.compact.description"),
       slash: "compact",
+      slashAliases: ["summarize"],
+      argumentHint: language.t("command.session.compact.hint"),
       disabled: !params.id || visibleUserMessages().length === 0,
-      onSelect: compact,
+      onSelect: (_, args) => void compact(args),
     }),
     sessionCommand({
       id: "session.fork",
@@ -467,8 +480,9 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       title: language.t("command.session.export"),
       description: language.t("command.session.export.description"),
       slash: "export",
+      argumentHint: language.t("command.session.export.hint"),
       disabled: !params.id,
-      onSelect: exportSession,
+      onSelect: (_, args) => void exportSession(args),
     }),
   ]
 

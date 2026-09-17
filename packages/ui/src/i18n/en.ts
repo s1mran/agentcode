@@ -199,6 +199,8 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Copy message",
   "ui.message.forkMessage": "Fork to new session",
   "ui.message.revertMessage": "Revert message",
+  "ui.message.revertMessage.partial.one": "Revert message ({{count}} file can't be restored)",
+  "ui.message.revertMessage.partial.other": "Revert message ({{count}} files can't be restored)",
   "ui.message.copyResponse": "Copy response",
   "ui.message.copied": "Copied",
   "ui.message.duration.seconds": "{{count}}s",
@@ -206,6 +208,23 @@ export const dict: Record<string, string> = {
   "ui.message.interrupted": "Interrupted",
   "ui.message.queued": "Queued",
   "ui.message.attachment.alt": "attachment",
+
+  "ui.checkpoint.skipped.one": "Undo can't restore {{count}} file changed here",
+  "ui.checkpoint.skipped.other": "Undo can't restore {{count}} files changed here",
+  "ui.checkpoint.reason.ignored": "ignored, not captured",
+  "ui.checkpoint.reason.large": "larger than 2 MB",
+  "ui.checkpoint.reason.outside": "outside the project folder",
+  "ui.checkpoint.reason.offline": "cloud file not downloaded",
+  "ui.checkpoint.reason.unavailable": "checkpoints off",
+  "ui.checkpoint.unavailable.root": "Checkpoints are off because this is a drive root. Undo can't restore these files.",
+  "ui.checkpoint.unavailable.home": "Checkpoints are off in your home folder. Open a project folder to get undo.",
+  "ui.checkpoint.unavailable.data-dir": "Checkpoints are off because this folder contains AgentCode's own data.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Checkpoints are off: this folder has more than 20,000 files after skipping dependencies and build output.",
+  "ui.checkpoint.unavailable.too-large": "Checkpoints are off: this folder holds more than 512 MB of files.",
+  "ui.checkpoint.unavailable.slow":
+    "Checkpoints are off for now: scanning this folder took too long. It will be tried again shortly.",
+  "ui.checkpoint.unavailable.no-git": "Checkpoints are off: Git is not installed. Install Git to get undo.",
 
   "ui.patch.action.deleted": "Deleted",
   "ui.patch.action.created": "Created",

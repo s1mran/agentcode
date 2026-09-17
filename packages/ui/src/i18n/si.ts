@@ -178,6 +178,27 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "පණිවිඩය පිටපත් කරන්න",
   "ui.message.forkMessage": "නව සැසියට ෆෝක් කරන්න",
   "ui.message.revertMessage": "පණිවිඩය ප්‍රතිවර්තනය කරන්න",
+  "ui.message.revertMessage.partial.one": "පණිවිඩය ප්‍රතිවර්තනය කරන්න (ගොනු {{count}}ක් ප්‍රතිසාධනය කළ නොහැක)",
+  "ui.message.revertMessage.partial.other": "පණිවිඩය ප්‍රතිවර්තනය කරන්න (ගොනු {{count}}ක් ප්‍රතිසාධනය කළ නොහැක)",
+  "ui.checkpoint.skipped.one": "මෙහි වෙනස් කළ ගොනු {{count}}ක් අහෝසි කිරීමෙන් ප්‍රතිසාධනය කළ නොහැක",
+  "ui.checkpoint.skipped.other": "මෙහි වෙනස් කළ ගොනු {{count}}ක් අහෝසි කිරීමෙන් ප්‍රතිසාධනය කළ නොහැක",
+  "ui.checkpoint.reason.ignored": "නොසලකා හරින ලදී, සුරැකුණේ නැත",
+  "ui.checkpoint.reason.large": "2 MB ට වඩා විශාලයි",
+  "ui.checkpoint.reason.outside": "ව්‍යාපෘති ෆෝල්ඩරයෙන් පිටත",
+  "ui.checkpoint.reason.offline": "බාගත නොකළ වලාකුළු ගොනුව",
+  "ui.checkpoint.reason.unavailable": "පිරික්සුම් ලක්ෂ්‍ය අක්‍රියයි",
+  "ui.checkpoint.unavailable.root":
+    "මෙය ධාවකයක මූලය නිසා පිරික්සුම් ලක්ෂ්‍ය අක්‍රියයි. අහෝසි කිරීමෙන් මෙම ගොනු ප්‍රතිසාධනය කළ නොහැක.",
+  "ui.checkpoint.unavailable.home":
+    "ඔබගේ නිවෙස් ෆෝල්ඩරයේ පිරික්සුම් ලක්ෂ්‍ය අක්‍රියයි. අහෝසි කිරීම ලබා ගැනීමට ව්‍යාපෘති ෆෝල්ඩරයක් විවෘත කරන්න.",
+  "ui.checkpoint.unavailable.data-dir": "මෙම ෆෝල්ඩරයේ AgentCode හි ම දත්ත ඇති නිසා පිරික්සුම් ලක්ෂ්‍ය අක්‍රියයි.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "පිරික්සුම් ලක්ෂ්‍ය අක්‍රියයි: පරායත්තතා සහ build ප්‍රතිදානය මඟහැරිය පසුත් මෙම ෆෝල්ඩරයේ ගොනු 20,000 කට වඩා ඇත.",
+  "ui.checkpoint.unavailable.too-large": "පිරික්සුම් ලක්ෂ්‍ය අක්‍රියයි: මෙම ෆෝල්ඩරයේ 512 MB කට වඩා ගොනු ඇත.",
+  "ui.checkpoint.unavailable.slow":
+    "පිරික්සුම් ලක්ෂ්‍ය තාවකාලිකව අක්‍රියයි: මෙම ෆෝල්ඩරය පරිලෝකනය කිරීමට වැඩි කාලයක් ගත විය. ඉක්මනින් නැවත උත්සාහ කෙරේ.",
+  "ui.checkpoint.unavailable.no-git":
+    "පිරික්සුම් ලක්ෂ්‍ය අක්‍රියයි: Git ස්ථාපනය කර නැත. අහෝසි කිරීමට Git ස්ථාපනය කරන්න.",
   "ui.message.copyResponse": "ප්රතිචාරය පිටපත් කරන්න",
   "ui.message.copied": "පිටපත් කර ඇත",
   "ui.message.duration.seconds": "{{count}}s",

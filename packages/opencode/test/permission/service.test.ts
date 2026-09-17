@@ -509,6 +509,31 @@ describe("Permission service - review fixes", () => {
   )
 
   it.instance(
+    "writing the workspace trust store always asks, whatever the rules allow",
+    () =>
+      Effect.gen(function* () {
+        const target = path.join(Global.Path.data, "trust", "workspaces.json")
+        for (const permission of ["external_directory", "edit"] as const) {
+          const request = yield* prompted({
+            sessionID: SessionID.make("ses_trust_store"),
+            permission,
+            patterns: permission === "edit" ? [target] : [path.join(Global.Path.data, "trust", "*")],
+            always: permission === "edit" ? [target] : [path.join(Global.Path.data, "trust", "*")],
+            metadata: { filepath: target },
+            ruleset: [
+              ...defaults,
+              { permission: "external_directory", pattern: "*", action: "allow" },
+              { permission: "edit", pattern: "*", action: "allow" },
+            ],
+          })
+          expect(request.guard?.level).toBe("floor")
+          expect(request.always).toEqual([])
+        }
+      }),
+    { git: true },
+  )
+
+  it.instance(
     "a subagent session cannot store a looser mode than its parent",
     () =>
       Effect.gen(function* () {
@@ -797,6 +822,71 @@ describe("Permission service - edit approvals and modes", () => {
           expect(seen.filter((item) => item.requestID === request.id)).toHaveLength(1)
           expect(yield* permission.list()).toHaveLength(0)
         }
+      }),
+    { git: true },
+  )
+})
+
+// Workspace trust: an untrusted repository cannot keep a project-wide "Allow always", so the request says session.
+const restricted = testEffect(
+  AppNodeBuilder.build(
+    LayerNode.group([
+      Permission.node,
+      Session.node,
+      EventV2Bridge.node,
+      SessionProjector.node,
+      CrossSpawnSpawner.node,
+      InstanceStore.node,
+    ]),
+    [
+      [RuntimeFlags.node, RuntimeFlags.layer({ experimentalWorkspaces: false })],
+      [
+        Config.node,
+        TestConfig.layer({
+          trust: () =>
+            Effect.succeed({
+              ...TestConfig.trusted,
+              state: { ...TestConfig.trusted.state, status: "unknown", effective: "restricted" },
+            }),
+        }),
+      ],
+      [
+        InstanceBootstrap.node,
+        Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void })),
+      ],
+    ],
+  ),
+)
+
+describe("Permission service - workspace trust", () => {
+  restricted.instance(
+    "a restricted repository advertises session scope for a bash always and stores it for the session",
+    () =>
+      Effect.gen(function* () {
+        const { directory } = yield* TestInstance
+        const permission = yield* Permission.Service
+        const input = {
+          sessionID: SessionID.make("ses_trust"),
+          permission: "bash",
+          patterns: ["git checkout main"],
+          always: ["git checkout *"],
+          hints: [{ pattern: "git checkout main", strict: "git checkout main", loose: "git checkout main" }],
+        }
+        const fiber = yield* ask(input).pipe(Effect.forkScoped)
+        const [request] = yield* waitForPending(1)
+        expect(request.alwaysScope).toBe("session")
+        yield* permission.reply({ requestID: request.id, reply: "always" })
+        yield* Fiber.join(fiber)
+        expect(
+          yield* Effect.promise(() =>
+            fs.stat(path.join(directory, ".opencode", "settings.local.json")).then(
+              () => true,
+              () => false,
+            ),
+          ),
+        ).toBe(false)
+        // The session approval answers the same command again without asking.
+        yield* ask(input)
       }),
     { git: true },
   )

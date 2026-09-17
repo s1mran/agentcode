@@ -4,6 +4,7 @@ import { Image } from "@/image/image"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Cause, Deferred, Effect, Exit, Layer, Context, Scope, Schema } from "effect"
 import * as Stream from "effect/Stream"
+import path from "path"
 import { Agent } from "@/agent/agent"
 import { Config } from "@/config/config"
 import { Permission } from "@/permission"
@@ -25,6 +26,7 @@ import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@opencode-ai/core/database/database"
 import { Usage, type LLMEvent } from "@opencode-ai/llm"
+import { InstanceState } from "@/effect/instance-state"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
@@ -68,6 +70,10 @@ interface ProcessorContext extends Input {
   toolcalls: Record<string, ToolCall>
   shouldBreak: boolean
   snapshot: string | undefined
+  // When the current checkpoint was taken, so files created during the step can be reported.
+  snapshotAt: number | undefined
+  // Files the agent's file tools wrote since the last patch part.
+  touched: Set<string>
   blocked: boolean
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
@@ -99,6 +105,7 @@ const layer = Layer.effect(
       // Pre-capture snapshot before the LLM stream starts. The AI SDK
       // may execute tools internally before emitting start-step events,
       // so capturing inside the event handler can be too late.
+      const snapshotAt = Date.now()
       const initialSnapshot = yield* snapshot.track()
       const ctx: ProcessorContext = {
         assistantMessage: input.assistantMessage,
@@ -107,6 +114,8 @@ const layer = Layer.effect(
         toolcalls: {},
         shouldBreak: false,
         snapshot: initialSnapshot,
+        snapshotAt,
+        touched: new Set(),
         blocked: false,
         needsCompaction: false,
         currentText: undefined,
@@ -157,6 +166,27 @@ const layer = Layer.effect(
         return part
       })
 
+      // Record what the file tools wrote so the patch part can report files the checkpoint missed.
+      // Only edit, write and apply_patch count, as in Claude Code: bash changes are not tracked here.
+      const touch = Effect.fnUntraced(function* (
+        tool: string,
+        input: Record<string, unknown>,
+        metadata: Record<string, unknown>,
+      ) {
+        if (tool === "edit" || tool === "write") {
+          if (typeof input.filePath !== "string" || !input.filePath) return
+          const instance = yield* InstanceState.context
+          ctx.touched.add(path.resolve(instance.directory, input.filePath))
+          return
+        }
+        if (tool !== "apply_patch" || !Array.isArray(metadata.files)) return
+        for (const item of metadata.files) {
+          if (!isRecord(item)) continue
+          if (typeof item.filePath === "string" && item.filePath) ctx.touched.add(item.filePath)
+          if (typeof item.movePath === "string" && item.movePath) ctx.touched.add(item.movePath)
+        }
+      })
+
       const completeToolCall = Effect.fn("SessionProcessor.completeToolCall")(function* (
         toolCallID: string,
         output: {
@@ -168,6 +198,7 @@ const layer = Layer.effect(
       ) {
         const match = yield* readToolCall(toolCallID)
         if (!match || match.part.state.status !== "running") return
+        yield* touch(match.part.tool, match.part.state.input, output.metadata)
         yield* session.updatePart({
           ...match.part,
           state: {
@@ -274,6 +305,44 @@ const layer = Layer.effect(
             typeof value.result.value === "string" ? value.result.value : (JSON.stringify(value.result.value) ?? ""),
         }
       }
+
+      // Write the step's patch part: the files the checkpoint captured plus the ones undo cannot restore.
+      // When checkpoints are off for this folder, steps where the file tools edited something still get a
+      // notice part (hash "", no files) so the user knows before reverting. snapshot: false stays silent.
+      const flushPatch = Effect.fn("SessionProcessor.flushPatch")(function* () {
+        const touched = Array.from(ctx.touched)
+        ctx.touched.clear()
+        if (ctx.snapshot) {
+          const patch = yield* snapshot.patch(ctx.snapshot, { since: ctx.snapshotAt, touched })
+          if (patch.files.length || patch.skipped?.length) {
+            yield* session.updatePart({
+              id: PartID.ascending(),
+              messageID: ctx.assistantMessage.id,
+              sessionID: ctx.sessionID,
+              type: "patch",
+              hash: patch.hash,
+              files: patch.files,
+              ...(patch.skipped?.length ? { skipped: patch.skipped } : {}),
+            })
+          }
+          ctx.snapshot = undefined
+          return
+        }
+        if (!touched.length) return
+        const checkpoint = yield* snapshot.status()
+        const reason = checkpoint.reason
+        if (checkpoint.mode !== "off" || !reason || reason === "disabled") return
+        yield* session.updatePart({
+          id: PartID.ascending(),
+          messageID: ctx.assistantMessage.id,
+          sessionID: ctx.sessionID,
+          type: "patch",
+          hash: "",
+          files: [],
+          skipped: touched.slice(0, 100).map((file) => ({ file, reason: "unavailable" as const })),
+          unavailable: reason,
+        })
+      })
 
       const handleEvent = Effect.fnUntraced(function* (value: StreamEvent) {
         switch (value.type) {
@@ -422,7 +491,10 @@ const layer = Layer.effect(
             throw new Error(value.message)
 
           case "step-start":
-            if (!ctx.snapshot) ctx.snapshot = yield* snapshot.track()
+            if (!ctx.snapshot) {
+              ctx.snapshotAt = Date.now()
+              ctx.snapshot = yield* snapshot.track()
+            }
             yield* session.updatePart({
               id: PartID.ascending(),
               messageID: ctx.assistantMessage.id,
@@ -454,20 +526,7 @@ const layer = Layer.effect(
               cost: usage.cost,
             })
             yield* session.updateMessage(ctx.assistantMessage)
-            if (ctx.snapshot) {
-              const patch = yield* snapshot.patch(ctx.snapshot)
-              if (patch.files.length) {
-                yield* session.updatePart({
-                  id: PartID.ascending(),
-                  messageID: ctx.assistantMessage.id,
-                  sessionID: ctx.sessionID,
-                  type: "patch",
-                  hash: patch.hash,
-                  files: patch.files,
-                })
-              }
-              ctx.snapshot = undefined
-            }
+            yield* flushPatch()
             yield* summary
               .summarize({
                 sessionID: ctx.sessionID,
@@ -537,20 +596,7 @@ const layer = Layer.effect(
       })
 
       const cleanup = Effect.fn("SessionProcessor.cleanup")(function* () {
-        if (ctx.snapshot) {
-          const patch = yield* snapshot.patch(ctx.snapshot)
-          if (patch.files.length) {
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: ctx.assistantMessage.id,
-              sessionID: ctx.sessionID,
-              type: "patch",
-              hash: patch.hash,
-              files: patch.files,
-            })
-          }
-          ctx.snapshot = undefined
-        }
+        yield* flushPatch()
 
         if (ctx.currentText) {
           const end = Date.now()

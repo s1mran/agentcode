@@ -207,6 +207,31 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Копіювати повідомлення",
   "ui.message.forkMessage": "Відгалузити в нову сесію",
   "ui.message.revertMessage": "Скинути до цього моменту",
+  "ui.message.revertMessage.partial.one": "Скинути до цього моменту (файлів, які не можна відновити: {{count}})",
+  "ui.message.revertMessage.partial.other": "Скинути до цього моменту (файлів, які не можна відновити: {{count}})",
+  "ui.message.revertMessage.partial.few": "Скинути до цього моменту (файлів, які не можна відновити: {{count}})",
+  "ui.message.revertMessage.partial.many": "Скинути до цього моменту (файлів, які не можна відновити: {{count}})",
+  "ui.checkpoint.skipped.one": "Скасування не зможе відновити файли, змінені тут: {{count}}",
+  "ui.checkpoint.skipped.other": "Скасування не зможе відновити файли, змінені тут: {{count}}",
+  "ui.checkpoint.skipped.few": "Скасування не зможе відновити файли, змінені тут: {{count}}",
+  "ui.checkpoint.skipped.many": "Скасування не зможе відновити файли, змінені тут: {{count}}",
+  "ui.checkpoint.reason.ignored": "ігнорується, не збережено",
+  "ui.checkpoint.reason.large": "більше 2 МБ",
+  "ui.checkpoint.reason.outside": "поза папкою проєкту",
+  "ui.checkpoint.reason.offline": "хмарний файл не завантажено",
+  "ui.checkpoint.reason.unavailable": "контрольні точки вимкнено",
+  "ui.checkpoint.unavailable.root":
+    "Контрольні точки вимкнено, бо це корінь диска. Скасування не зможе відновити ці файли.",
+  "ui.checkpoint.unavailable.home":
+    "Контрольні точки вимкнено в домашній папці. Відкрийте папку проєкту, щоб мати змогу скасовувати зміни.",
+  "ui.checkpoint.unavailable.data-dir": "Контрольні точки вимкнено, бо ця папка містить власні дані AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Контрольні точки вимкнено: у цій папці понад 20 000 файлів без урахування залежностей і результатів збирання.",
+  "ui.checkpoint.unavailable.too-large": "Контрольні точки вимкнено: у цій папці понад 512 МБ файлів.",
+  "ui.checkpoint.unavailable.slow":
+    "Контрольні точки тимчасово вимкнено: сканування цієї папки тривало занадто довго. Незабаром буде нова спроба.",
+  "ui.checkpoint.unavailable.no-git":
+    "Контрольні точки вимкнено: Git не встановлено. Установіть Git, щоб мати змогу скасовувати зміни.",
   "ui.message.copyResponse": "Копіювати відповідь",
   "ui.message.copied": "Скопійовано",
   "ui.message.duration.seconds": "{{count}}с",

@@ -198,6 +198,26 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Salin pesan",
   "ui.message.forkMessage": "Cabangkan ke sesi baru",
   "ui.message.revertMessage": "Urungkan pesan",
+  "ui.message.revertMessage.partial.one": "Urungkan pesan ({{count}} file tidak dapat dipulihkan)",
+  "ui.message.revertMessage.partial.other": "Urungkan pesan ({{count}} file tidak dapat dipulihkan)",
+  "ui.checkpoint.skipped.one": "Urungkan tidak dapat memulihkan {{count}} file yang diubah di sini",
+  "ui.checkpoint.skipped.other": "Urungkan tidak dapat memulihkan {{count}} file yang diubah di sini",
+  "ui.checkpoint.reason.ignored": "diabaikan, tidak disimpan",
+  "ui.checkpoint.reason.large": "lebih dari 2 MB",
+  "ui.checkpoint.reason.outside": "di luar folder proyek",
+  "ui.checkpoint.reason.offline": "file cloud belum diunduh",
+  "ui.checkpoint.reason.unavailable": "checkpoint nonaktif",
+  "ui.checkpoint.unavailable.root":
+    "Checkpoint nonaktif karena ini adalah root drive. Urungkan tidak dapat memulihkan file ini.",
+  "ui.checkpoint.unavailable.home":
+    "Checkpoint nonaktif di folder home Anda. Buka folder proyek untuk dapat mengurungkan.",
+  "ui.checkpoint.unavailable.data-dir": "Checkpoint nonaktif karena folder ini berisi data milik AgentCode sendiri.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Checkpoint nonaktif: folder ini memiliki lebih dari 20.000 file setelah dependensi dan hasil build dilewati.",
+  "ui.checkpoint.unavailable.too-large": "Checkpoint nonaktif: folder ini berisi lebih dari 512 MB file.",
+  "ui.checkpoint.unavailable.slow":
+    "Checkpoint nonaktif untuk sementara: pemindaian folder ini terlalu lama. Akan dicoba lagi sebentar lagi.",
+  "ui.checkpoint.unavailable.no-git": "Checkpoint nonaktif: Git tidak terpasang. Pasang Git agar bisa membatalkan.",
   "ui.message.copyResponse": "Salin respons",
   "ui.message.copied": "Tersalin",
   "ui.message.duration.seconds": "{{count}}dtk",

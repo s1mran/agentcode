@@ -36,6 +36,7 @@ import { Effect, Layer, Context } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Format } from "../format"
+import { FileReads } from "../session/file-reads"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectBridge } from "@/effect/bridge"
 import { Question } from "../question"
@@ -199,7 +200,8 @@ const layer = Layer.effect(
           }
         }
 
-        const dirs = yield* config.directories()
+        // Custom tool modules run in-process on import, so a project's are imported only once the folder is trusted.
+        const dirs = yield* config.trustedDirectories()
         const matches = dirs.flatMap((dir) =>
           Glob.scanSync("{tool,tools}/*.{js,ts}", { cwd: dir, absolute: true, dot: true, symlink: true }),
         )
@@ -467,6 +469,7 @@ export const node = LayerNode.make({
     httpClient,
     CrossSpawnSpawner.node,
     Format.node,
+    FileReads.node,
     Truncate.node,
     RuntimeFlags.node,
     MCP.node,

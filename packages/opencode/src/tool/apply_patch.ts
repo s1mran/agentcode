@@ -1,5 +1,5 @@
 import * as path from "path"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import * as Tool from "./tool"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Watcher } from "@opencode-ai/core/filesystem/watcher"
@@ -15,6 +15,7 @@ import DESCRIPTION from "./apply_patch.txt"
 import { FileSystem } from "@opencode-ai/core/filesystem"
 import { Format } from "../format"
 import * as Bom from "@/util/bom"
+import { FileReads } from "../session/file-reads"
 
 export const Parameters = Schema.Struct({
   patchText: Schema.String.annotate({ description: "The full patch text that describes all changes to be made" }),
@@ -28,6 +29,8 @@ export const ApplyPatchTool = Tool.define(
     const format = yield* Format.Service
     const events = yield* EventV2Bridge.Service
     const denyPlanModeEdits = yield* PlanEditGuard.make
+    // Optional so isolated tool tests keep working; the tool registry always provides it.
+    const reads = Option.getOrUndefined(yield* Effect.serviceOption(FileReads.Service))
 
     const run = Effect.fn("ApplyPatchTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -63,18 +66,82 @@ export const ApplyPatchTool = Tool.define(
         ]),
       )
 
+      // Every target (and move destination) is locked, in sorted order, from the read check through formatting.
+      const locked = hunks.flatMap((hunk) => [
+        path.resolve(instance.directory, hunk.path),
+        hunk.type === "update" && hunk.move_path ? path.resolve(instance.directory, hunk.move_path) : undefined,
+      ])
+      const applied = yield* FileReads.withLock(locked, apply(hunks, ctx))
+      // Language server diagnostics can take seconds: they run after the locks are released, as in edit and write.
+      return yield* report(applied)
+    })
+
+    type Change = {
+      filePath: string
+      oldContent: string
+      newContent: string
+      type: "add" | "update" | "delete" | "move"
+      movePath?: string
+      diff: string
+      additions: number
+      deletions: number
+      bom: boolean
+      /** What was on disk when the change was built, re-checked after the permission prompt. */
+      snap?: FileReads.Snapshot
+      /** The ledger view the source was read under, when fresh. */
+      entry?: FileReads.View
+      /** The existing file an add or move replaces. */
+      target?: FileReads.Snapshot
+    }
+
+    /** One entry of the `files` metadata; the CLI and UI renderers read these fields. */
+    type PatchFile = {
+      filePath: string
+      relativePath: string
+      type: Change["type"]
+      patch: string
+      additions: number
+      deletions: number
+      movePath: string | undefined
+    }
+
+    const verify = (message: string) => new Error(`apply_patch verification failed: ${message}`)
+
+    /**
+     * Read-before-edit for one path (session/file-reads.ts). `need` is the old lines an update touches; undefined
+     * means the whole file is replaced, which needs a full read.
+     */
+    const check = Effect.fn("ApplyPatchTool.check")(function* (
+      ctx: Tool.Context,
+      file: string,
+      snap: FileReads.Snapshot,
+      verb: "edit" | "overwrite",
+      need?: (seen: FileReads.View) => number[],
+    ) {
+      if (!reads) return
+      const status = yield* reads.status(ctx, file, snap)
+      if (!reads.enforce) return status.kind === "fresh" ? status.entry : undefined
+      if (status.kind === "unread") throw verify(FileReads.unreadError(file, verb))
+      if (status.kind === "changed") throw verify(FileReads.changedError(file, verb))
+      // A full view covers every line, so the diff behind `need` only runs for a partial one.
+      if (status.entry.full) return status.entry
+      const lines = need?.(status.entry)
+      if (lines === undefined || !FileReads.covers(status.entry, lines)) {
+        throw verify(FileReads.partialError(file, status.entry, lines))
+      }
+      return status.entry
+    })
+
+    const existing = Effect.fn("ApplyPatchTool.existing")(function* (file: string) {
+      const stats = yield* afs.stat(file).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (!stats || stats.type === "Directory") return
+      return yield* FileReads.read(afs, file)
+    })
+
+    const apply = Effect.fn("ApplyPatchTool.apply")(function* (hunks: Patch.Hunk[], ctx: Tool.Context) {
+      const instance = yield* InstanceState.context
       // Validate file paths and check permissions
-      const fileChanges: Array<{
-        filePath: string
-        oldContent: string
-        newContent: string
-        type: "add" | "update" | "delete" | "move"
-        movePath?: string
-        diff: string
-        additions: number
-        deletions: number
-        bom: boolean
-      }> = []
+      const fileChanges: Change[] = []
 
       let totalDiff = ""
 
@@ -84,6 +151,9 @@ export const ApplyPatchTool = Tool.define(
 
         switch (hunk.type) {
           case "add": {
+            // Adding over an existing file replaces it: the write rules apply.
+            const target = yield* existing(filePath)
+            if (target) yield* check(ctx, filePath, target, "overwrite")
             const oldContent = ""
             const newContent =
               hunk.contents.length === 0 || hunk.contents.endsWith("\n") ? hunk.contents : `${hunk.contents}\n`
@@ -106,6 +176,7 @@ export const ApplyPatchTool = Tool.define(
               additions,
               deletions,
               bom: next.bom,
+              target,
             })
 
             totalDiff += diff + "\n"
@@ -121,7 +192,7 @@ export const ApplyPatchTool = Tool.define(
               )
             }
 
-            const source = yield* Bom.readFile(afs, filePath)
+            const source = yield* FileReads.read(afs, filePath)
             const oldContent = source.text
             let newContent = oldContent
             let bom = source.bom
@@ -148,8 +219,15 @@ export const ApplyPatchTool = Tool.define(
               if (change.removed) deletions += change.count || 0
             }
 
+            const entry = yield* check(ctx, filePath, source, "edit", (seen) =>
+              FileReads.touched(oldContent, newContent, seen),
+            )
+
             const movePath = hunk.move_path ? path.resolve(instance.directory, hunk.move_path) : undefined
             yield* assertExternalDirectoryEffect(ctx, movePath)
+            const target =
+              movePath && FileReads.key(movePath) !== FileReads.key(filePath) ? yield* existing(movePath) : undefined
+            if (movePath && target) yield* check(ctx, movePath, target, "overwrite")
 
             fileChanges.push({
               filePath,
@@ -161,6 +239,9 @@ export const ApplyPatchTool = Tool.define(
               additions,
               deletions,
               bom,
+              snap: source,
+              entry,
+              target,
             })
 
             totalDiff += diff + "\n"
@@ -200,7 +281,7 @@ export const ApplyPatchTool = Tool.define(
       }
 
       // Build per-file metadata for UI rendering (used for both permission and result)
-      const files = fileChanges.map((change) => ({
+      const files: PatchFile[] = fileChanges.map((change) => ({
         filePath: change.filePath,
         relativePath: path.relative(instance.worktree, change.movePath ?? change.filePath).replaceAll("\\", "/"),
         type: change.type,
@@ -227,8 +308,26 @@ export const ApplyPatchTool = Tool.define(
         },
       })
 
+      // A file may have changed (or appeared) while the prompt was open: never overwrite that.
+      for (const change of fileChanges) {
+        const checks: Array<[string, FileReads.Snapshot | undefined]> = []
+        if (change.type === "update" || change.type === "move") checks.push([change.filePath, change.snap])
+        if (change.type === "add") checks.push([change.filePath, change.target])
+        if (
+          change.type === "move" &&
+          change.movePath &&
+          FileReads.key(change.movePath) !== FileReads.key(change.filePath)
+        )
+          checks.push([change.movePath, change.target])
+        for (const [file, snap] of checks) {
+          if (yield* FileReads.changedSince(afs, file, snap)) throw new Error(FileReads.raceError(file))
+        }
+      }
+
       // Apply the changes
       const updates: Array<{ file: string; event: "add" | "change" | "unlink" }> = []
+      const notes: string[] = []
+      const ledger: FileReads.View[] = []
 
       for (const change of fileChanges) {
         const edited = change.type === "delete" ? undefined : (change.movePath ?? change.filePath)
@@ -263,8 +362,32 @@ export const ApplyPatchTool = Tool.define(
         }
 
         if (edited) {
-          if (yield* format.file(edited)) {
-            yield* Bom.syncFile(afs, edited, change.bom)
+          const formatted = yield* FileReads.formatWritten(format, afs, edited, change.bom, change.newContent)
+          notes.push(...formatted.notes)
+          if (reads) {
+            // Own changes count as reads: an add is fully seen, an update keeps what was read plus the changed lines.
+            const view = yield* FileReads.recordWrite(afs, edited, {
+              base:
+                change.type === "add"
+                  ? {
+                      file: FileReads.key(edited),
+                      mtimeMs: 0,
+                      size: 0,
+                      ranges: [],
+                      full: true,
+                      source: "apply_patch",
+                      time: 0,
+                    }
+                  : change.entry,
+              before: change.oldContent,
+              written: change.newContent,
+              final: formatted.text,
+              source: "apply_patch",
+            })
+            if (view) {
+              yield* reads.record(ctx, [view])
+              ledger.push(view)
+            }
           }
           yield* events.publish(FileSystem.Event.Edited, { file: edited })
         }
@@ -274,6 +397,19 @@ export const ApplyPatchTool = Tool.define(
       for (const update of updates) {
         yield* events.publish(Watcher.Event.Updated, update)
       }
+
+      return { fileChanges, notes, ledger, totalDiff, files }
+    })
+
+    const report = Effect.fn("ApplyPatchTool.report")(function* (input: {
+      fileChanges: Change[]
+      notes: string[]
+      ledger: FileReads.View[]
+      totalDiff: string
+      files: PatchFile[]
+    }) {
+      const instance = yield* InstanceState.context
+      const { fileChanges, notes, ledger, totalDiff, files } = input
 
       // Notify LSP of file changes and collect diagnostics
       for (const change of fileChanges) {
@@ -295,6 +431,7 @@ export const ApplyPatchTool = Tool.define(
         return `M ${path.relative(instance.worktree, target).replaceAll("\\", "/")}`
       })
       let output = `Success. Updated the following files:\n${summaryLines.join("\n")}`
+      if (notes.length > 0) output += `\n\n${notes.join("\n\n")}`
 
       for (const change of fileChanges) {
         if (change.type === "delete") continue
@@ -311,6 +448,7 @@ export const ApplyPatchTool = Tool.define(
           diff: totalDiff,
           files,
           diagnostics,
+          ...(ledger.length > 0 ? { ledger } : {}),
         },
         output,
       }

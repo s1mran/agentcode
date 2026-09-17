@@ -18,6 +18,8 @@ import { diffs as list, message as clean } from "@/utils/diffs"
 import { messageKey } from "@/utils/session-message"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+// Patch parts stay out of the store unless they carry a checkpoint notice (files undo cannot restore).
+const skipPart = (part: Part) => SKIP_PARTS.has(part.type) && !(part.type === "patch" && !!part.skipped?.length)
 const SESSION_CONTENT_EVENTS = new Set([
   "session.diff",
   "todo.updated",
@@ -312,7 +314,7 @@ export function applyDirectoryEvent(input: {
     }
     case "message.part.updated": {
       const part = (event.properties as { part: Part }).part
-      if (SKIP_PARTS.has(part.type)) break
+      if (skipPart(part)) break
       input.setStore(
         produce((draft) => {
           delete draft.part_text_accum_delta[part.id]

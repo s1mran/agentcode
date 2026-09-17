@@ -178,6 +178,29 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Αντιγραφή μηνύματος",
   "ui.message.forkMessage": "Διακλάδωση σε νέα συνεδρία",
   "ui.message.revertMessage": "Επαναφορά μηνύματος",
+  "ui.message.revertMessage.partial.one": "Επαναφορά μηνύματος ({{count}} αρχείο δεν μπορεί να ανακτηθεί)",
+  "ui.message.revertMessage.partial.other": "Επαναφορά μηνύματος ({{count}} αρχεία δεν μπορούν να ανακτηθούν)",
+  "ui.checkpoint.skipped.one": "Η αναίρεση δεν μπορεί να επαναφέρει {{count}} αρχείο που άλλαξε εδώ",
+  "ui.checkpoint.skipped.other": "Η αναίρεση δεν μπορεί να επαναφέρει {{count}} αρχεία που άλλαξαν εδώ",
+  "ui.checkpoint.reason.ignored": "αγνοήθηκε, δεν καταγράφηκε",
+  "ui.checkpoint.reason.large": "μεγαλύτερο από 2 MB",
+  "ui.checkpoint.reason.outside": "εκτός του φακέλου του έργου",
+  "ui.checkpoint.reason.offline": "αρχείο cloud που δεν έχει ληφθεί",
+  "ui.checkpoint.reason.unavailable": "σημεία ελέγχου απενεργοποιημένα",
+  "ui.checkpoint.unavailable.root":
+    "Τα σημεία ελέγχου είναι απενεργοποιημένα επειδή αυτή είναι η ρίζα ενός δίσκου. Η αναίρεση δεν μπορεί να επαναφέρει αυτά τα αρχεία.",
+  "ui.checkpoint.unavailable.home":
+    "Τα σημεία ελέγχου είναι απενεργοποιημένα στον αρχικό σας φάκελο. Ανοίξτε έναν φάκελο έργου για να έχετε αναίρεση.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Τα σημεία ελέγχου είναι απενεργοποιημένα επειδή αυτός ο φάκελος περιέχει τα δεδομένα του ίδιου του AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Τα σημεία ελέγχου είναι απενεργοποιημένα: αυτός ο φάκελος έχει πάνω από 20.000 αρχεία χωρίς τις εξαρτήσεις και τα αποτελέσματα build.",
+  "ui.checkpoint.unavailable.too-large":
+    "Τα σημεία ελέγχου είναι απενεργοποιημένα: αυτός ο φάκελος περιέχει πάνω από 512 MB αρχείων.",
+  "ui.checkpoint.unavailable.slow":
+    "Τα σημεία ελέγχου είναι προσωρινά απενεργοποιημένα: η σάρωση αυτού του φακέλου άργησε πολύ. Θα γίνει νέα προσπάθεια σύντομα.",
+  "ui.checkpoint.unavailable.no-git":
+    "Τα σημεία ελέγχου είναι απενεργοποιημένα: το Git δεν είναι εγκατεστημένο. Εγκαταστήστε το Git για να έχετε αναίρεση.",
   "ui.message.copyResponse": "Απάντηση αντιγραφής",
   "ui.message.copied": "Αντιγράφηκε",
   "ui.message.duration.seconds": "{{count}}δ",

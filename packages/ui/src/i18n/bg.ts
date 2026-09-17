@@ -178,6 +178,29 @@ export const dict = {
   "ui.message.copyMessage": "Копиране на съобщение",
   "ui.message.forkMessage": "Разклоняване в нова сесия",
   "ui.message.revertMessage": "Възстановяване на съобщението",
+  "ui.message.revertMessage.partial.one": "Възстановяване на съобщението ({{count}} файл не може да бъде възстановен)",
+  "ui.message.revertMessage.partial.other":
+    "Възстановяване на съобщението ({{count}} файла не могат да бъдат възстановени)",
+  "ui.checkpoint.skipped.one": "Отмяната не може да възстанови {{count}} файл, променен тук",
+  "ui.checkpoint.skipped.other": "Отмяната не може да възстанови {{count}} файла, променени тук",
+  "ui.checkpoint.reason.ignored": "игнориран, не е запазен",
+  "ui.checkpoint.reason.large": "по-голям от 2 MB",
+  "ui.checkpoint.reason.outside": "извън папката на проекта",
+  "ui.checkpoint.reason.offline": "облачен файл, който не е изтеглен",
+  "ui.checkpoint.reason.unavailable": "контролните точки са изключени",
+  "ui.checkpoint.unavailable.root":
+    "Контролните точки са изключени, защото това е коренът на диск. Отмяната не може да възстанови тези файлове.",
+  "ui.checkpoint.unavailable.home":
+    "Контролните точки са изключени в домашната ви папка. Отворете папка на проект, за да имате отмяна.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Контролните точки са изключени, защото тази папка съдържа собствените данни на AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Контролните точки са изключени: тази папка има над 20 000 файла след пропускане на зависимостите и резултатите от компилация.",
+  "ui.checkpoint.unavailable.too-large": "Контролните точки са изключени: тази папка съдържа над 512 MB файлове.",
+  "ui.checkpoint.unavailable.slow":
+    "Контролните точки са временно изключени: сканирането на тази папка отне твърде дълго. Скоро ще бъде направен нов опит.",
+  "ui.checkpoint.unavailable.no-git":
+    "Контролните точки са изключени: Git не е инсталиран. Инсталирайте Git, за да може да отменяте.",
   "ui.message.copyResponse": "Копиране на отговора",
   "ui.message.copied": "Копирано",
   "ui.message.duration.seconds": "{{count}} сек",

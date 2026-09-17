@@ -103,6 +103,15 @@ export type PromptInputV2Suggestion = {
   keybind?: string[]
   recent?: boolean
   mention?: PromptInputV2FilePart | PromptInputV2AgentPart
+  /** Other command names that run this command; matched exactly on Enter and searchable through `keywords`. */
+  aliases?: string[]
+  keywords?: string
+  /** Argument hint shown after a command's name, such as `[model]`. */
+  hint?: string
+  /** Source badge shown on a command row: built-in, custom, skill or mcp. */
+  badge?: string
+  /** Whether a command takes arguments, so picking it inserts `/name ` instead of running it. */
+  takesArguments?: boolean
 }
 
 export type PromptInputV2ModeTone = "neutral" | "success" | "info" | "critical" | "warning"

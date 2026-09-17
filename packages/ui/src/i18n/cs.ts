@@ -186,6 +186,32 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Zkopírujte zprávu",
   "ui.message.forkMessage": "Vytvořit větev v nové relaci",
   "ui.message.revertMessage": "Vrátit zprávu",
+  "ui.message.revertMessage.partial.one": "Vrátit zprávu (soubory, které nelze obnovit: {{count}})",
+  "ui.message.revertMessage.partial.other": "Vrátit zprávu (soubory, které nelze obnovit: {{count}})",
+  "ui.message.revertMessage.partial.few": "Vrátit zprávu (soubory, které nelze obnovit: {{count}})",
+  "ui.message.revertMessage.partial.many": "Vrátit zprávu (soubory, které nelze obnovit: {{count}})",
+  "ui.checkpoint.skipped.one": "Zpět nelze obnovit soubory změněné zde: {{count}}",
+  "ui.checkpoint.skipped.other": "Zpět nelze obnovit soubory změněné zde: {{count}}",
+  "ui.checkpoint.skipped.few": "Zpět nelze obnovit soubory změněné zde: {{count}}",
+  "ui.checkpoint.skipped.many": "Zpět nelze obnovit soubory změněné zde: {{count}}",
+  "ui.checkpoint.reason.ignored": "ignorováno, nezachyceno",
+  "ui.checkpoint.reason.large": "větší než 2 MB",
+  "ui.checkpoint.reason.outside": "mimo složku projektu",
+  "ui.checkpoint.reason.offline": "cloudový soubor není stažen",
+  "ui.checkpoint.reason.unavailable": "kontrolní body vypnuty",
+  "ui.checkpoint.unavailable.root":
+    "Kontrolní body jsou vypnuté, protože jde o kořen disku. Zpět tyto soubory nemůže obnovit.",
+  "ui.checkpoint.unavailable.home":
+    "Kontrolní body jsou ve vaší domovské složce vypnuté. Otevřete složku projektu, abyste mohli vracet změny.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Kontrolní body jsou vypnuté, protože tato složka obsahuje vlastní data AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Kontrolní body jsou vypnuté: tato složka má po vynechání závislostí a výstupů sestavení více než 20 000 souborů.",
+  "ui.checkpoint.unavailable.too-large": "Kontrolní body jsou vypnuté: tato složka obsahuje více než 512 MB souborů.",
+  "ui.checkpoint.unavailable.slow":
+    "Kontrolní body jsou dočasně vypnuté: prohledání této složky trvalo příliš dlouho. Brzy se to zkusí znovu.",
+  "ui.checkpoint.unavailable.no-git":
+    "Kontrolní body jsou vypnuté: Git není nainstalovaný. Nainstalujte Git, abyste mohli vracet změny.",
   "ui.message.copyResponse": "Zkopírujte odpověď",
   "ui.message.copied": "Zkopírováno",
   "ui.message.duration.seconds": "{{count}} s",

@@ -18,10 +18,16 @@ export const Status = Schema.Struct({
 }).annotate({ identifier: "FormatterStatus" })
 export type Status = Schema.Schema.Type<typeof Status>
 
+/** Formatters run on a file: `ran` names every formatter started, `failed` those that could not start or exited non-zero. */
+export type Outcome = { ran: string[]; failed: { name: string; code?: number }[] }
+
 export interface Interface {
   readonly init: () => Effect.Effect<void>
   readonly status: () => Effect.Effect<Status[]>
+  /** True when a formatter matched the file and was run. Kept for callers that only need that. */
   readonly file: (filepath: string) => Effect.Effect<boolean>
+  /** Runs the matching formatters and reports which ran or failed. Whether the text changed is up to the caller. */
+  readonly apply: (filepath: string) => Effect.Effect<Outcome>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Format") {}
@@ -74,10 +80,12 @@ const layer = Layer.effect(
           return Effect.gen(function* () {
             yield* Effect.logInfo("formatting", { file: filepath })
             const formatters = yield* Effect.promise(() => getFormatter(path.extname(filepath)))
+            const outcome: Outcome = { ran: [], failed: [] }
 
-            if (!formatters.length) return false
+            if (!formatters.length) return outcome
 
             for (const { item, cmd } of formatters) {
+              outcome.ran.push(item.name)
               yield* Effect.logInfo("running", { command: cmd })
               const replaced = cmd.map((x) => x.replace("$FILE", filepath))
               const dir = yield* InstanceState.directory
@@ -103,7 +111,9 @@ const layer = Layer.effect(
                     }).pipe(Effect.as(undefined)),
                   ),
                 )
+              if (!result) outcome.failed.push({ name: item.name })
               if (result && result.exitCode !== 0) {
+                outcome.failed.push({ name: item.name, code: result.exitCode })
                 yield* Effect.logError("failed", {
                   command: cmd,
                   ...item.environment,
@@ -111,7 +121,7 @@ const layer = Layer.effect(
               }
             }
 
-            return true
+            return outcome
           })
         }
 
@@ -185,12 +195,16 @@ const layer = Layer.effect(
       return result
     })
 
-    const file = Effect.fn("Format.file")(function* (filepath: string) {
+    const apply = Effect.fn("Format.apply")(function* (filepath: string) {
       const { formatFile } = yield* InstanceState.get(state)
       return yield* formatFile(filepath)
     })
 
-    return Service.of({ init, status, file })
+    const file = Effect.fn("Format.file")(function* (filepath: string) {
+      return (yield* apply(filepath)).ran.length > 0
+    })
+
+    return Service.of({ init, status, file, apply })
   }),
 )
 

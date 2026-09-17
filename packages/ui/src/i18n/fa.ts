@@ -178,6 +178,26 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "کپی پیام",
   "ui.message.forkMessage": "فورک به جلسه جدید",
   "ui.message.revertMessage": "پیام را برگردانید",
+  "ui.message.revertMessage.partial.one": "پیام را برگردانید ({{count}} فایل قابل بازیابی نیست)",
+  "ui.message.revertMessage.partial.other": "پیام را برگردانید ({{count}} فایل قابل بازیابی نیست)",
+  "ui.checkpoint.skipped.one": "واگرد نمی‌تواند {{count}} فایل تغییریافته در اینجا را بازیابی کند",
+  "ui.checkpoint.skipped.other": "واگرد نمی‌تواند {{count}} فایل تغییریافته در اینجا را بازیابی کند",
+  "ui.checkpoint.reason.ignored": "نادیده گرفته شده، ذخیره نشده",
+  "ui.checkpoint.reason.large": "بزرگ‌تر از 2 MB",
+  "ui.checkpoint.reason.outside": "خارج از پوشه پروژه",
+  "ui.checkpoint.reason.offline": "فایل ابری دانلود نشده",
+  "ui.checkpoint.reason.unavailable": "نقاط بازگشت خاموش",
+  "ui.checkpoint.unavailable.root":
+    "نقاط بازگشت خاموش هستند چون اینجا ریشه یک درایو است. واگرد نمی‌تواند این فایل‌ها را بازیابی کند.",
+  "ui.checkpoint.unavailable.home":
+    "نقاط بازگشت در پوشه خانگی شما خاموش هستند. برای داشتن واگرد، یک پوشه پروژه باز کنید.",
+  "ui.checkpoint.unavailable.data-dir": "نقاط بازگشت خاموش هستند چون این پوشه شامل داده‌های خود AgentCode است.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "نقاط بازگشت خاموش هستند: این پوشه پس از کنار گذاشتن وابستگی‌ها و خروجی ساخت بیش از 20,000 فایل دارد.",
+  "ui.checkpoint.unavailable.too-large": "نقاط بازگشت خاموش هستند: این پوشه بیش از 512 MB فایل دارد.",
+  "ui.checkpoint.unavailable.slow":
+    "نقاط بازگشت موقتاً خاموش هستند: بررسی این پوشه بیش از حد طول کشید. به‌زودی دوباره تلاش می‌شود.",
+  "ui.checkpoint.unavailable.no-git": "نقاط بازگشت خاموش هستند: Git نصب نیست. برای امکان واگرد، Git را نصب کنید.",
   "ui.message.copyResponse": "پاسخ را کپی کنید",
   "ui.message.copied": "کپی شد",
   "ui.message.duration.seconds": "{{count}}s",

@@ -183,6 +183,31 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Copia messaggio",
   "ui.message.forkMessage": "Crea una nuova sessione da qui",
   "ui.message.revertMessage": "Annulla messaggio",
+  "ui.message.revertMessage.partial.one": "Annulla messaggio ({{count}} file non può essere ripristinato)",
+  "ui.message.revertMessage.partial.other": "Annulla messaggio ({{count}} file non possono essere ripristinati)",
+  "ui.message.revertMessage.partial.many": "Annulla messaggio ({{count}} file non possono essere ripristinati)",
+  "ui.checkpoint.skipped.one": "Annulla non può ripristinare {{count}} file modificato qui",
+  "ui.checkpoint.skipped.other": "Annulla non può ripristinare {{count}} file modificati qui",
+  "ui.checkpoint.skipped.many": "Annulla non può ripristinare {{count}} file modificati qui",
+  "ui.checkpoint.reason.ignored": "ignorato, non acquisito",
+  "ui.checkpoint.reason.large": "più grande di 2 MB",
+  "ui.checkpoint.reason.outside": "fuori dalla cartella del progetto",
+  "ui.checkpoint.reason.offline": "file cloud non scaricato",
+  "ui.checkpoint.reason.unavailable": "checkpoint disattivati",
+  "ui.checkpoint.unavailable.root":
+    "I checkpoint sono disattivati perché questa è la radice di un'unità. Annulla non può ripristinare questi file.",
+  "ui.checkpoint.unavailable.home":
+    "I checkpoint sono disattivati nella cartella home. Apri una cartella di progetto per poter annullare.",
+  "ui.checkpoint.unavailable.data-dir":
+    "I checkpoint sono disattivati perché questa cartella contiene i dati di AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "I checkpoint sono disattivati: questa cartella contiene più di 20.000 file escludendo dipendenze e output di build.",
+  "ui.checkpoint.unavailable.too-large":
+    "I checkpoint sono disattivati: questa cartella contiene più di 512 MB di file.",
+  "ui.checkpoint.unavailable.slow":
+    "I checkpoint sono disattivati per ora: l'analisi di questa cartella ha richiesto troppo tempo. Verrà ritentata a breve.",
+  "ui.checkpoint.unavailable.no-git":
+    "I checkpoint sono disattivati: Git non è installato. Installa Git per poter annullare.",
   "ui.message.copyResponse": "Copia la risposta",
   "ui.message.copied": "Copiato",
   "ui.message.duration.seconds": "{{count}}s",

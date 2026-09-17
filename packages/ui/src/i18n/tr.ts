@@ -192,6 +192,27 @@ export const dict = {
   "ui.message.copyMessage": "Mesajı kopyala",
   "ui.message.forkMessage": "Yeni oturuma dallandır",
   "ui.message.revertMessage": "Bu noktaya sıfırla",
+  "ui.message.revertMessage.partial.one": "Bu noktaya sıfırla ({{count}} dosya geri yüklenemez)",
+  "ui.message.revertMessage.partial.other": "Bu noktaya sıfırla ({{count}} dosya geri yüklenemez)",
+  "ui.checkpoint.skipped.one": "Geri alma burada değiştirilen {{count}} dosyayı geri yükleyemez",
+  "ui.checkpoint.skipped.other": "Geri alma burada değiştirilen {{count}} dosyayı geri yükleyemez",
+  "ui.checkpoint.reason.ignored": "yok sayıldı, kaydedilmedi",
+  "ui.checkpoint.reason.large": "2 MB'den büyük",
+  "ui.checkpoint.reason.outside": "proje klasörünün dışında",
+  "ui.checkpoint.reason.offline": "bulut dosyası indirilmemiş",
+  "ui.checkpoint.reason.unavailable": "kontrol noktaları kapalı",
+  "ui.checkpoint.unavailable.root":
+    "Bu bir sürücünün kökü olduğu için kontrol noktaları kapalı. Geri alma bu dosyaları geri yükleyemez.",
+  "ui.checkpoint.unavailable.home":
+    "Ana klasörünüzde kontrol noktaları kapalı. Geri alabilmek için bir proje klasörü açın.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Bu klasör AgentCode'un kendi verilerini içerdiği için kontrol noktaları kapalı.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Kontrol noktaları kapalı: bu klasörde bağımlılıklar ve derleme çıktısı hariç 20.000'den fazla dosya var.",
+  "ui.checkpoint.unavailable.too-large": "Kontrol noktaları kapalı: bu klasörde 512 MB'den fazla dosya var.",
+  "ui.checkpoint.unavailable.slow":
+    "Kontrol noktaları şimdilik kapalı: bu klasörü taramak çok uzun sürdü. Kısa süre içinde yeniden denenecek.",
+  "ui.checkpoint.unavailable.no-git": "Kontrol noktaları kapalı: Git yüklü değil. Geri alabilmek için Git'i yükleyin.",
   "ui.message.copyResponse": "Yanıtı kopyala",
   "ui.message.copied": "Kopyalandı",
   "ui.message.interrupted": "Kesildi",

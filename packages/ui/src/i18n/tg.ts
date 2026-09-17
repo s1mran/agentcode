@@ -178,6 +178,28 @@ export const dict = {
   "ui.message.copyMessage": "Паёмро нусхабардорӣ кунед",
   "ui.message.forkMessage": "Дар сессияи нав шоха созед",
   "ui.message.revertMessage": "Баргардонидани паём",
+  "ui.message.revertMessage.partial.one": "Баргардонидани паём ({{count}} файлро барқарор кардан мумкин нест)",
+  "ui.message.revertMessage.partial.other": "Баргардонидани паём ({{count}} файлро барқарор кардан мумкин нест)",
+  "ui.checkpoint.skipped.one": "Бекоркунӣ {{count}} файли дар ин ҷо тағйирёфтаро барқарор карда наметавонад",
+  "ui.checkpoint.skipped.other": "Бекоркунӣ {{count}} файли дар ин ҷо тағйирёфтаро барқарор карда наметавонад",
+  "ui.checkpoint.reason.ignored": "нодида гирифта шуд, нигоҳ дошта нашуд",
+  "ui.checkpoint.reason.large": "аз 2 MB калонтар",
+  "ui.checkpoint.reason.outside": "берун аз ҷузвдони лоиҳа",
+  "ui.checkpoint.reason.offline": "файли абрӣ зеркашӣ нашудааст",
+  "ui.checkpoint.reason.unavailable": "нуқтаҳои назоратӣ хомӯшанд",
+  "ui.checkpoint.unavailable.root":
+    "Нуқтаҳои назоратӣ хомӯшанд, зеро ин решаи диск аст. Бекоркунӣ ин файлҳоро барқарор карда наметавонад.",
+  "ui.checkpoint.unavailable.home":
+    "Нуқтаҳои назоратӣ дар ҷузвдони хонагии шумо хомӯшанд. Барои бекоркунӣ ҷузвдони лоиҳаро кушоед.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Нуқтаҳои назоратӣ хомӯшанд, зеро ин ҷузвдон маълумоти худи AgentCode-ро дорад.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Нуқтаҳои назоратӣ хомӯшанд: пас аз гузаштан аз вобастагиҳо ва натиҷаҳои сохтан дар ин ҷузвдон зиёда аз 20 000 файл ҳаст.",
+  "ui.checkpoint.unavailable.too-large": "Нуқтаҳои назоратӣ хомӯшанд: ин ҷузвдон зиёда аз 512 MB файл дорад.",
+  "ui.checkpoint.unavailable.slow":
+    "Нуқтаҳои назоратӣ муваққатан хомӯшанд: скан кардани ин ҷузвдон хеле тӯл кашид. Ба наздикӣ дубора кӯшиш карда мешавад.",
+  "ui.checkpoint.unavailable.no-git":
+    "Нуқтаҳои назоратӣ хомӯшанд: Git насб нашудааст. Барои бекор кардан Git-ро насб кунед.",
   "ui.message.copyResponse": "Ҷавобро нусхабардорӣ кунед",
   "ui.message.copied": "Нусхабардорӣ",
   "ui.message.duration.seconds": "{{count}}с",

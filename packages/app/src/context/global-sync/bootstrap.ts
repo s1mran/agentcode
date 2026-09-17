@@ -281,6 +281,8 @@ export const loadCommands = (
     if ((await protocol) === "v1" && legacy) {
       return ((await legacy.command.list()).data ?? []).map((command) => {
         const [providerID, id] = command.model?.split("/") ?? []
+        // The hand-kept v1 SDK type predates these fields, but the engine sends both.
+        const extra = command as { source?: "command" | "mcp" | "skill"; hints?: string[] }
         return {
           name: command.name,
           template: command.template,
@@ -288,7 +290,8 @@ export const loadCommands = (
           agent: command.agent,
           model: providerID && id ? { providerID, id } : undefined,
           subtask: command.subtask,
-          // source: command.source === "skill" ? undefined : command.source,
+          source: extra.source,
+          hints: extra.hints ?? [],
         }
       })
     }

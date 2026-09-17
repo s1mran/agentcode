@@ -11,6 +11,7 @@ import { Global } from "@opencode-ai/core/global"
 import { ConfigPermissionV1 } from "@opencode-ai/core/v1/config/permission"
 import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { InstanceState } from "@/effect/instance-state"
+import type { Config } from "@/config/config"
 import { isRecord } from "@/util/record"
 import { fromConfig } from "./evaluate"
 
@@ -19,6 +20,11 @@ import { fromConfig } from "./evaluate"
 // global data, one file per directory. The file is ignored when git tracks it in any letter case or through a
 // .opencode submodule (a repo cannot ship pre-approvals), when git cannot answer, when it or .opencode is a symlink,
 // or when it does not parse (and is then never overwritten).
+//
+// Workspace trust: in a version-controlled folder that is not trusted (restricted mode) the file is neither read nor
+// written and git is not run, since a file dropped into a fresh checkout cannot be told apart from one the user wrote
+// and an untrusted .git/config must not run anything. "Allow always" then lasts for the session. Headless runs apply the
+// untracked file, like Claude Code -p. Files in global data are the user's own and always apply.
 
 export const FILE = "settings.local.json"
 export const EXCLUDE_LINE = "/.opencode/settings.local.json"
@@ -113,8 +119,9 @@ export function merge(text: string, rules: ReadonlyArray<PermissionV1.Rule>) {
 export const make = Effect.fnUntraced(function* (deps: {
   fs: FSUtil.Interface
   spawner: ChildProcessSpawner["Service"]
+  config?: Config.Interface
 }) {
-  const { fs, spawner } = deps
+  const { fs, spawner, config } = deps
   const state = yield* InstanceState.make<State>((ctx) =>
     Effect.succeed({
       file: ctx.project.vcs ? path.join(ctx.worktree, ".opencode", FILE) : globalFile(ctx.directory),
@@ -127,7 +134,7 @@ export const make = Effect.fnUntraced(function* (deps: {
   const git = (args: string[], cwd: string) =>
     Effect.gen(function* () {
       const handle = yield* spawner.spawn(
-        ChildProcess.make("git", args, {
+        ChildProcess.make("git", ["-c", "core.fsmonitor=false", ...args], {
           cwd,
           extendEnv: true,
           env: { GIT_OPTIONAL_LOCKS: "0" },
@@ -144,6 +151,13 @@ export const make = Effect.fnUntraced(function* (deps: {
       Effect.timeout(GIT_TIMEOUT),
       Effect.catchCause(() => Effect.succeed({ code: -1, text: "" })),
     )
+
+  /** True when this is a version-controlled folder whose workspace trust is restricted. */
+  const held = Effect.fnUntraced(function* (s: State) {
+    if (!s.vcs || !config) return false
+    const trust = yield* config.trust()
+    return trust.state.effective === "restricted"
+  })
 
   const warn = (s: State, reason: string) => {
     if (s.warned === reason) return Effect.void
@@ -178,6 +192,10 @@ export const make = Effect.fnUntraced(function* (deps: {
   const rules: Interface["rules"] = Effect.fn("PermissionLocal.rules")(function* () {
     if (Flag.OPENCODE_DISABLE_PROJECT_CONFIG) return []
     const s = yield* InstanceState.get(state)
+    if (yield* held(s)) {
+      yield* warn(s, "settings.local.json waits for workspace trust")
+      return []
+    }
     const info = yield* inspect(s)
     if (info.kind === "missing") {
       s.cache = undefined
@@ -237,6 +255,10 @@ export const make = Effect.fnUntraced(function* (deps: {
   const add: Interface["add"] = Effect.fn("PermissionLocal.add")(function* (items) {
     if (Flag.OPENCODE_DISABLE_PROJECT_CONFIG || items.length === 0) return false
     const s = yield* InstanceState.get(state)
+    if (yield* held(s)) {
+      yield* warn(s, "settings.local.json waits for workspace trust")
+      return false
+    }
     return yield* Effect.gen(function* () {
       const info = yield* inspect(s)
       if (info.kind === "unsafe") {

@@ -15,6 +15,7 @@ import { createPersistedPromptInputHistory } from "@/components/prompt-input/his
 import { promptDesignPlaceholder, promptPlaceholder } from "@/components/prompt-input/placeholder"
 import { createPromptSubmit } from "@/components/prompt-input/submit"
 import { permissionModeTone } from "@/components/prompt-input/permission-mode-controls"
+import { buildSlashCommands, createSlashResolver } from "@/components/prompt-input/slash"
 import { selectionFromLines, type SelectedLineRange, useFile } from "@/context/file"
 import { useComments } from "@/context/comments"
 import { useCommand } from "@/context/command"
@@ -225,6 +226,14 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     onAbort: props.onAbort,
     onSubmit: props.onSubmit,
     model: props.controls.model.selection,
+    slash: {
+      resolve: createSlashResolver({
+        options: () => command.options,
+        commands: () => sync().data.command,
+        catalog: () => command.catalog,
+      }),
+      run: (id, args) => command.trigger(id, "slash", args),
+    },
   })
 
   const referenceDescription = (reference: ReferenceInfo) =>
@@ -295,33 +304,22 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       mention: { type: "file" as const, path, content: `@${path}`, start: 0, end: 0 },
     })),
   ])
-  const slashCommands = createMemo(() => [
-    // The engine's plan command stays listed so picking it inserts `/plan `; submit turns it into Plan mode.
-    ...sync().data.command.map((item) => ({
-      id: `custom.${item.name}`,
-      trigger: item.name,
-      title: item.name,
-      description: item.description,
-      type: "custom" as const,
-    })),
-    ...command.options
-      .filter((item) => !item.disabled && !item.id.startsWith("suggested.") && item.slash)
-      .map((item) => ({
-        id: item.id,
-        trigger: item.slash!,
-        title: item.title,
-        description: item.description,
-        type: "builtin" as const,
-      })),
-  ])
+  const slashCommands = createMemo(() =>
+    buildSlashCommands({ options: command.options, commands: sync().data.command, t: language.t }),
+  )
   const commands = createMemo<PromptInputV2Suggestion[]>(() =>
     slashCommands().map((item) => ({
       id: item.id,
       kind: "command",
       label: `/${item.trigger}`,
       trigger: item.trigger,
+      aliases: item.aliases,
+      keywords: item.keywords,
       title: item.title,
       description: item.description,
+      hint: item.hint,
+      badge: item.badge,
+      takesArguments: item.type === "custom" && !!item.hints?.length,
       keybind: command.keybindParts(item.id),
     })),
   )
@@ -363,11 +361,19 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       editor = element as HTMLDivElement
       props.ref?.(editor)
     },
-    onSuggestionSelect(item) {
-      if (item.kind !== "command") return
+    // Tab only completes. Enter or click runs a built-in, and runs a custom command unless it takes arguments or was
+    // picked from the searchable menu, where `/name ` is inserted instead.
+    onSuggestionSelect(item, ctx) {
+      if (item.kind !== "command" || ctx.via === "tab") return
       const selected = slashCommands().find((entry) => entry.id === item.id)
-      if (!selected || selected.type === "custom") return
-      return () => command.trigger(selected.id, "slash")
+      if (!selected) return
+      if (selected.type === "builtin") return () => command.trigger(selected.id, "slash")
+      if (ctx.menu || selected.hints?.length) return
+      return () => {
+        const text = `/${selected.trigger}`
+        prompt.set([{ type: "text", content: text, start: 0, end: text.length }, ...attachments()], text.length)
+        void submission.handleSubmit(new Event("submit"))
+      }
     },
     attachments: {
       picker: platform.openAttachmentPickerDialog,

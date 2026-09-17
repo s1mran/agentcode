@@ -7,6 +7,10 @@ OpenCode uses the `permission` config to decide whether a given action should ru
 
 As of `v1.1.1`, the legacy `tools` boolean config is deprecated and has been merged into `permission`. The old `tools` config is still supported for backwards compatibility.
 
+:::note
+`allow` rules and `default_permission_mode: acceptEdits` from a folder's own configuration (including its agents) only apply once you trust the folder. `deny` and `ask` rules always apply. See [Workspace trust](/docs/workspace-trust).
+:::
+
 ---
 
 ## Actions

@@ -52,3 +52,31 @@ describe("toggleMcp", () => {
     expect(calls).toEqual([])
   })
 })
+
+describe("toggleMcp workspace trust", () => {
+  test("a server pending approval or rejected never connects; approval is delegated", async () => {
+    for (const status of ["pending_approval", "rejected"] as const) {
+      const calls: string[] = []
+      const record = (name: string) => async () => {
+        calls.push(name)
+      }
+      await toggleMcp({
+        status,
+        connect: record("connect"),
+        disconnect: record("disconnect"),
+        authenticate: record("authenticate"),
+        refresh: record("refresh"),
+      })
+      expect(calls).toEqual([])
+      await toggleMcp({
+        status,
+        connect: record("connect"),
+        disconnect: record("disconnect"),
+        authenticate: record("authenticate"),
+        refresh: record("refresh"),
+        approve: record("approve"),
+      })
+      expect(calls).toEqual(["approve"])
+    }
+  })
+})

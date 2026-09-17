@@ -4,6 +4,7 @@ import {
   addCommandRegistration,
   commandPaletteOptions,
   resolveKeybindOption,
+  slashBuiltins,
   type CommandOption,
 } from "./command"
 
@@ -66,5 +67,27 @@ describe("resolveKeybindOption", () => {
     const contextual = { id: "terminal.close", title: "Close terminal", when: () => false }
 
     expect(resolveKeybindOption([fallback, contextual], new KeyboardEvent("keydown"))).toBe(fallback)
+  })
+})
+
+describe("slashBuiltins", () => {
+  test("maps slash names and aliases, disabled state and whether arguments are taken", () => {
+    const options: CommandOption[] = [
+      {
+        id: "session.compact",
+        title: "Compact",
+        slash: "compact",
+        slashAliases: ["summarize"],
+        argumentHint: "[focus]",
+      },
+      { id: "session.undo", title: "Undo", slash: "undo", disabled: true },
+      { id: "suggested.session.undo", title: "Undo", slash: "undo" },
+      { id: "review.toggle", title: "Toggle review" },
+    ]
+
+    expect(slashBuiltins(options)).toEqual([
+      { id: "session.compact", names: ["compact", "summarize"], disabled: false, takesArguments: true },
+      { id: "session.undo", names: ["undo"], disabled: true, takesArguments: false },
+    ])
   })
 })

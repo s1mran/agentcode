@@ -186,6 +186,32 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Nukopijuokite pranešimą",
   "ui.message.forkMessage": "Atskirti į naują seansą",
   "ui.message.revertMessage": "Grąžinti pranešimą",
+  "ui.message.revertMessage.partial.one": "Grąžinti pranešimą (neatkuriamų failų: {{count}})",
+  "ui.message.revertMessage.partial.other": "Grąžinti pranešimą (neatkuriamų failų: {{count}})",
+  "ui.message.revertMessage.partial.few": "Grąžinti pranešimą (neatkuriamų failų: {{count}})",
+  "ui.message.revertMessage.partial.many": "Grąžinti pranešimą (neatkuriamų failų: {{count}})",
+  "ui.checkpoint.skipped.one": "Anuliavimas negali atkurti čia pakeistų failų: {{count}}",
+  "ui.checkpoint.skipped.other": "Anuliavimas negali atkurti čia pakeistų failų: {{count}}",
+  "ui.checkpoint.skipped.few": "Anuliavimas negali atkurti čia pakeistų failų: {{count}}",
+  "ui.checkpoint.skipped.many": "Anuliavimas negali atkurti čia pakeistų failų: {{count}}",
+  "ui.checkpoint.reason.ignored": "ignoruotas, neišsaugotas",
+  "ui.checkpoint.reason.large": "didesnis nei 2 MB",
+  "ui.checkpoint.reason.outside": "už projekto aplanko ribų",
+  "ui.checkpoint.reason.offline": "neatsisiųstas debesies failas",
+  "ui.checkpoint.reason.unavailable": "kontroliniai taškai išjungti",
+  "ui.checkpoint.unavailable.root":
+    "Kontroliniai taškai išjungti, nes tai disko šaknis. Anuliavimas negali atkurti šių failų.",
+  "ui.checkpoint.unavailable.home":
+    "Kontroliniai taškai išjungti jūsų namų aplanke. Atidarykite projekto aplanką, kad galėtumėte anuliuoti.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Kontroliniai taškai išjungti, nes šiame aplanke yra paties AgentCode duomenys.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Kontroliniai taškai išjungti: praleidus priklausomybes ir kompiliavimo rezultatus, šiame aplanke yra daugiau nei 20 000 failų.",
+  "ui.checkpoint.unavailable.too-large": "Kontroliniai taškai išjungti: šiame aplanke yra daugiau nei 512 MB failų.",
+  "ui.checkpoint.unavailable.slow":
+    "Kontroliniai taškai laikinai išjungti: šio aplanko nuskaitymas užtruko per ilgai. Netrukus bus bandoma dar kartą.",
+  "ui.checkpoint.unavailable.no-git":
+    "Kontroliniai taškai išjungti: Git neįdiegtas. Įdiekite Git, kad galėtumėte anuliuoti.",
   "ui.message.copyResponse": "Nukopijuokite atsakymą",
   "ui.message.copied": "Nukopijuota",
   "ui.message.duration.seconds": "{{count}}s",

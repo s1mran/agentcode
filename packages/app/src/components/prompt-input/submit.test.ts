@@ -2,8 +2,10 @@ import { beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import { createStore } from "solid-js/store"
 import type { Prompt, PromptStore } from "@/context/prompt"
 import type { ModelSelection } from "@/context/local"
+import { resolveSlash, type SlashBuiltin } from "@opencode-ai/core/util/slash"
 
 let createPromptSubmit: typeof import("./submit").createPromptSubmit
+let sendFollowupDraft: typeof import("./submit").sendFollowupDraft
 
 const createdClients: string[] = []
 const createdSessions: string[] = []
@@ -37,6 +39,18 @@ const promptInputs: unknown[] = []
 const sentCommands: unknown[] = []
 const commands: Array<{ name: string; agent?: string; template?: string }> = []
 let serverSessionSyncs = 0
+const toasts: Array<{ variant?: string; title?: string; description?: string }> = []
+const slashRuns: Array<{ id: string; args: string }> = []
+const promptSets: Array<{ prompt: Prompt; cursor?: number }> = []
+const builtins: SlashBuiltin[] = [
+  { id: "model.choose", names: ["model"], takesArguments: true },
+  { id: "session.compact", names: ["compact", "summarize"], takesArguments: true },
+  { id: "session.undo", names: ["undo", "rewind"] },
+]
+const slashInput = () => ({
+  resolve: (text: string) => resolveSlash(text, { commands, builtins }),
+  run: (id: string, args: string) => slashRuns.push({ id, args }),
+})
 
 let params: { id?: string } = {}
 let search: { draftId?: string } = {}
@@ -62,7 +76,9 @@ const prompt = {
     set: () => undefined,
   },
   reset: () => undefined,
-  set: () => undefined,
+  set: (value: Prompt, cursor?: number) => {
+    promptSets.push({ prompt: value, cursor })
+  },
   context: {
     add: () => undefined,
     remove: () => undefined,
@@ -141,11 +157,16 @@ beforeAll(async () => {
 
   mock.module("@opencode-ai/ui/toast", () => ({
     Toast: { Region: () => null },
-    showToast: () => 0,
+    showToast: (options: (typeof toasts)[number]) => {
+      toasts.push(options)
+      return 0
+    },
     toaster: { dismiss: () => undefined },
   }))
 
+  const encode = await import("@opencode-ai/core/util/encode")
   mock.module("@opencode-ai/core/util/encode", () => ({
+    ...encode,
     base64Encode: (value: string) => value,
   }))
 
@@ -283,12 +304,13 @@ beforeAll(async () => {
 
   mock.module("@/context/language", () => ({
     useLanguage: () => ({
-      t: (key: string) => key,
+      t: (key: string, params?: Record<string, unknown>) => (params ? `${key} ${JSON.stringify(params)}` : key),
     }),
   }))
 
   const mod = await import("./submit")
   createPromptSubmit = mod.createPromptSubmit
+  sendFollowupDraft = mod.sendFollowupDraft
 })
 
 beforeEach(() => {
@@ -317,11 +339,15 @@ beforeEach(() => {
   permissionServer = "server-a"
   createSessionGate = undefined
   serverSessionSyncs = 0
+  toasts.length = 0
+  slashRuns.length = 0
+  promptSets.length = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
 const baseInput = () => ({
   prompt,
+  slash: slashInput(),
   info: () => undefined as { id: string } | undefined,
   imageAttachments: () => [],
   commentCount: () => 0,
@@ -341,6 +367,7 @@ describe("prompt submit worktree selection", () => {
   test("reads the latest worktree accessor value per submit", async () => {
     const submit = createPromptSubmit({
       prompt,
+      slash: slashInput(),
       info: () => undefined,
       imageAttachments: () => [],
       commentCount: () => 0,
@@ -624,6 +651,7 @@ describe("prompt submit worktree selection", () => {
     search = { draftId: "draft-1" }
     const submit = createPromptSubmit({
       prompt,
+      slash: slashInput(),
       info: () => undefined,
       imageAttachments: () => [],
       commentCount: () => 0,
@@ -652,6 +680,7 @@ describe("prompt submit worktree selection", () => {
 
     const submit = createPromptSubmit({
       prompt,
+      slash: slashInput(),
       info: () => ({ id: "session-1" }),
       imageAttachments: () => [],
       commentCount: () => 0,
@@ -700,6 +729,7 @@ describe("prompt submit worktree selection", () => {
 
     const submit = createPromptSubmit({
       prompt,
+      slash: slashInput(),
       info: () => ({ id: "session-1" }),
       imageAttachments: () => [],
       commentCount: () => 0,
@@ -738,6 +768,7 @@ describe("prompt submit worktree selection", () => {
     } as unknown as ModelSelection
     const submit = createPromptSubmit({
       prompt,
+      slash: slashInput(),
       info: () => ({ id: "session-1" }),
       imageAttachments: () => [],
       commentCount: () => 0,
@@ -765,6 +796,7 @@ describe("prompt submit worktree selection", () => {
   test("seeds new sessions before optimistic prompts are added", async () => {
     const submit = createPromptSubmit({
       prompt,
+      slash: slashInput(),
       info: () => undefined,
       imageAttachments: () => [],
       commentCount: () => 0,
@@ -789,5 +821,181 @@ describe("prompt submit worktree selection", () => {
     expect(storedSessions["/repo/worktree-a"]).toHaveLength(1)
     expect(storedSessions["/repo/worktree-a"]?.[0]).toMatchObject({ id: "session-1", title: "New session 1" })
     expect(optimisticSeeded).toEqual([true])
+  })
+})
+
+describe("prompt submit slash commands", () => {
+  const event = { preventDefault: () => undefined } as unknown as Event
+  const image = {
+    type: "image" as const,
+    id: "img-1",
+    filename: "shot.png",
+    mime: "image/png",
+    blob: { id: "blob-1", url: "blob:shot" },
+  }
+
+  test("reports an unknown command without creating a session or sending anything", async () => {
+    promptValue = [{ type: "text", content: "/typo", start: 0, end: 5 }]
+    const history: unknown[] = []
+    const submit = createPromptSubmit({
+      ...baseInput(),
+      mode: () => "normal",
+      addToHistory: (value) => history.push(value),
+      newSessionWorktree: () => selected,
+    })
+
+    await submit.handleSubmit(event)
+    await Bun.sleep(0)
+
+    expect(toasts).toEqual([
+      {
+        variant: "error",
+        title: 'prompt.slash.unknown.title {"name":"typo"}',
+        description: "prompt.slash.unknown.description",
+      },
+    ])
+    expect(createdSessions).toEqual([])
+    expect(promptInputs).toEqual([])
+    expect(sentCommands).toEqual([])
+    expect(slashRuns).toEqual([])
+    expect(history).toEqual([])
+    expect(promptSets).toEqual([])
+  })
+
+  test("reports arguments given to a built-in that takes none", async () => {
+    params = { id: "session-1" }
+    promptValue = [{ type: "text", content: "/undo now", start: 0, end: 9 }]
+    const submit = createPromptSubmit({ ...baseInput(), info: () => ({ id: "session-1" }), mode: () => "normal" })
+
+    await submit.handleSubmit(event)
+
+    expect(toasts).toEqual([{ variant: "error", title: 'prompt.slash.noArguments.title {"name":"undo"}' }])
+    expect(slashRuns).toEqual([])
+  })
+
+  test("runs a built-in with its arguments in a draft without creating a session", async () => {
+    promptValue = [{ type: "text", content: "/model kimi", start: 0, end: 11 }, image]
+    const history: unknown[] = []
+    const submit = createPromptSubmit({
+      ...baseInput(),
+      imageAttachments: () => [image],
+      mode: () => "normal",
+      addToHistory: (value) => history.push(value),
+      newSessionWorktree: () => selected,
+    })
+
+    await submit.handleSubmit(event)
+
+    expect(slashRuns).toEqual([{ id: "model.choose", args: "kimi" }])
+    expect(createdSessions).toEqual([])
+    expect(promptInputs).toEqual([])
+    expect(history).toHaveLength(1)
+    expect(promptSets).toEqual([{ prompt: [{ type: "text", content: "", start: 0, end: 0 }, image], cursor: 0 }])
+  })
+
+  test("runs a built-in by its alias while a turn is working", async () => {
+    params = { id: "session-1" }
+    promptValue = [{ type: "text", content: "/summarize the auth flow", start: 0, end: 24 }]
+    const submit = createPromptSubmit({
+      ...baseInput(),
+      info: () => ({ id: "session-1" }),
+      working: () => true,
+      shouldQueue: () => true,
+      onQueue: () => {
+        throw new Error("built-ins are not queued")
+      },
+      mode: () => "normal",
+    })
+
+    await submit.handleSubmit(event)
+
+    expect(slashRuns).toEqual([{ id: "session.compact", args: "the auth flow" }])
+  })
+
+  test("keeps newlines between a server command and its arguments", async () => {
+    params = { id: "session-1" }
+    commands.push({ name: "review" })
+    promptValue = [{ type: "text", content: "/review\nfocus on auth", start: 0, end: 21 }]
+    const submit = createPromptSubmit({ ...baseInput(), info: () => ({ id: "session-1" }), mode: () => "normal" })
+
+    await submit.handleSubmit(event)
+
+    expect(sentCommands).toEqual([expect.objectContaining({ command: "review", arguments: "focus on auth" })])
+    expect(promptInputs).toEqual([])
+  })
+
+  test("sends a path as a prompt", async () => {
+    params = { id: "session-1" }
+    promptValue = [{ type: "text", content: "/Users/me/a.ts explain", start: 0, end: 22 }]
+    const submit = createPromptSubmit({ ...baseInput(), info: () => ({ id: "session-1" }), mode: () => "normal" })
+
+    await submit.handleSubmit(event)
+    await Bun.sleep(0)
+
+    expect(toasts).toEqual([])
+    expect(sentCommands).toEqual([])
+    expect(promptInputs[0]).toMatchObject({ sessionID: "session-1", text: "/Users/me/a.ts explain" })
+  })
+
+  test("sends a server command typed with different capitals by its real name", async () => {
+    params = { id: "session-1" }
+    commands.push({ name: "review" })
+    promptValue = [{ type: "text", content: "/Review focus on auth", start: 0, end: 21 }]
+    const submit = createPromptSubmit({ ...baseInput(), info: () => ({ id: "session-1" }), mode: () => "normal" })
+
+    await submit.handleSubmit(event)
+    await Bun.sleep(0)
+
+    expect(toasts).toEqual([])
+    expect(sentCommands).toEqual([expect.objectContaining({ command: "review", arguments: "focus on auth" })])
+    expect(promptInputs).toEqual([])
+  })
+
+  test("sends a queued follow-up command typed with different capitals by its real name", async () => {
+    const sent: Array<{ command: string; arguments: string }> = []
+    const ok = await sendFollowupDraft({
+      api: {
+        command: async (input: { command: string; arguments: string }) => {
+          sent.push(input)
+        },
+      } as never,
+      serverSync: { session: { set: () => undefined } } as never,
+      sync: { data: { command: [{ name: "review" }] } } as never,
+      draft: {
+        sessionID: "session-1",
+        sessionDirectory: "/repo/main",
+        prompt: [{ type: "text", content: "/Review x", start: 0, end: 9 }],
+        context: [],
+        agent: "agent",
+        model: { providerID: "provider", modelID: "model" },
+      },
+    })
+
+    expect(ok).toBeTrue()
+    expect(sent).toEqual([expect.objectContaining({ command: "review", arguments: "x" })])
+  })
+
+  test("sends a queued follow-up command with its arguments after a newline", async () => {
+    const sent: Array<{ command: string; arguments: string }> = []
+    const ok = await sendFollowupDraft({
+      api: {
+        command: async (input: { command: string; arguments: string }) => {
+          sent.push(input)
+        },
+      } as never,
+      serverSync: { session: { set: () => undefined } } as never,
+      sync: { data: { command: [{ name: "review" }] } } as never,
+      draft: {
+        sessionID: "session-1",
+        sessionDirectory: "/repo/main",
+        prompt: [{ type: "text", content: "/review\nx", start: 0, end: 9 }],
+        context: [],
+        agent: "agent",
+        model: { providerID: "provider", modelID: "model" },
+      },
+    })
+
+    expect(ok).toBeTrue()
+    expect(sent).toEqual([expect.objectContaining({ command: "review", arguments: "x" })])
   })
 })

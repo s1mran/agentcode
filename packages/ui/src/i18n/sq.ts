@@ -178,6 +178,28 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "Kopjo mesazhin",
   "ui.message.forkMessage": "Degëzo në një sesion të ri",
   "ui.message.revertMessage": "Rikthe mesazhin",
+  "ui.message.revertMessage.partial.one": "Rikthe mesazhin ({{count}} skedar nuk mund të rikthehet)",
+  "ui.message.revertMessage.partial.other": "Rikthe mesazhin ({{count}} skedarë nuk mund të rikthehen)",
+  "ui.checkpoint.skipped.one": "Zhbërja nuk mund të rikthejë {{count}} skedar të ndryshuar këtu",
+  "ui.checkpoint.skipped.other": "Zhbërja nuk mund të rikthejë {{count}} skedarë të ndryshuar këtu",
+  "ui.checkpoint.reason.ignored": "i shpërfillur, nuk u ruajt",
+  "ui.checkpoint.reason.large": "më i madh se 2 MB",
+  "ui.checkpoint.reason.outside": "jashtë dosjes së projektit",
+  "ui.checkpoint.reason.offline": "skedar në re i pashkarkuar",
+  "ui.checkpoint.reason.unavailable": "pikat e kontrollit janë çaktivizuar",
+  "ui.checkpoint.unavailable.root":
+    "Pikat e kontrollit janë çaktivizuar sepse kjo është rrënja e një disku. Zhbërja nuk mund t'i rikthejë këta skedarë.",
+  "ui.checkpoint.unavailable.home":
+    "Pikat e kontrollit janë çaktivizuar në dosjen tuaj kryesore. Hapni një dosje projekti për të pasur zhbërje.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Pikat e kontrollit janë çaktivizuar sepse kjo dosje përmban të dhënat e vetë AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Pikat e kontrollit janë çaktivizuar: kjo dosje ka mbi 20.000 skedarë pa varësitë dhe rezultatet e ndërtimit.",
+  "ui.checkpoint.unavailable.too-large": "Pikat e kontrollit janë çaktivizuar: kjo dosje përmban mbi 512 MB skedarë.",
+  "ui.checkpoint.unavailable.slow":
+    "Pikat e kontrollit janë çaktivizuar përkohësisht: skanimi i kësaj dosjeje zgjati shumë. Do të provohet përsëri së shpejti.",
+  "ui.checkpoint.unavailable.no-git":
+    "Pikat e kontrollit janë çaktivizuar: Git nuk është instaluar. Instaloni Git për të pasur zhbërje.",
   "ui.message.copyResponse": "Kopjo përgjigjen",
   "ui.message.copied": "E kopjuar",
   "ui.message.duration.seconds": "{{count}}s",

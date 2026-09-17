@@ -1,10 +1,16 @@
-import { Component, createMemo, Show } from "solid-js"
+import { Component, createMemo, createSignal, Show } from "solid-js"
 import { useSync } from "@/context/sync"
+import { Button } from "@opencode-ai/ui/button"
+import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { List } from "@opencode-ai/ui/list"
 import { Switch } from "@opencode-ai/ui/switch"
 import { useLanguage } from "@/context/language"
 import { useMcpToggle } from "@/context/mcp"
+import { useSDK } from "@/context/sdk"
+import { isHeldMcp, type McpStatus } from "@/context/global-sync/mcp"
+import { DialogWorkspaceTrust } from "@/components/dialog-workspace-trust"
+import { showToast } from "@/utils/toast"
 
 const statusLabels = {
   connected: "mcp.status.connected",
@@ -12,7 +18,46 @@ const statusLabels = {
   needs_auth: "mcp.status.needs_auth",
   needs_client_registration: "mcp.status.needs_client_registration",
   disabled: "mcp.status.disabled",
+  pending_approval: "mcp.status.pendingApproval",
+  rejected: "mcp.status.rejected",
 } as const
+
+/** Approve or reject one MCP server from a trusted folder's configuration, showing what it runs. */
+const DialogApproveMcp: Component<{ name: string; command: string; onAnswer: (approve: boolean) => Promise<void> }> = (
+  props,
+) => {
+  const dialog = useDialog()
+  const language = useLanguage()
+  const [pending, setPending] = createSignal(false)
+  const answer = async (approve: boolean) => {
+    if (pending()) return
+    setPending(true)
+    try {
+      await props.onAnswer(approve)
+    } finally {
+      setPending(false)
+      dialog.close()
+    }
+  }
+  return (
+    <Dialog title={language.t("dialog.mcp.approve.title")} fit>
+      <div data-component="dialog-approve-mcp" class="flex flex-col gap-4 pl-6 pr-2.5 pb-3 max-w-[480px]">
+        <span class="text-14-regular text-text-strong">{language.t("dialog.mcp.approve.body")}</span>
+        <span class="text-12-regular text-text-base break-all">
+          {props.name}: {props.command}
+        </span>
+        <div class="flex justify-end gap-2">
+          <Button variant="ghost" size="large" autofocus disabled={pending()} onClick={() => void answer(false)}>
+            {language.t("dialog.mcp.approve.reject")}
+          </Button>
+          <Button variant="primary" size="large" disabled={pending()} onClick={() => void answer(true)}>
+            {language.t("dialog.mcp.approve.approve")}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  )
+}
 
 export const DialogSelectMcp: Component = () => {
   const sync = useSync()
@@ -25,6 +70,40 @@ export const DialogSelectMcp: Component = () => {
   )
 
   const toggle = useMcpToggle()
+  const dialog = useDialog()
+  const sdk = useSDK()
+
+  const failed = (error: unknown) => {
+    showToast({
+      variant: "error",
+      title: language.t("common.requestFailed"),
+      description: error instanceof Error ? error.message : String(error),
+    })
+  }
+
+  // A held server: until the folder is trusted, ask about the folder; in a trusted folder, approve this server.
+  const review = async (name: string) => {
+    const info = await sdk()
+      .client.trust.get()
+      .then((response) => response.data)
+      .catch(() => undefined)
+    if (!info) return
+    if (info.status !== "trusted") {
+      void dialog.push(() => (
+        <DialogWorkspaceTrust info={info} onDecide={(payload) => sdk().client.trust.set(payload).catch(failed)} />
+      ))
+      return
+    }
+    const held = info.held.find((item) => item.kind === "mcp" && item.name === name)
+    const command = held?.kind === "mcp" ? (held.type === "local" ? (held.command ?? []).join(" ") : held.url) : ""
+    void dialog.push(() => (
+      <DialogApproveMcp
+        name={name}
+        command={command ?? ""}
+        onAnswer={(approve) => sync().mcp.approve(name, approve).catch(failed)}
+      />
+    ))
+  }
 
   const enabledCount = createMemo(() => items().filter((i) => i.status === "connected").length)
   const totalCount = createMemo(() => items().length)
@@ -44,6 +123,7 @@ export const DialogSelectMcp: Component = () => {
         sortBy={(a, b) => a.name.localeCompare(b.name)}
         onSelect={(x) => {
           if (!x || x.status === "pending" || toggle.isPending) return
+          if (isHeldMcp(x.status as McpStatus)) return void review(x.name)
           toggle.mutate(x.name)
         }}
       >
@@ -51,6 +131,9 @@ export const DialogSelectMcp: Component = () => {
           const mcpStatus = () => sync().data.mcp[i.name]
           const status = () => mcpStatus()?.status
           const statusLabel = () => {
+            const s = mcpStatus() as { status: McpStatus; reason?: string } | undefined
+            if (s?.status === "pending_approval" && s.reason === "changed")
+              return language.t("mcp.status.changedSinceApproval")
             const key = status() ? statusLabels[status() as keyof typeof statusLabels] : undefined
             if (!key) return
             return language.t(key)
@@ -79,6 +162,7 @@ export const DialogSelectMcp: Component = () => {
                   disabled={status() === "pending" || (toggle.isPending && toggle.variables === i.name)}
                   onChange={() => {
                     if (toggle.isPending) return
+                    if (isHeldMcp(status() as McpStatus)) return void review(i.name)
                     toggle.mutate(i.name)
                   }}
                 />

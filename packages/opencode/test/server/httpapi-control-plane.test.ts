@@ -17,6 +17,8 @@ import { globalHandlers } from "../../src/server/routes/instance/httpapi/handler
 import { authorizationLayer } from "../../src/server/routes/instance/httpapi/middleware/authorization"
 import { schemaErrorLayer } from "../../src/server/routes/instance/httpapi/middleware/schema-error"
 import { testEffect } from "../lib/effect"
+import { InstanceStore } from "../../src/project/instance-store"
+import { WorkspaceTrust } from "../../src/trust"
 
 const input = MoveSession.Input.make({
   sessionID: SessionV2.ID.make("ses_move"),
@@ -38,6 +40,8 @@ const apiLayer = HttpRouter.serve(
   Layer.provideMerge(NodeHttpServer.layerTest),
   Layer.provide(Layer.mock(Auth.Service)({})),
   Layer.provide(Layer.mock(Config.Service)({})),
+  Layer.provide(Layer.mock(WorkspaceTrust.Service)({})),
+  Layer.provide(Layer.mock(InstanceStore.Service)({})),
   Layer.provide(Layer.mock(Installation.Service)({})),
   Layer.provide(
     Layer.mock(MoveSession.Service)({

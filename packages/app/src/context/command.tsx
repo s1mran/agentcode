@@ -3,6 +3,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { type Accessor, createEffect, createMemo, onCleanup, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
 import { makeEventListener } from "@solid-primitives/event-listener"
+import type { SlashBuiltin } from "@opencode-ai/core/util/slash"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
 import { dict as en } from "@/i18n/en"
@@ -79,11 +80,16 @@ export interface CommandOption {
   category?: string
   keybind?: KeybindConfig
   slash?: string
+  /** Other slash names that run this command, such as `clear` for `new`. */
+  slashAliases?: string[]
+  /** Shown after the slash name in the menu; a command with a hint accepts arguments after its slash name. */
+  argumentHint?: string
   suggested?: boolean
   disabled?: boolean
   hidden?: boolean
   when?: (event: KeyboardEvent) => boolean
-  onSelect?: (source?: "palette" | "keybind" | "slash") => void
+  /** `args` is the text typed after the slash name, when the command was run as `/name args`. */
+  onSelect?: (source?: CommandSource, args?: string) => void
   onHighlight?: () => (() => void) | void
 }
 
@@ -98,7 +104,19 @@ export function resolveKeybindOption(candidates: CommandOption[] | undefined, ev
   return candidates?.find((option) => option.when?.(event)) ?? candidates?.find((option) => !option.when)
 }
 
-type CommandSource = "palette" | "keybind" | "slash"
+export type CommandSource = "palette" | "keybind" | "slash"
+
+/** The registered commands that have a slash name, as the slash resolver sees them. */
+export function slashBuiltins(options: CommandOption[]): SlashBuiltin[] {
+  return options
+    .filter((option) => !!option.slash && !option.id.startsWith(SUGGESTED_PREFIX))
+    .map((option) => ({
+      id: option.id,
+      names: [option.slash!, ...(option.slashAliases ?? [])],
+      disabled: !!option.disabled,
+      takesArguments: !!option.argumentHint,
+    }))
+}
 
 export type CommandCatalogItem = {
   title: string
@@ -385,9 +403,9 @@ export const { use: useCommand, provider: CommandProvider } = createSimpleContex
       return map
     })
 
-    const run = (id: string, source?: CommandSource) => {
+    const run = (id: string, source?: CommandSource, args?: string) => {
       const option = optionMap().get(id)
-      option?.onSelect?.(source)
+      option?.onSelect?.(source, args)
     }
 
     const showPalette = () => {
@@ -448,8 +466,8 @@ export const { use: useCommand, provider: CommandProvider } = createSimpleContex
 
     return {
       register,
-      trigger(id: string, source?: CommandSource) {
-        run(id, source)
+      trigger(id: string, source?: CommandSource, args?: string) {
+        run(id, source, args)
       },
       keybind(id: string) {
         const config = keybindConfig(id)

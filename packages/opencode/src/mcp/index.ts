@@ -35,6 +35,7 @@ import { PermissionLaunchMode } from "@opencode-ai/core/permission/launch-mode"
 import { McpCatalog } from "./catalog"
 import { McpEvent } from "@opencode-ai/schema/mcp-event"
 import { McpBrowser } from "./browser"
+import { CredentialEnv } from "@/trust/credential-env"
 
 const DEFAULT_TIMEOUT = 30_000
 const CLIENT_OPTIONS = {
@@ -71,6 +72,15 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("MCP
   name: Schema.String,
 }) {}
 
+/** A project server that waits for workspace trust or for the user's approval, so it is never started on request. */
+export class ApprovalRequiredError extends Schema.TaggedErrorClass<ApprovalRequiredError>()(
+  "MCP.ApprovalRequiredError",
+  {
+    name: Schema.String,
+    reason: Schema.Literals(["untrusted", "pending", "changed", "rejected"]),
+  },
+) {}
+
 type MCPClient = Client
 
 function createClient(directory: string) {
@@ -98,6 +108,16 @@ const StatusNeedsClientRegistration = Schema.Struct({
   status: Schema.Literal("needs_client_registration"),
   error: Schema.String,
 }).annotate({ identifier: "MCPStatusNeedsClientRegistration" })
+// A server the project's config declares that waits for workspace trust (untrusted), for approval in a trusted folder
+// (pending), or for approval again after its command or url changed (changed).
+const StatusPendingApproval = Schema.Struct({
+  status: Schema.Literal("pending_approval"),
+  reason: Schema.Literals(["untrusted", "pending", "changed"]),
+  source: Schema.String,
+}).annotate({ identifier: "MCPStatusPendingApproval" })
+const StatusRejected = Schema.Struct({ status: Schema.Literal("rejected") }).annotate({
+  identifier: "MCPStatusRejected",
+})
 
 export const Status = Schema.Union([
   StatusConnected,
@@ -105,6 +125,8 @@ export const Status = Schema.Union([
   StatusFailed,
   StatusNeedsAuth,
   StatusNeedsClientRegistration,
+  StatusPendingApproval,
+  StatusRejected,
 ]).annotate({ identifier: "MCPStatus", discriminator: "status" })
 export type Status = Schema.Schema.Type<typeof Status>
 
@@ -174,7 +196,7 @@ export interface Interface {
     clientName?: string,
   ) => Effect.Effect<Record<string, ResourceTemplateInfo & { client: string }>>
   readonly add: (name: string, mcp: ConfigMCPV1.Info) => Effect.Effect<{ status: Record<string, Status> | Status }>
-  readonly connect: (name: string) => Effect.Effect<void, NotFoundError>
+  readonly connect: (name: string) => Effect.Effect<void, NotFoundError | ApprovalRequiredError>
   readonly disconnect: (name: string) => Effect.Effect<void, NotFoundError>
   readonly getPrompt: (
     clientName: string,
@@ -350,14 +372,22 @@ const layer = Layer.effect(
       const baseDir = yield* InstanceState.directory
       const cwd = mcp.cwd ? path.resolve(baseDir, mcp.cwd) : baseDir
       // The launch permission mode is this engine's setting: a server (which may start agents of its own) must not
-      // inherit it. An explicit `environment` entry still applies.
+      // inherit it. A server the project's config declares also gets no credentials from this environment (API keys,
+      // tokens, the server password, proxies with credentials), trusted folder or not. An explicit `environment` entry still applies.
+      const project = (yield* cfgSvc.mcpOrigin(key))?.project === true
+      const inherited = PermissionLaunchMode.inherited()
+      if (project) {
+        const stripped = CredentialEnv.strippedNames(inherited)
+        if (stripped.length)
+          yield* Effect.logDebug("project MCP server started without credential variables", { key, stripped })
+      }
       const transport = new StdioClientTransport({
         stderr: "pipe",
         command: cmd,
         args,
         cwd,
         env: {
-          ...PermissionLaunchMode.inherited(),
+          ...(project ? CredentialEnv.stripCredentials(inherited) : inherited),
           ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
           ...mcp.environment,
         },
@@ -611,6 +641,14 @@ const layer = Layer.effect(
         result[key] = s.status[key] ?? { status: "disabled" }
       }
 
+      for (const item of (yield* cfgSvc.trust()).held) {
+        if (item.kind !== "mcp" || item.name in result) continue
+        result[item.name] =
+          item.reason === "rejected"
+            ? { status: "rejected" }
+            : { status: "pending_approval", reason: item.reason, source: item.source }
+      }
+
       return result
     })
 
@@ -653,6 +691,11 @@ const layer = Layer.effect(
     })
 
     const connect = Effect.fn("MCP.connect")(function* (name: string) {
+      const s = yield* InstanceState.get(state)
+      if (!s.config[name] && !(yield* cfgSvc.get()).mcp?.[name]) {
+        const item = (yield* cfgSvc.trust()).held.find((held) => held.kind === "mcp" && held.name === name)
+        if (item?.kind === "mcp") return yield* new ApprovalRequiredError({ name, reason: item.reason })
+      }
       const mcp = yield* requireMcpConfig(name)
       yield* createAndStore(name, { ...mcp, enabled: true })
     })

@@ -2,7 +2,11 @@ Writes a file to the local filesystem.
 
 Usage:
 - This tool will overwrite the existing file if there is one at the provided path.
-- If this is an existing file, you MUST use the Read tool first to read the file's contents. This tool will fail if you did not read the file first.
+- If the path already exists, you must have read the whole file in this session first (a read that showed every line, or your own earlier write of it); a partial read is not enough, and the write fails otherwise. Your own edits only add the lines they changed to what you had read, so an edit after a partial read does not make the whole file read.
+- If the file changed on disk since you read it, read it again before overwriting.
+- New files need no read.
+- Writes to the same file never run at the same time as another write or edit.
+- If a configured formatter rewrites the file afterwards, the result says so.
 - ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
 - NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
 - Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.

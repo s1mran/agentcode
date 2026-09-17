@@ -179,6 +179,27 @@ export const dict = {
   "ui.message.copyMessage": "ចម្លងសារ",
   "ui.message.forkMessage": "បំបែកទៅសម័យថ្មី។",
   "ui.message.revertMessage": "ត្រឡប់សារ",
+  "ui.message.revertMessage.partial.one": "ត្រឡប់សារ (ឯកសារ {{count}} មិនអាចស្ដារបានទេ)",
+  "ui.message.revertMessage.partial.other": "ត្រឡប់សារ (ឯកសារ {{count}} មិនអាចស្ដារបានទេ)",
+  "ui.checkpoint.skipped.one": "ការមិនធ្វើវិញមិនអាចស្ដារឯកសារ {{count}} ដែលបានផ្លាស់ប្ដូរនៅទីនេះបានទេ",
+  "ui.checkpoint.skipped.other": "ការមិនធ្វើវិញមិនអាចស្ដារឯកសារ {{count}} ដែលបានផ្លាស់ប្ដូរនៅទីនេះបានទេ",
+  "ui.checkpoint.reason.ignored": "បានមិនអើពើ មិនបានរក្សាទុក",
+  "ui.checkpoint.reason.large": "ធំជាង 2 MB",
+  "ui.checkpoint.reason.outside": "នៅខាងក្រៅថតគម្រោង",
+  "ui.checkpoint.reason.offline": "ឯកសារពពកមិនទាន់បានទាញយក",
+  "ui.checkpoint.reason.unavailable": "ចំណុចត្រួតពិនិត្យបានបិទ",
+  "ui.checkpoint.unavailable.root":
+    "ចំណុចត្រួតពិនិត្យត្រូវបានបិទ ព្រោះនេះជាឫសនៃដ្រាយ។ ការមិនធ្វើវិញមិនអាចស្ដារឯកសារទាំងនេះបានទេ។",
+  "ui.checkpoint.unavailable.home":
+    "ចំណុចត្រួតពិនិត្យត្រូវបានបិទនៅក្នុងថតផ្ទះរបស់អ្នក។ បើកថតគម្រោងដើម្បីអាចមិនធ្វើវិញបាន។",
+  "ui.checkpoint.unavailable.data-dir": "ចំណុចត្រួតពិនិត្យត្រូវបានបិទ ព្រោះថតនេះមានទិន្នន័យផ្ទាល់របស់ AgentCode។",
+  "ui.checkpoint.unavailable.too-many-files":
+    "ចំណុចត្រួតពិនិត្យត្រូវបានបិទ៖ ថតនេះមានឯកសារច្រើនជាង 20,000 ក្រោយពីរំលង dependencies និងលទ្ធផល build។",
+  "ui.checkpoint.unavailable.too-large": "ចំណុចត្រួតពិនិត្យត្រូវបានបិទ៖ ថតនេះមានឯកសារច្រើនជាង 512 MB។",
+  "ui.checkpoint.unavailable.slow":
+    "ចំណុចត្រួតពិនិត្យត្រូវបានបិទបណ្ដោះអាសន្ន៖ ការស្កេនថតនេះចំណាយពេលយូរពេក។ នឹងព្យាយាមម្ដងទៀតឆាប់ៗនេះ។",
+  "ui.checkpoint.unavailable.no-git":
+    "ចំណុចត្រួតពិនិត្យត្រូវបានបិទ៖ មិនទាន់ដំឡើង Git ទេ។ សូមដំឡើង Git ដើម្បីអាចមិនធ្វើវិញ។",
   "ui.message.copyResponse": "ចម្លងការឆ្លើយតប",
   "ui.message.copied": "ចម្លង",
   "ui.message.duration.seconds": "{{count}}s",

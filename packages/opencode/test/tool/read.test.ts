@@ -27,6 +27,7 @@ import {
   tmpdirScoped,
 } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { FileReads } from "../../src/session/file-reads"
 
 const FIXTURES_DIR = path.join(import.meta.dir, "fixtures")
 
@@ -822,6 +823,116 @@ describe("tool.read binary detection", () => {
 
       const err = yield* fail(dir, { filePath: path.join(dir, "module.wasm") })
       expect(err.message).toContain("Cannot read binary file")
+    }),
+  )
+})
+
+// Read ledger (session/file-reads.ts): what each read records for the edit tools.
+const ledgerIt = testEffect(
+  Layer.mergeAll(
+    LayerNode.compile(
+      LayerNode.group([
+        Agent.node,
+        FSUtil.node,
+        CrossSpawnSpawner.node,
+        Instruction.node,
+        LSP.node,
+        Ripgrep.node,
+        Session.node,
+        Truncate.node,
+        FileReads.node,
+      ]),
+    ),
+    testInstanceStoreLayer,
+  ),
+)
+
+describe("tool.read ledger", () => {
+  ledgerIt.live("a full read records the whole file, a ranged read its lines", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      const file = path.join(dir, "three.txt")
+      yield* put(file, "one\ntwo\nthree\n")
+
+      const full = (yield* exec(dir, { filePath: file })).metadata.ledger?.[0]
+      expect(full?.full).toBe(true)
+      expect(full?.lines).toBe(3)
+      expect(full?.hash).toBeDefined()
+      expect(full?.file).toBe(FileReads.key(file))
+
+      const ranged = (yield* exec(dir, { filePath: file, offset: 2, limit: 1 })).metadata.ledger?.[0]
+      expect(ranged?.ranges).toEqual([[2, 2]])
+      expect(ranged?.full).toBe(false)
+      expect(ranged?.lines).toBe(3)
+    }),
+  )
+
+  ledgerIt.live("the 50 KB cap leaves the line count and hash unknown; the default limit covers 2000 lines", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      const big = path.join(dir, "big.txt")
+      yield* put(big, Array.from({ length: 1500 }, (_, i) => `${i}`.padEnd(60, "x")).join("\n"))
+      const cut = (yield* exec(dir, { filePath: big })).metadata.ledger?.[0]
+      expect(cut?.full).toBe(false)
+      expect(cut?.lines).toBeUndefined()
+      expect(cut?.hash).toBeUndefined()
+
+      const long = path.join(dir, "long.txt")
+      yield* put(long, Array.from({ length: 2500 }, (_, i) => `l${i}`).join("\n"))
+      const view = (yield* exec(dir, { filePath: long })).metadata.ledger?.[0]
+      expect(view?.ranges).toEqual([[1, 2000]])
+      expect(view?.lines).toBe(2500)
+      expect(view?.full).toBe(false)
+    }),
+  )
+
+  ledgerIt.live("line counts match FileReads.countLines", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      const samples = ["", "a", "a\n", "a\n\nb", "a\r\nb\r\n", "a\rb\r", "﻿bom\nline", "x\n\n\n"]
+      for (const [i, sample] of samples.entries()) {
+        const file = path.join(dir, `sample-${i}.txt`)
+        yield* put(file, sample)
+        const view = (yield* exec(dir, { filePath: file })).metadata.ledger?.[0]
+        expect(view?.lines).toBe(FileReads.countLines(sample.replace(/^﻿/, "")))
+        expect(view?.full).toBe(true)
+      }
+    }),
+  )
+
+  ledgerIt.live("images count as fully read", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      const png = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
+        "base64",
+      )
+      yield* put(path.join(dir, "image.png"), png)
+      const view = (yield* exec(dir, { filePath: path.join(dir, "image.png") })).metadata.ledger?.[0]
+      expect(view?.full).toBe(true)
+      expect(view?.ranges).toEqual([])
+    }),
+  )
+
+  ledgerIt.live("directories, binary files and out-of-range offsets record nothing", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped()
+      const reads = yield* FileReads.Service
+      yield* put(path.join(dir, "sub", "a.txt"), "a")
+      const listing = yield* exec(dir, { filePath: path.join(dir, "sub") })
+      expect(listing.metadata.ledger).toBeUndefined()
+
+      const binary = path.join(dir, "module.wasm")
+      yield* put(binary, new Uint8Array([0, 1, 2, 3]))
+      yield* fail(dir, { filePath: binary })
+      const short = path.join(dir, "short.txt")
+      yield* put(short, "one\n")
+      yield* fail(dir, { filePath: short, offset: 5 })
+
+      for (const file of [binary, short]) {
+        const status = yield* reads.status(ctx, file, yield* reads.snapshot(file))
+        expect(status.kind).toBe("unread")
+      }
     }),
   )
 })

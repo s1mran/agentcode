@@ -193,6 +193,33 @@ export const dict = {
   "ui.message.copyMessage": "Копировать сообщение",
   "ui.message.forkMessage": "Ответвить в новую сессию",
   "ui.message.revertMessage": "Сбросить до этого момента",
+  "ui.message.revertMessage.partial.one": "Сбросить до этого момента (файлов, которые нельзя восстановить: {{count}})",
+  "ui.message.revertMessage.partial.other":
+    "Сбросить до этого момента (файлов, которые нельзя восстановить: {{count}})",
+  "ui.message.revertMessage.partial.few": "Сбросить до этого момента (файлов, которые нельзя восстановить: {{count}})",
+  "ui.message.revertMessage.partial.many": "Сбросить до этого момента (файлов, которые нельзя восстановить: {{count}})",
+  "ui.checkpoint.skipped.one": "Отмена не сможет восстановить файлы, изменённые здесь: {{count}}",
+  "ui.checkpoint.skipped.other": "Отмена не сможет восстановить файлы, изменённые здесь: {{count}}",
+  "ui.checkpoint.skipped.few": "Отмена не сможет восстановить файлы, изменённые здесь: {{count}}",
+  "ui.checkpoint.skipped.many": "Отмена не сможет восстановить файлы, изменённые здесь: {{count}}",
+  "ui.checkpoint.reason.ignored": "игнорируется, не сохранён",
+  "ui.checkpoint.reason.large": "больше 2 МБ",
+  "ui.checkpoint.reason.outside": "вне папки проекта",
+  "ui.checkpoint.reason.offline": "облачный файл не загружен",
+  "ui.checkpoint.reason.unavailable": "контрольные точки отключены",
+  "ui.checkpoint.unavailable.root":
+    "Контрольные точки отключены, потому что это корень диска. Отмена не сможет восстановить эти файлы.",
+  "ui.checkpoint.unavailable.home":
+    "Контрольные точки отключены в домашней папке. Откройте папку проекта, чтобы можно было отменять изменения.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Контрольные точки отключены, потому что эта папка содержит собственные данные AgentCode.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Контрольные точки отключены: в этой папке больше 20 000 файлов без учёта зависимостей и результатов сборки.",
+  "ui.checkpoint.unavailable.too-large": "Контрольные точки отключены: в этой папке больше 512 МБ файлов.",
+  "ui.checkpoint.unavailable.slow":
+    "Контрольные точки временно отключены: сканирование этой папки заняло слишком много времени. Скоро будет новая попытка.",
+  "ui.checkpoint.unavailable.no-git":
+    "Контрольные точки отключены: Git не установлен. Установите Git, чтобы можно было отменять изменения.",
   "ui.message.copyResponse": "Копировать ответ",
   "ui.message.copied": "Скопировано!",
   "ui.message.interrupted": "Прервано",

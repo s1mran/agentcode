@@ -6,7 +6,7 @@ import { WorkspaceContext } from "@/control-plane/workspace-context"
 import { InstanceRef } from "@/effect/instance-ref"
 import { disposeInstance as runDisposers } from "@/effect/instance-registry"
 import { FSUtil } from "@opencode-ai/core/fs-util"
-import { Context, Deferred, Duration, Effect, Exit, Layer, Scope } from "effect"
+import { Context, Deferred, Duration, Effect, Exit, Layer, Option, Scope } from "effect"
 import { type InstanceContext } from "./instance-context"
 import { InstanceBootstrap } from "./bootstrap-service"
 import * as Project from "./project"
@@ -23,6 +23,8 @@ export interface Interface {
   readonly dispose: (ctx: InstanceContext) => Effect.Effect<void>
   readonly disposeDirectory: (directory: string) => Effect.Effect<void>
   readonly disposeAll: () => Effect.Effect<void>
+  /** Contexts of the instances that finished loading, for changes (such as workspace trust) that reload several. */
+  readonly loaded: () => Effect.Effect<InstanceContext[]>
   readonly provide: <A, E, R>(input: LoadInput, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 }
 
@@ -186,6 +188,17 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
       return yield* cachedDisposeAll
     })
 
+    const loaded = Effect.fn("InstanceStore.loaded")(function* () {
+      const result: InstanceContext[] = []
+      for (const entry of cache.values()) {
+        const done = yield* Deferred.poll(entry.deferred)
+        if (Option.isNone(done)) continue
+        const exit = yield* Effect.exit(done.value)
+        if (Exit.isSuccess(exit)) result.push(exit.value)
+      }
+      return result
+    })
+
     const provide = <A, E, R>(input: LoadInput, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
       load(input).pipe(Effect.flatMap((ctx) => effect.pipe(Effect.provideService(InstanceRef, ctx))))
 
@@ -197,6 +210,7 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
       dispose,
       disposeDirectory,
       disposeAll,
+      loaded,
       provide,
     })
   }),

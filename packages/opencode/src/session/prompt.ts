@@ -25,6 +25,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import * as Stream from "effect/Stream"
 import { Command } from "../command"
+import { findServerCommand, splitSlashChain } from "@opencode-ai/core/util/slash"
 import { pathToFileURL, fileURLToPath } from "url"
 import { Config } from "@/config/config"
 import { ConfigMarkdown } from "@/config/markdown"
@@ -941,6 +942,8 @@ const layer = Layer.effect(
                     type: "text",
                     synthetic: true,
                     text: result.output,
+                    // An attached file counts as read for the edit tools, also after a restart (session/file-reads.ts).
+                    metadata: result.metadata.ledger ? { ledger: result.metadata.ledger } : undefined,
                   })
                   if (result.attachments?.length) {
                     pieces.push(
@@ -1490,31 +1493,52 @@ const layer = Layer.effect(
       // plan_exit (ACP) run it on the plan agent instead, so going back to a native agent is how they leave plan mode.
       const agentName = builtinPlan && !ToolRegistry.questionToolEnabled(flags) ? "plan" : (cmdAgent ?? input.agent)
 
-      const raw = input.arguments.match(argsRegex) ?? []
-      const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
-      const templateCommand = yield* Effect.promise(async () => cmd.template)
+      // Fills a command template with the arguments. `consumed` is false when the template has no placeholder, so the
+      // arguments still have to be appended.
+      const render = (item: Command.Info, text: string) =>
+        Effect.gen(function* () {
+          const raw = text.match(argsRegex) ?? []
+          const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
+          const templateCommand = yield* Effect.promise(async () => item.template)
 
-      const placeholders = templateCommand.match(placeholderRegex) ?? []
-      let last = 0
-      for (const item of placeholders) {
-        const value = Number(item.slice(1))
-        if (value > last) last = value
-      }
+          const placeholders = templateCommand.match(placeholderRegex) ?? []
+          let last = 0
+          for (const placeholder of placeholders) {
+            const value = Number(placeholder.slice(1))
+            if (value > last) last = value
+          }
 
-      const withArgs = templateCommand.replaceAll(placeholderRegex, (_, index) => {
-        const position = Number(index)
-        const argIndex = position - 1
-        if (argIndex >= args.length) return ""
-        if (position === last) return args.slice(argIndex).join(" ")
-        return args[argIndex]
-      })
-      const usesArgumentsPlaceholder = templateCommand.includes("$ARGUMENTS")
-      let template = withArgs.replaceAll("$ARGUMENTS", input.arguments)
+          const withArgs = templateCommand.replaceAll(placeholderRegex, (_, index) => {
+            const position = Number(index)
+            const argIndex = position - 1
+            if (argIndex >= args.length) return ""
+            if (position === last) return args.slice(argIndex).join(" ")
+            return args[argIndex]
+          })
+          const usesArgumentsPlaceholder = templateCommand.includes("$ARGUMENTS")
+          const template =
+            Command.isBuiltinPlan(item) && !text.trim()
+              ? Command.PLAN_BLANK_PROMPT
+              : withArgs.replaceAll("$ARGUMENTS", text)
+          return { template, consumed: placeholders.length > 0 || usesArgumentsPlaceholder }
+        })
 
-      if (placeholders.length === 0 && !usesArgumentsPlaceholder && input.arguments.trim()) {
-        template = template + "\n\n" + input.arguments
-      }
-      if (builtinPlan && !input.arguments.trim()) template = Command.PLAN_BLANK_PROMPT
+      // `/a /b do XYZ` chains up to six commands into one turn, each rendered with the trailing text. Only commands
+      // that can share a turn chain; any other `/name` token stays part of the arguments.
+      // Chained names match the way the composer resolves a typed name, so `/a /B x` finds a command named `b`.
+      const available = yield* commands.list()
+      const chain = Command.chainable(cmd)
+        ? splitSlashChain(input.arguments, (name) => {
+            const item = findServerCommand(available, name)
+            return !!item && Command.chainable(item)
+          })
+        : { names: [], rest: input.arguments }
+      const rest = chain.names.length > 0 ? chain.rest : input.arguments
+      const rendered = [yield* render(cmd, rest)]
+      for (const name of chain.names) rendered.push(yield* render(findServerCommand(available, name)!, rest))
+      let template = rendered.map((item) => item.template).join("\n\n")
+      // Unconsumed arguments are appended once, not once per chained command.
+      if (!rendered.some((item) => item.consumed) && rest.trim()) template = template + "\n\n" + rest
 
       const shellMatches = ConfigMarkdown.shell(template)
       if (shellMatches.length > 0) {

@@ -33,6 +33,7 @@ import { Session } from "@/session/session"
 import { SessionMessageTable } from "@opencode-ai/core/session/sql"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
+import { FileReads } from "../../src/session/file-reads"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { SessionCompaction } from "../../src/session/compaction"
 import { SessionSummary } from "../../src/session/summary"
@@ -1828,6 +1829,117 @@ unix(
   30_000,
 )
 
+function lastUserText(inputs: Record<string, unknown>[]) {
+  const messages = inputs.at(-1)?.messages
+  if (!Array.isArray(messages)) throw new Error("expected LLM messages")
+  const message = messages.findLast((item) => item?.role === "user")
+  if (typeof message?.content === "string") return message.content
+  if (!Array.isArray(message?.content)) return ""
+  return message.content.map((part: { text?: string }) => part.text ?? "").join("\n")
+}
+
+it.instance(
+  "command chains leading slash commands into one turn",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig((url) => ({
+        ...providerCfg(url),
+        command: {
+          a: { template: "A says $ARGUMENTS" },
+          b: { template: "B template" },
+        },
+      }))
+      const { prompt, chat } = yield* boot()
+      yield* llm.text("done")
+
+      const result = yield* prompt.command({ sessionID: chat.id, command: "a", arguments: "/b hello" })
+
+      expect(result.info.role).toBe("assistant")
+      expect(yield* llm.calls).toBe(1)
+      const text = lastUserText(yield* llm.inputs)
+      expect(text).toContain("A says hello")
+      expect(text).toContain("B template")
+      expect(text.indexOf("A says hello")).toBeLessThan(text.indexOf("B template"))
+      expect(text).not.toContain("/b")
+      expect(text.split("hello")).toHaveLength(2)
+    }),
+  30_000,
+)
+
+it.instance(
+  "command chain matches a chained name typed with different capitals",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig((url) => ({
+        ...providerCfg(url),
+        command: {
+          a: { template: "A says $ARGUMENTS" },
+          b: { template: "B template" },
+        },
+      }))
+      const { prompt, chat } = yield* boot()
+      yield* llm.text("done")
+
+      yield* prompt.command({ sessionID: chat.id, command: "a", arguments: "/B hello" })
+
+      const text = lastUserText(yield* llm.inputs)
+      expect(text).toContain("A says hello")
+      expect(text).toContain("B template")
+      expect(text).not.toContain("/B")
+    }),
+  30_000,
+)
+
+it.instance(
+  "command chain appends unconsumed trailing text once",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig((url) => ({
+        ...providerCfg(url),
+        command: {
+          a: { template: "A template" },
+          b: { template: "B template" },
+        },
+      }))
+      const { prompt, chat } = yield* boot()
+      yield* llm.text("done")
+
+      yield* prompt.command({ sessionID: chat.id, command: "a", arguments: "/b\nhello there" })
+
+      const text = lastUserText(yield* llm.inputs)
+      expect(text.indexOf("A template")).toBeLessThan(text.indexOf("B template"))
+      expect(text.indexOf("B template")).toBeLessThan(text.indexOf("hello there"))
+      expect(text.split("hello there")).toHaveLength(2)
+    }),
+  30_000,
+)
+
+it.instance(
+  "command chain leaves subtask and unknown commands in the arguments",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig((url) => ({
+        ...providerCfg(url),
+        command: {
+          a: { template: "A says $ARGUMENTS" },
+          sub: { template: "Sub template", subtask: true },
+        },
+      }))
+      const { prompt, chat } = yield* boot()
+      yield* llm.text("done")
+      yield* llm.text("done")
+
+      yield* prompt.command({ sessionID: chat.id, command: "a", arguments: "/sub go" })
+      expect(lastUserText(yield* llm.inputs)).toContain("A says /sub go")
+
+      yield* prompt.command({ sessionID: chat.id, command: "a", arguments: "/zzz go" })
+      const text = lastUserText(yield* llm.inputs)
+      expect(text).toContain("A says /zzz go")
+      expect(text).not.toContain("Sub template")
+    }),
+  30_000,
+)
+
 unixNoLLMServer(
   "cancel interrupts shell and resolves cleanly",
   () =>
@@ -2186,6 +2298,49 @@ noLLMServer.instance(
       expect(text[0]?.startsWith("Called the Read tool with the following input:")).toBe(true)
       expect(text[1]?.includes("Read tool failed to read")).toBe(true)
       expect(text[2]).toBe("after-file")
+
+      yield* sessions.remove(session.id)
+    }),
+  { config: cfg },
+)
+
+noLLMServer.instance(
+  "an attached text file counts as read for the edit tools",
+  () =>
+    Effect.gen(function* () {
+      const { directory: dir } = yield* TestInstance
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({})
+
+      const attached = path.join(dir, "attached.txt")
+      yield* writeText(attached, "one\ntwo\n")
+      const msg = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [
+          { type: "text", text: "look at @attached.txt" },
+          { type: "file", mime: "text/plain", url: `file://${attached}`, filename: "attached.txt" },
+        ],
+      })
+
+      const stored = yield* MessageV2.get({ sessionID: session.id, messageID: msg.info.id })
+      const output = stored.parts.find(
+        (part): part is SessionV1.TextPart => part.type === "text" && !!part.synthetic && !!part.metadata?.ledger,
+      )
+      const view = output?.metadata?.ledger?.[0] as FileReads.View | undefined
+      expect(view?.full).toBe(true)
+
+      const status = yield* Effect.gen(function* () {
+        const reads = yield* FileReads.Service
+        return yield* reads.status(
+          { sessionID: session.id, messageID: "msg_later", messages: [stored] },
+          attached,
+          yield* reads.snapshot(attached),
+        )
+      }).pipe(Effect.provide(LayerNode.compile(FileReads.node)))
+      expect(status.kind).toBe("fresh")
 
       yield* sessions.remove(session.id)
     }),

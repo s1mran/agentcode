@@ -31,3 +31,7 @@ It is important to remember:
 
 - You must include a header with your intended action (Add/Delete/Update)
 - You must prefix new lines with `+` even when creating a new file
+- Update File (and Move to) requires that you read the file in this session, at least the lines you change, and that it has not changed on disk since; otherwise re-read it first.
+- Add File on a path that already exists replaces it and requires a full read of that file.
+- Delete File needs no read.
+- The result notes files a formatter rewrote.

@@ -2,6 +2,7 @@ import {
   Component,
   createEffect,
   createMemo,
+  createRoot,
   createSignal,
   For,
   Match,
@@ -11,6 +12,7 @@ import {
   onCleanup,
   Index,
   type JSX,
+  type Accessor,
   type ComponentProps,
 } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -61,6 +63,7 @@ import { TextShimmer } from "@opencode-ai/ui/text-shimmer"
 import { AnimatedCountList } from "./tool-count-summary"
 import { ToolStatusTitle } from "./tool-status-title"
 import { patchFiles } from "./apply-patch-file"
+import { checkpointNotice, unrestorableCounts } from "./checkpoint-notice"
 import { partDefaultOpen } from "./part-default-open"
 import { animate } from "motion"
 import { attached, inline, kind, typeLabel } from "./message-file"
@@ -716,6 +719,7 @@ export function renderable(part: PartType, showReasoningSummaries = true) {
   }
   if (part.type === "text") return !!part.text?.trim()
   if (part.type === "reasoning") return showReasoningSummaries && !!part.text?.trim()
+  if (part.type === "patch") return !!checkpointNotice(part)
   return !!PART_MAPPING[part.type]
 }
 
@@ -1178,6 +1182,32 @@ function UserMessageComments(props: { comments: UserMessageComment[]; bounded: b
   )
 }
 
+type CountsEntry = { users: number; counts: Accessor<Map<string, number>>; dispose: () => void }
+const sharedCounts = new WeakMap<object, Map<string, CountsEntry>>()
+
+// Every user message in a session shares one memo, so a new part costs one pass over the session rather than
+// one pass per user message.
+function useUnrestorableCounts(store: ReturnType<typeof useData>["store"], sessionID: string) {
+  const sessions = sharedCounts.get(store) ?? new Map<string, CountsEntry>()
+  sharedCounts.set(store, sessions)
+  const entry =
+    sessions.get(sessionID) ??
+    createRoot((dispose) => ({
+      users: 0,
+      dispose,
+      counts: createMemo(() => unrestorableCounts(store.message?.[sessionID] ?? [], store.part ?? {})),
+    }))
+  sessions.set(sessionID, entry)
+  entry.users += 1
+  onCleanup(() => {
+    entry.users -= 1
+    if (entry.users > 0) return
+    entry.dispose()
+    if (sessions.get(sessionID) === entry) sessions.delete(sessionID)
+  })
+  return entry.counts
+}
+
 export function UserMessageDisplay(props: {
   message: UserMessage
   parts: PartType[]
@@ -1233,6 +1263,19 @@ export function UserMessageDisplay(props: {
   })
 
   const metaTail = stamp
+
+  // Files a revert to this message cannot bring back (not captured by the checkpoints), so the user
+  // knows before clicking.
+  const counts = useUnrestorableCounts(data.store, props.message.sessionID)
+  const unrestorable = createMemo(() => {
+    if (!props.actions?.revert) return 0
+    return counts().get(props.message.id) ?? 0
+  })
+  const revertLabel = createMemo(() =>
+    unrestorable() > 0
+      ? i18n.plural("ui.message.revertMessage.partial", unrestorable())
+      : i18n.t("ui.message.revertMessage"),
+  )
 
   const openImagePreview = (url: string, alt?: string) => {
     dialog.show(() => <ImagePreview src={url} alt={alt} />)
@@ -1361,7 +1404,7 @@ export function UserMessageDisplay(props: {
           <Show when={props.actions?.revert}>
             <MessageActionButton
               icon="reset"
-              label={i18n.t("ui.message.revertMessage")}
+              label={revertLabel()}
               useV2={props.useV2Actions}
               disabled={!!busy()}
               onMouseDown={(event) => event.preventDefault()}
@@ -1369,7 +1412,7 @@ export function UserMessageDisplay(props: {
                 event.stopPropagation()
                 revert()
               }}
-              aria-label={i18n.t("ui.message.revertMessage")}
+              aria-label={revertLabel()}
             />
           </Show>
           <Show when={text()}>
@@ -1643,6 +1686,69 @@ export function MessageDivider(props: { label: string }) {
         <span data-slot="compaction-part-line" />
       </div>
     </div>
+  )
+}
+
+// A patch part is rendered only as a notice: files this step changed that the checkpoint did not capture,
+// or that checkpoints are off for this folder. Collapsed by default, with the files and reasons inside.
+PART_MAPPING["patch"] = function CheckpointNoticeDisplay(props) {
+  const data = useData()
+  const i18n = useI18n()
+  const [open, setOpen] = createSignal(false)
+  const notice = createMemo(() => checkpointNotice(props.part))
+  const title = createMemo(() => {
+    const value = notice()
+    if (!value) return ""
+    if (value.unavailable) return i18n.t(`ui.checkpoint.unavailable.${value.unavailable}`)
+    return i18n.plural("ui.checkpoint.skipped", value.skipped.length)
+  })
+
+  return (
+    <Show when={notice()}>
+      {(value) => (
+        <Collapsible
+          open={open()}
+          onOpenChange={(next) => {
+            setOpen(next)
+            props.onContentRendered?.()
+          }}
+          variant="ghost"
+          class="tool-collapsible"
+          data-component="checkpoint-notice"
+          data-timeline-part-id={props.part.id}
+        >
+          <Collapsible.Trigger>
+            <div data-slot="checkpoint-notice-trigger" class="min-w-0 flex items-center gap-2 text-text-weak">
+              <Icon name="warning" size="small" />
+              <span data-slot="checkpoint-notice-title" class="min-w-0 truncate text-12-regular">
+                {title()}
+              </span>
+              <Collapsible.Arrow />
+            </div>
+          </Collapsible.Trigger>
+          <Collapsible.Content>
+            <div data-slot="checkpoint-notice-list" class="flex flex-col gap-1 pt-1 pl-6">
+              <For each={value().skipped}>
+                {(item) => {
+                  const shown = createMemo(() => relativizeProjectPath(item.file, data.directory))
+                  return (
+                    <div data-slot="checkpoint-notice-item" class="min-w-0 flex items-center gap-2 text-12-regular">
+                      <span class="min-w-0 truncate text-text-base">
+                        <Show when={shown().includes("/")}>
+                          <span class="text-text-weak">{`\u202A${_getDirectory(shown())}\u202C`}</span>
+                        </Show>
+                        <span>{getFilename(shown())}</span>
+                      </span>
+                      <span class="shrink-0 text-text-weak">{i18n.t(`ui.checkpoint.reason.${item.reason}`)}</span>
+                    </div>
+                  )
+                }}
+              </For>
+            </div>
+          </Collapsible.Content>
+        </Collapsible>
+      )}
+    </Show>
   )
 }
 

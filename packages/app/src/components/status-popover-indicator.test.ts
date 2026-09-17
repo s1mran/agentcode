@@ -56,3 +56,12 @@ describe("hasServiceNeedingAttention", () => {
     expect(hasServiceNeedingAttention({ mcp: ["connected", "pending", "disabled"] })).toBe(false)
   })
 })
+
+describe("status popover indicator workspace trust", () => {
+  test("a server pending approval needs attention and is not a failure; a rejected one is neither", () => {
+    expect(hasServiceNeedingAttention({ mcp: ["pending_approval"] })).toBe(true)
+    expect(hasNonBlockingServiceIssue({ mcp: ["pending_approval"], lsp: [] })).toBe(false)
+    expect(hasServiceNeedingAttention({ mcp: ["rejected"] })).toBe(false)
+    expect(hasNonBlockingServiceIssue({ mcp: ["rejected"], lsp: [] })).toBe(false)
+  })
+})

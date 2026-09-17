@@ -25,6 +25,8 @@ import { ConfigToolOutput } from "./config/tool-output"
 import { ConfigWatcher } from "./config/watcher"
 import { ConfigV1 } from "./v1/config/config"
 import { ConfigMigrateV1 } from "./v1/config/migrate"
+import { WorkspaceTrustState } from "./trust/state"
+import { WorkspaceTrustLocationConfig } from "./trust/location-config"
 
 export class Info extends Schema.Class<Info>("Config.Info")({
   $schema: Schema.optional(Schema.String).annotate({
@@ -198,9 +200,42 @@ const layer = Layer.effect(
       Effect.map((configs) => configs.filter((config): config is Document => config !== undefined)),
     )
     const supplementary = yield* Effect.forEach(directories, loadDirectory).pipe(Effect.orDie)
+
+    // Workspace trust (see trust/location-config.ts): until the folder is trusted, the project's own files lose
+    // what would run code or send data out, and its `.opencode` folders are not handed to the plugin host at all.
+    const trust = locationIsGlobal ? undefined : WorkspaceTrustState.resolve(location.directory)
+    const effective = trust?.effective ?? "full"
+    const userOpencode = path.join(global.home, ".opencode")
+    const isProject = (target: string) => {
+      const resolved = path.resolve(target)
+      if (FSUtil.contains(global.config, resolved)) return false
+      return resolved !== userOpencode && path.dirname(resolved) !== userOpencode
+    }
+    const trustScope = {
+      directory: location.directory,
+      roots: [trust?.path ?? location.directory, location.directory, location.project.directory],
+      home: global.home,
+      worktree: location.project.directory,
+    }
+    const restrictEntry = (entry: Entry): Entry[] => {
+      if (effective === "full") return [entry]
+      if (entry.type === "directory") return effective === "restricted" && isProject(entry.path) ? [] : [entry]
+      if (!entry.path || !isProject(entry.path)) return [entry]
+      const info = Option.getOrUndefined(
+        decodeInfo(WorkspaceTrustLocationConfig.restrictDocument({ ...entry.info }, effective, trustScope)),
+      )
+      return [
+        new Document({ type: "document", path: entry.path, info: info ?? decodeInfo({}).pipe(Option.getOrThrow) }),
+      ]
+    }
+
     // Apply general settings first and more specific settings last:
     // global config, project files, then `.opencode` files.
-    const configs = [...(supplementary[0] ?? []), ...direct, ...supplementary.slice(1).flat()]
+    const configs = [
+      ...(supplementary[0] ?? []),
+      ...direct.flatMap(restrictEntry),
+      ...supplementary.slice(1).flat().flatMap(restrictEntry),
+    ]
     // Rules use the opposite order so a user-global rule can override a
     // repository rule. Statement order inside each file stays unchanged.
     yield* policy.load(

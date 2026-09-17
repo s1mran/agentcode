@@ -171,6 +171,30 @@ export const dict = {
   "ui.message.copyMessage": "Nachricht kopieren",
   "ui.message.forkMessage": "In neue Sitzung abzweigen",
   "ui.message.revertMessage": "Auf diesen Punkt zurücksetzen",
+  "ui.message.revertMessage.partial.one":
+    "Auf diesen Punkt zurücksetzen ({{count}} Datei kann nicht wiederhergestellt werden)",
+  "ui.message.revertMessage.partial.other":
+    "Auf diesen Punkt zurücksetzen ({{count}} Dateien können nicht wiederhergestellt werden)",
+  "ui.checkpoint.skipped.one": "Rückgängig kann {{count}} hier geänderte Datei nicht wiederherstellen",
+  "ui.checkpoint.skipped.other": "Rückgängig kann {{count}} hier geänderte Dateien nicht wiederherstellen",
+  "ui.checkpoint.reason.ignored": "ignoriert, nicht erfasst",
+  "ui.checkpoint.reason.large": "größer als 2 MB",
+  "ui.checkpoint.reason.outside": "außerhalb des Projektordners",
+  "ui.checkpoint.reason.offline": "Cloud-Datei nicht heruntergeladen",
+  "ui.checkpoint.reason.unavailable": "Checkpoints aus",
+  "ui.checkpoint.unavailable.root":
+    "Checkpoints sind aus, weil dies das Stammverzeichnis eines Laufwerks ist. Rückgängig kann diese Dateien nicht wiederherstellen.",
+  "ui.checkpoint.unavailable.home":
+    "Checkpoints sind im Home-Ordner aus. Einen Projektordner öffnen, um Rückgängig zu nutzen.",
+  "ui.checkpoint.unavailable.data-dir":
+    "Checkpoints sind aus, weil dieser Ordner die eigenen Daten von AgentCode enthält.",
+  "ui.checkpoint.unavailable.too-many-files":
+    "Checkpoints sind aus: Dieser Ordner hat ohne Abhängigkeiten und Build-Ausgaben mehr als 20.000 Dateien.",
+  "ui.checkpoint.unavailable.too-large": "Checkpoints sind aus: Dieser Ordner enthält mehr als 512 MB an Dateien.",
+  "ui.checkpoint.unavailable.slow":
+    "Checkpoints sind vorerst aus: Das Durchsuchen dieses Ordners hat zu lange gedauert. Es wird gleich erneut versucht.",
+  "ui.checkpoint.unavailable.no-git":
+    "Checkpoints sind aus: Git ist nicht installiert. Git installieren, um Rückgängig zu nutzen.",
   "ui.message.copyResponse": "Antwort kopieren",
   "ui.message.copied": "Kopiert!",
   "ui.message.interrupted": "Unterbrochen",

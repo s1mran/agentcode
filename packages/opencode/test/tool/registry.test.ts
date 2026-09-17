@@ -685,3 +685,128 @@ describe("tool.registry", () => {
     }),
   )
 })
+
+// Its own config layer, so this wiring check does not depend on which Config members the shared fixture stubs.
+const ledgerRegistry = testEffect(
+  LayerNode.compile(root, [
+    [
+      Config.node,
+      TestConfig.layer({
+        directories: () => Effect.succeed([]),
+        ...({ trustedDirectories: () => Effect.succeed([]) } as Partial<Config.Interface>),
+      }),
+    ],
+    [RuntimeFlags.node, RuntimeFlags.layer()],
+  ]),
+)
+
+describe("tool.registry read ledger", () => {
+  // Guards the wiring: the edit tools read the ledger through an optional service, so a registry without
+  // FileReads.node would silently turn the read-before-edit check off.
+  ledgerRegistry.instance("edit through the registry requires a read first", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const registry = yield* ToolRegistry.Service
+      const agents = yield* Agent.Service
+      const tools = yield* registry.tools({
+        providerID: ProviderV2.ID.opencode,
+        modelID: ModelV2.ID.make("test"),
+        agent: yield* agents.defaultInfo(),
+      })
+      const edit = tools.find((tool) => tool.id === "edit")
+      const read = tools.find((tool) => tool.id === "read")
+      expect(edit).toBeDefined()
+      expect(read).toBeDefined()
+
+      const file = path.join(test.directory, "wired.txt")
+      yield* Effect.promise(() => fs.writeFile(file, "before\n"))
+      const ctx: Tool.Context = {
+        sessionID: SessionID.make("ses_registry-ledger"),
+        messageID: MessageID.make("msg_registry-ledger"),
+        callID: "",
+        agent: "build",
+        abort: AbortSignal.any([]),
+        messages: [],
+        metadata: () => Effect.void,
+        ask: () => Effect.void,
+      }
+
+      const unread = yield* edit!
+        .execute({ filePath: file, oldString: "before", newString: "after" }, ctx)
+        .pipe(Effect.exit)
+      expect(unread._tag).toBe("Failure")
+      expect(yield* Effect.promise(() => fs.readFile(file, "utf-8"))).toBe("before\n")
+
+      yield* read!.execute({ filePath: file }, ctx)
+      yield* edit!.execute({ filePath: file, oldString: "before", newString: "after" }, ctx)
+      expect(yield* Effect.promise(() => fs.readFile(file, "utf-8"))).toBe("after\n")
+    }),
+  )
+})
+
+// Workspace trust: custom tool modules run code on import, so a restricted folder's are never imported.
+const heldTools = testEffect(
+  LayerNode.compile(root, [
+    [
+      Config.node,
+      TestConfig.layer({
+        directories: () => InstanceState.directory.pipe(Effect.map((dir) => [path.join(dir, ".opencode")])),
+        trustedDirectories: () => Effect.succeed([]),
+      }),
+    ],
+    [RuntimeFlags.node, RuntimeFlags.layer()],
+  ]),
+)
+
+describe("tool.registry workspace trust", () => {
+  const writeMarkerTool = Effect.gen(function* () {
+    const test = yield* TestInstance
+    const tools = path.join(test.directory, ".opencode", "tools")
+    const marker = path.join(test.directory, "imported.txt")
+    yield* Effect.promise(() => fs.mkdir(tools, { recursive: true }))
+    yield* Effect.promise(() =>
+      Bun.write(
+        path.join(tools, "marked.ts"),
+        [
+          "import fs from 'fs'",
+          `fs.writeFileSync(${JSON.stringify(marker)}, 'imported')`,
+          "export default { description: 'marked', args: {}, execute: async () => 'ok' }",
+          "",
+        ].join("\n"),
+      ),
+    )
+    return marker
+  })
+
+  heldTools.instance("does not import a project tool when the folder is restricted", () =>
+    Effect.gen(function* () {
+      const marker = yield* writeMarkerTool
+      const ids = yield* (yield* ToolRegistry.Service).ids()
+      expect(ids).not.toContain("marked")
+      expect(
+        yield* Effect.promise(() =>
+          fs.stat(marker).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      ).toBe(false)
+    }),
+  )
+
+  it.instance("imports and registers the same tool when the folder is trusted", () =>
+    Effect.gen(function* () {
+      const marker = yield* writeMarkerTool
+      const ids = yield* (yield* ToolRegistry.Service).ids()
+      expect(ids).toContain("marked")
+      expect(
+        yield* Effect.promise(() =>
+          fs.stat(marker).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      ).toBe(true)
+    }),
+  )
+})

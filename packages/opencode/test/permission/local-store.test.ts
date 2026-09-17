@@ -15,6 +15,8 @@ import { InstanceStore } from "@/project/instance-store"
 import { PermissionLocalStore } from "../../src/permission/local-store"
 import { TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { TestConfig } from "../fixture/config"
+import type { WorkspaceTrust } from "../../src/trust"
 
 const noopBootstrap = Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void }))
 const it = testEffect(
@@ -349,5 +351,62 @@ describe("PermissionLocalStore", () => {
       ).toBe(false)
       yield* promise(() => fs.rm(expected, { force: true }))
     }),
+  )
+
+  // Workspace trust: an untrusted repository's file is neither read nor written, and git never runs for it.
+  const trustIn = (effective: WorkspaceTrust.Effective) =>
+    TestConfig.make({
+      trust: () => Effect.succeed({ ...TestConfig.trusted, state: { ...TestConfig.trusted.state, effective } }),
+    })
+
+  const spied = Effect.fnUntraced(function* (effective: WorkspaceTrust.Effective) {
+    const real = yield* ChildProcessSpawner
+    const calls: string[][] = []
+    const spawner = ChildProcessSpawner.of({
+      ...real,
+      spawn: (command) => {
+        if (command._tag === "StandardCommand") calls.push([command.command, ...command.args])
+        return real.spawn(command)
+      },
+    })
+    const local = yield* PermissionLocalStore.make({ fs: yield* FSUtil.Service, spawner, config: trustIn(effective) })
+    return { local, calls }
+  })
+
+  it.instance(
+    "a restricted repository neither reads nor writes the file and runs no git",
+    () =>
+      Effect.gen(function* () {
+        const { directory } = yield* TestInstance
+        const content = JSON.stringify({ permission: { bash: { "curl *": "allow" } } })
+        yield* promise(async () => {
+          await fs.mkdir(path.dirname(file(directory)), { recursive: true })
+          await fs.writeFile(file(directory), content)
+        })
+        const { local, calls } = yield* spied("restricted")
+        expect(yield* local.rules()).toEqual([])
+        expect(yield* local.add([allow("bash", "ls *")])).toBe(false)
+        expect(calls).toEqual([])
+        expect(yield* promise(() => fs.readFile(file(directory), "utf8"))).toBe(content)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "a headless run applies the untracked file after the tracked check, with fsmonitor disabled",
+    () =>
+      Effect.gen(function* () {
+        const { directory } = yield* TestInstance
+        yield* promise(async () => {
+          await fs.mkdir(path.dirname(file(directory)), { recursive: true })
+          await fs.writeFile(file(directory), JSON.stringify({ permission: { bash: { "ls *": "allow" } } }))
+        })
+        const { local, calls } = yield* spied("headless")
+        expect(yield* local.rules()).toEqual([allow("bash", "ls *")])
+        const git = calls.filter((call) => call[0] === "git")
+        expect(git.length).toBeGreaterThan(0)
+        for (const call of git) expect(call.slice(1, 3)).toEqual(["-c", "core.fsmonitor=false"])
+      }),
+    { git: true },
   )
 })

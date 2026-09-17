@@ -101,3 +101,28 @@ describe("tui thread", () => {
     }),
   )
 })
+
+describe("tui worker workspace trust", () => {
+  test("the worker claims OPENCODE_WORKSPACE_TRUST at startup, and the launcher forwards a claimed policy", async () => {
+    const worker = await Bun.file(new URL("../../../src/cli/tui/worker.ts", import.meta.url)).text()
+    expect(worker).toContain("WorkspaceTrustLaunch.claim()")
+    const index = await Bun.file(new URL("../../../src/index.ts", import.meta.url)).text()
+    expect(index).toContain("WorkspaceTrustLaunch.claim()")
+
+    const { WorkspaceTrustLaunch } = await import("@opencode-ai/core/trust/launch")
+    const { workerEnv } = await import("../../../src/cli/cmd/tui")
+    const previous = process.env.OPENCODE_WORKSPACE_TRUST
+    process.env.OPENCODE_WORKSPACE_TRUST = "untrusted"
+    try {
+      WorkspaceTrustLaunch.claim()
+      expect(process.env.OPENCODE_WORKSPACE_TRUST).toBeUndefined()
+      expect(WorkspaceTrustLaunch.inherited({ PATH: "/bin", OPENCODE_WORKSPACE_TRUST: "x" })).toEqual({ PATH: "/bin" })
+      expect(workerEnv({ PATH: "/bin" }, undefined)).toEqual({ PATH: "/bin", OPENCODE_WORKSPACE_TRUST: "untrusted" })
+      expect(WorkspaceTrustLaunch.read()).toBe("untrusted")
+    } finally {
+      WorkspaceTrustLaunch.reset()
+      if (previous === undefined) delete process.env.OPENCODE_WORKSPACE_TRUST
+      else process.env.OPENCODE_WORKSPACE_TRUST = previous
+    }
+  })
+})

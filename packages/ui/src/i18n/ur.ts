@@ -179,6 +179,26 @@ export const dict: Record<string, string> = {
   "ui.message.copyMessage": "پیغام کاپی کریں۔",
   "ui.message.forkMessage": "نئے سیشن میں فورک کریں",
   "ui.message.revertMessage": "پیغام کی تبدیلیاں واپس لیں",
+  "ui.message.revertMessage.partial.one": "پیغام کی تبدیلیاں واپس لیں ({{count}} فائل بحال نہیں ہو سکتی)",
+  "ui.message.revertMessage.partial.other": "پیغام کی تبدیلیاں واپس لیں ({{count}} فائلیں بحال نہیں ہو سکتیں)",
+  "ui.checkpoint.skipped.one": "واپس لینا یہاں تبدیل کی گئی {{count}} فائل بحال نہیں کر سکتا",
+  "ui.checkpoint.skipped.other": "واپس لینا یہاں تبدیل کی گئی {{count}} فائلیں بحال نہیں کر سکتا",
+  "ui.checkpoint.reason.ignored": "نظر انداز کی گئی، محفوظ نہیں ہوئی",
+  "ui.checkpoint.reason.large": "2 MB سے بڑی",
+  "ui.checkpoint.reason.outside": "پروجیکٹ فولڈر سے باہر",
+  "ui.checkpoint.reason.offline": "کلاؤڈ فائل ڈاؤن لوڈ نہیں ہوئی",
+  "ui.checkpoint.reason.unavailable": "چیک پوائنٹس بند",
+  "ui.checkpoint.unavailable.root":
+    "چیک پوائنٹس بند ہیں کیونکہ یہ ڈرائیو کا روٹ ہے۔ واپس لینا ان فائلوں کو بحال نہیں کر سکتا۔",
+  "ui.checkpoint.unavailable.home":
+    "آپ کے ہوم فولڈر میں چیک پوائنٹس بند ہیں۔ واپس لینے کے لیے کوئی پروجیکٹ فولڈر کھولیں۔",
+  "ui.checkpoint.unavailable.data-dir": "چیک پوائنٹس بند ہیں کیونکہ اس فولڈر میں AgentCode کا اپنا ڈیٹا ہے۔",
+  "ui.checkpoint.unavailable.too-many-files":
+    "چیک پوائنٹس بند ہیں: انحصار اور بلڈ آؤٹ پٹ چھوڑنے کے بعد بھی اس فولڈر میں 20,000 سے زیادہ فائلیں ہیں۔",
+  "ui.checkpoint.unavailable.too-large": "چیک پوائنٹس بند ہیں: اس فولڈر میں 512 MB سے زیادہ فائلیں ہیں۔",
+  "ui.checkpoint.unavailable.slow":
+    "چیک پوائنٹس فی الحال بند ہیں: اس فولڈر کو اسکین کرنے میں بہت وقت لگا۔ جلد دوبارہ کوشش کی جائے گی۔",
+  "ui.checkpoint.unavailable.no-git": "چیک پوائنٹس بند ہیں: Git انسٹال نہیں ہے۔ واپس لینے کے لیے Git انسٹال کریں۔",
   "ui.message.copyResponse": "جواب کاپی کریں۔",
   "ui.message.copied": "کاپی ہو گیا",
   "ui.message.duration.seconds": "{{count}}s",
