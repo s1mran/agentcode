@@ -22,7 +22,7 @@ import { UI } from "../ui"
 import { effectCmd } from "../effect-cmd"
 import { EOL } from "os"
 import { Filesystem } from "@/util/filesystem"
-import { createOpencodeClient, type OpencodeClient, type ToolPart } from "@opencode-ai/sdk/v2"
+import { createOpencodeClient, type OpencodeClient, type PermissionRequest, type ToolPart } from "@opencode-ai/sdk/v2"
 import { FormatError, FormatUnknownError } from "../error"
 import { INTERACTIVE_INPUT_ERROR, resolveInteractiveStdin } from "./run/runtime.stdin"
 
@@ -85,6 +85,177 @@ function block(info: Inline, output?: string) {
 
 function formatRunError(error: unknown) {
   return FormatError(error) ?? FormatUnknownError(error)
+}
+
+// A `{ name, data: { message } }` error body (for example a refused permission mode) reads best as its message.
+function requestErrorMessage(error: unknown) {
+  if (error && typeof error === "object" && "data" in error) {
+    const data = error.data
+    if (data && typeof data === "object" && "message" in data && typeof data.message === "string") return data.message
+  }
+  return formatRunError(error)
+}
+
+type PermissionMode = PermissionV1.Mode
+
+const PERMISSION_MODES: Record<string, PermissionMode> = {
+  default: "default",
+  manual: "default",
+  acceptedits: "acceptEdits",
+  "accept-edits": "acceptEdits",
+  plan: "plan",
+  bypasspermissions: "bypassPermissions",
+  bypass: "bypassPermissions",
+  dontask: "dontAsk",
+  "dont-ask": "dontAsk",
+}
+
+export const PERMISSION_MODE_DESCRIBE = "permission mode: default | acceptEdits | plan | bypassPermissions | dontAsk"
+
+/** Parses a --permission-mode value case-insensitively, accepting manual, accept-edits, bypass and dont-ask. */
+export function parsePermissionMode(value: string): PermissionMode | undefined {
+  return PERMISSION_MODES[value.trim().toLowerCase()]
+}
+
+export type PermissionModeArgs = {
+  "permission-mode"?: string
+  auto?: boolean
+  yolo?: boolean
+  "dangerously-skip-permissions"?: boolean
+}
+
+/**
+ * Resolves --permission-mode together with --auto (and its --yolo / --dangerously-skip-permissions aliases).
+ * --auto is a reply policy for this invocation only: it approves prompts once and never becomes a session mode, so it
+ * is not stored on the session (a later run without --auto asks again) and is not subject to the bypassPermissions
+ * gate. It only combines with an explicit bypassPermissions, which is stored like any other --permission-mode.
+ */
+export function resolvePermissionModeArgs(
+  args: PermissionModeArgs,
+): { auto: boolean; mode: PermissionMode | undefined; error?: undefined } | { error: string } {
+  const auto = Boolean(args.auto || args.yolo || args["dangerously-skip-permissions"])
+  const raw = args["permission-mode"]
+  const parsed = raw === undefined ? undefined : parsePermissionMode(raw)
+  if (raw !== undefined && !parsed)
+    return {
+      error: `invalid --permission-mode "${raw}"; expected ${PERMISSION_MODE_DESCRIBE.replace("permission mode: ", "")}`,
+    }
+  if (auto && parsed && parsed !== "bypassPermissions") return { error: "--auto conflicts with --permission-mode" }
+  return { auto, mode: parsed }
+}
+
+/** Adds permissionMode to an SDK request body when a mode was chosen. Servers without mode support ignore it. */
+export function withPermissionMode<T extends object>(body: T, mode: PermissionMode | undefined): T {
+  return mode ? { ...body, permissionMode: mode } : body
+}
+
+/**
+ * Stores the mode on an existing session (--continue, --session, --fork). Returns the server's refusal, if any.
+ * A request the server could not decode (its error names a `kind`, as when a client without the field sends an
+ * empty update) did not reach the mode check, so it is only reported through `warn`, like a server that ignores it.
+ */
+export async function applySessionPermissionMode(
+  sdk: { session: Pick<OpencodeClient["session"], "update"> },
+  sessionID: string,
+  mode: PermissionMode | undefined,
+  warn: (message: string) => void = warnLine,
+): Promise<string | undefined> {
+  if (!mode) return
+  const result = await sdk.session.update(withPermissionMode({ sessionID }, mode))
+  if (!result.error) return
+  const message = requestErrorMessage(result.error)
+  if (!decodeError(result.error)) return message
+  warn(`permission mode ${mode} was not applied: ${message}`)
+}
+
+function decodeError(error: unknown) {
+  if (!error || typeof error !== "object" || !("data" in error)) return false
+  const data = error.data
+  return !!data && typeof data === "object" && "kind" in data && typeof data.kind === "string"
+}
+
+function warnLine(message: string) {
+  UI.println(UI.Style.TEXT_WARNING_BOLD + "!", UI.Style.TEXT_NORMAL + message)
+}
+
+export type RunPermissionRequest = PermissionRequest & {
+  guard?: PermissionV1.Guard
+  alwaysScope?: PermissionV1.AlwaysScope
+}
+
+/**
+ * Whether a prompt was raised by a tool call running in plan mode, read from the asking assistant message (which
+ * records the mode it resolved, parents and agent included). Prompts without a tool call count as not in plan.
+ */
+export async function askedInPlanMode(
+  client: { session: Pick<OpencodeClient["session"], "message"> },
+  request: Pick<PermissionRequest, "sessionID" | "tool">,
+): Promise<boolean> {
+  if (!request.tool) return false
+  const result = await client.session.message({ sessionID: request.sessionID, messageID: request.tool.messageID })
+  const info = result.data?.info
+  return info?.role === "assistant" && (info.permissionMode === "plan" || info.agent === "plan")
+}
+
+/**
+ * Tells whether a session belongs to the run: the run's own session or any subagent session below it. Subagents ask
+ * in their own child session, and an unanswered prompt there would hang the run. Parents are looked up once each;
+ * a lookup that fails is not remembered, so a later prompt from that session tries again.
+ */
+export function runSessionTree(client: { session: Pick<OpencodeClient["session"], "get"> }, root: string) {
+  const known = new Map<string, boolean>([[root, true]])
+  return async function contains(sessionID: string): Promise<boolean> {
+    const walked: string[] = []
+    const remember = (value: boolean) => {
+      for (const item of walked) known.set(item, value)
+      return value
+    }
+    let id: string | undefined = sessionID
+    while (id !== undefined && walked.length < 16) {
+      const current: string = id
+      const hit = known.get(current)
+      if (hit !== undefined) return remember(hit)
+      walked.push(current)
+      const result = await client.session.get({ sessionID: current })
+      if (!result.data) return false
+      id = result.data.parentID
+    }
+    return id === undefined ? remember(false) : false
+  }
+}
+
+/**
+ * Answers a permission prompt for a non-interactive run. A floor request (protected path or critical removal) needs a
+ * person, so it is rejected even under --auto. A prompt raised in plan mode is rejected too: --auto must not turn
+ * plan mode's read-only guarantee into approvals. Anything else is approved once under --auto and rejected otherwise.
+ */
+export async function replyRunPermission(input: {
+  client: { permission: Pick<OpencodeClient["permission"], "reply"> }
+  request: RunPermissionRequest
+  auto: boolean
+  warn?: (message: string) => void
+  /** Only consulted under --auto, for a request that is not a floor request. */
+  inPlanMode?: () => Promise<boolean>
+}): Promise<"once" | "reject"> {
+  const warn = input.warn ?? warnLine
+  const request = input.request
+  const guard = request.guard
+  const floor = guard?.level === "floor"
+  const plan = input.auto && !floor && input.inPlanMode ? await input.inPlanMode().catch(() => true) : false
+  const reply = input.auto && !floor && !plan ? "once" : "reject"
+  if (floor) warn(`blocked: ${guard.reason} needs interactive approval (approve in the app or TUI)`)
+  else if (plan)
+    warn(
+      `permission requested in plan mode: ${request.permission} (${request.patterns.join(", ")}); ` +
+        "auto-rejecting (plan mode is read-only, --auto does not approve it)",
+    )
+  else if (reply === "reject")
+    warn(
+      `permission requested: ${request.permission} (${request.patterns.join(", ")}); auto-rejecting` +
+        (guard ? ` (${guard.reason})` : ""),
+    )
+  await input.client.permission.reply({ requestID: request.id, reply })
+  return reply
 }
 
 async function tool(part: ToolPart) {
@@ -254,6 +425,10 @@ export const RunCommand = effectCmd({
         hidden: true,
         default: false,
       })
+      .option("permission-mode", {
+        type: "string",
+        describe: PERMISSION_MODE_DESCRIBE,
+      })
       .option("demo", {
         type: "boolean",
         default: false,
@@ -271,12 +446,14 @@ export const RunCommand = effectCmd({
     yield* Effect.promise(async () => {
       const rawMessage = [...args.message, ...(args["--"] || [])].join(" ")
       const interactive = args.mini
-      const auto = args.auto || args.yolo || args["dangerously-skip-permissions"]
       const thinking = interactive ? (args.thinking ?? true) : (args.thinking ?? false)
       const die = (message: string): never => {
         UI.error(message)
         process.exit(1)
       }
+      const permissionModeArgs = resolvePermissionModeArgs(args)
+      if (permissionModeArgs.error !== undefined) return die(permissionModeArgs.error)
+      const { auto, mode } = permissionModeArgs
       const dieInteractive = (error: unknown): never => {
         if (error instanceof Error && error.message === INTERACTIVE_INPUT_ERROR) {
           die(error.message)
@@ -447,6 +624,13 @@ export const RunCommand = effectCmd({
             },
           ]
 
+      // Stores an explicit --permission-mode on a resumed or forked session; a refused mode ends the run. --auto is
+      // never stored.
+      async function permissionMode(sdk: OpencodeClient, sessionID: string) {
+        const refused = await applySessionPermissionMode(sdk, sessionID, mode)
+        if (refused) die(refused)
+      }
+
       function title() {
         if (args.title === undefined) return
         if (args.title !== "") return args.title
@@ -475,6 +659,7 @@ export const RunCommand = effectCmd({
               return
             }
 
+            await permissionMode(sdk, id)
             return {
               id,
               title: forked.data?.title ?? current.data.title,
@@ -482,6 +667,7 @@ export const RunCommand = effectCmd({
             }
           }
 
+          await permissionMode(sdk, current.data.id)
           return {
             id: current.data.id,
             title: current.data.title,
@@ -500,6 +686,7 @@ export const RunCommand = effectCmd({
             return
           }
 
+          await permissionMode(sdk, id)
           return {
             id,
             title: forked.data?.title ?? base.title,
@@ -508,6 +695,7 @@ export const RunCommand = effectCmd({
         }
 
         if (base) {
+          await permissionMode(sdk, base.id)
           return {
             id: base.id,
             title: base.title,
@@ -516,10 +704,16 @@ export const RunCommand = effectCmd({
         }
 
         const name = title()
-        const result = await sdk.session.create({
-          title: name,
-          permission: [...rules],
-        })
+        const result = await sdk.session.create(
+          withPermissionMode(
+            {
+              title: name,
+              permission: [...rules],
+            },
+            mode,
+          ),
+        )
+        if (result.error && mode) die(requestErrorMessage(result.error))
         const id = result.data?.id
         if (!id) {
           return
@@ -551,18 +745,24 @@ export const RunCommand = effectCmd({
         sdk: OpencodeClient,
         input: { agent: string | undefined; model: ModelInput | undefined; variant: string | undefined },
       ): Promise<SessionInfo> {
-        const result = await sdk.session.create({
-          title: args.title !== undefined && args.title !== "" ? args.title : undefined,
-          agent: input.agent,
-          model: input.model
-            ? {
-                providerID: input.model.providerID,
-                id: input.model.modelID,
-                variant: input.variant,
-              }
-            : undefined,
-          permission: [...rules],
-        })
+        const result = await sdk.session.create(
+          withPermissionMode(
+            {
+              title: args.title !== undefined && args.title !== "" ? args.title : undefined,
+              agent: input.agent,
+              model: input.model
+                ? {
+                    providerID: input.model.providerID,
+                    id: input.model.modelID,
+                    variant: input.variant,
+                  }
+                : undefined,
+              permission: [...rules],
+            },
+            mode,
+          ),
+        )
+        if (result.error && mode) throw new Error(requestErrorMessage(result.error))
         const id = result.data?.id
         if (!id) {
           throw new Error("Failed to create session")
@@ -696,6 +896,7 @@ export const RunCommand = effectCmd({
         // created, and replies issued from inside the loop must use that client.
         async function loop(client: OpencodeClient, events: Awaited<ReturnType<typeof sdk.event.subscribe>>) {
           const toggles = new Map<string, boolean>()
+          const inRun = runSessionTree(client, sessionID)
           let error: string | undefined
 
           for await (const event of events.stream) {
@@ -795,24 +996,15 @@ export const RunCommand = effectCmd({
 
             if (event.type === "permission.asked") {
               const permission = event.properties
-              if (permission.sessionID !== sessionID) continue
+              // Subagents ask in their own child sessions; those prompts need an answer too or the run hangs.
+              if (!(await inRun(permission.sessionID))) continue
 
-              if (auto) {
-                await client.permission.reply({
-                  requestID: permission.id,
-                  reply: "once",
-                })
-              } else {
-                UI.println(
-                  UI.Style.TEXT_WARNING_BOLD + "!",
-                  UI.Style.TEXT_NORMAL +
-                    `permission requested: ${permission.permission} (${permission.patterns.join(", ")}); auto-rejecting`,
-                )
-                await client.permission.reply({
-                  requestID: permission.id,
-                  reply: "reject",
-                })
-              }
+              await replyRunPermission({
+                client,
+                request: permission,
+                auto,
+                inPlanMode: () => askedInPlanMode(client, permission),
+              })
             }
           }
           return error
@@ -838,14 +1030,19 @@ export const RunCommand = effectCmd({
           }
 
           if (args.command) {
-            const result = await client.session.command({
-              sessionID,
-              agent,
-              model: args.model,
-              command: args.command,
-              arguments: message,
-              variant: args.variant,
-            })
+            const result = await client.session.command(
+              withPermissionMode(
+                {
+                  sessionID,
+                  agent,
+                  model: args.model,
+                  command: args.command,
+                  arguments: message,
+                  variant: args.variant,
+                },
+                mode,
+              ),
+            )
             if (result.error) {
               if (!emit("error", { error: result.error })) UI.error(formatRunError(result.error))
               process.exitCode = 1
@@ -856,13 +1053,18 @@ export const RunCommand = effectCmd({
           }
 
           const model = pick(args.model)
-          const result = await client.session.prompt({
-            sessionID,
-            agent,
-            model,
-            variant: args.variant,
-            parts: [...files, { type: "text", text: message }],
-          })
+          const result = await client.session.prompt(
+            withPermissionMode(
+              {
+                sessionID,
+                agent,
+                model,
+                variant: args.variant,
+                parts: [...files, { type: "text" as const, text: message }],
+              },
+              mode,
+            ),
+          )
           if (result.error) {
             if (!emit("error", { error: result.error })) UI.error(formatRunError(result.error))
             process.exitCode = 1
@@ -972,6 +1174,8 @@ type MiniCommandInput = {
   replay?: boolean
   replayLimit?: number
   demo?: boolean
+  auto?: boolean
+  permissionMode?: string
 }
 
 export async function runMini(input: MiniCommandInput) {
@@ -1002,10 +1206,12 @@ export async function runMini(input: MiniCommandInput) {
     replay: input.replay ?? true,
     "replay-limit": input.replayLimit,
     replayLimit: input.replayLimit,
-    auto: false,
+    auto: input.auto ?? false,
     yolo: false,
     "dangerously-skip-permissions": false,
     dangerouslySkipPermissions: false,
+    "permission-mode": input.permissionMode,
+    permissionMode: input.permissionMode,
     demo: input.demo ?? false,
   })
 }

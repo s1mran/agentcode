@@ -1,11 +1,14 @@
-import { afterEach, expect } from "bun:test"
+import { afterEach, expect, test } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Cause, Effect, Exit, Fiber, Layer, Queue } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer, Queue, Scope } from "effect"
+import { HttpRouter } from "effect/unstable/http"
+import { AppLayer } from "../../src/effect/app-runtime"
+import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { Question } from "../../src/question"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import { InstanceStore } from "../../src/project/instance-store"
 import { QuestionID } from "../../src/question/schema"
-import { disposeAllInstances, provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
+import { disposeAllInstances, provideInstance, testInstanceStoreLayer, tmpdir, tmpdirScoped } from "../fixture/fixture"
 import { SessionID } from "../../src/session/schema"
 import { testEffect } from "../lib/effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -202,6 +205,143 @@ it.instance(
     }),
   { git: true },
 )
+
+// answer validation tests
+
+const closed = [
+  {
+    question: "Continue?",
+    header: "Continue",
+    custom: false,
+    options: [
+      { label: "Yes", description: "Continue" },
+      { label: "No", description: "Stop" },
+    ],
+  },
+]
+
+const invalidReply = (exit: Exit.Exit<void, unknown>) => {
+  expect(Exit.isFailure(exit)).toBe(true)
+  if (Exit.isFailure(exit)) return Cause.squash(exit.cause)
+}
+
+it.instance(
+  "reply - an unlisted answer to a closed question fails and keeps the request pending",
+  () =>
+    Effect.gen(function* () {
+      const fiber = yield* askEffect({ sessionID: SessionID.make("ses_test"), questions: closed }).pipe(
+        Effect.forkScoped,
+      )
+      const pending = yield* waitForPending(1)
+
+      const error = invalidReply(
+        yield* replyEffect({ requestID: pending[0].id, answers: [["Maybe"]] }).pipe(Effect.exit),
+      )
+      expect(error).toBeInstanceOf(Question.InvalidAnswerError)
+      expect(error).toMatchObject({ _tag: "Question.InvalidAnswerError", requestID: pending[0].id })
+      expect(String((error as Question.InvalidAnswerError).message)).toContain("Maybe")
+      expect((yield* listEffect).map((item) => item.id)).toEqual([pending[0].id])
+
+      yield* replyEffect({ requestID: pending[0].id, answers: [["Yes"]] })
+      expect(yield* Fiber.join(fiber)).toEqual([["Yes"]])
+      expect(yield* listEffect).toHaveLength(0)
+    }),
+  { git: true },
+)
+
+it.instance(
+  "reply - two answers to a single-select question fail; multiple and custom questions accept theirs",
+  () =>
+    Effect.gen(function* () {
+      const single = yield* askEffect({
+        sessionID: SessionID.make("ses_test"),
+        questions: [{ ...closed[0], custom: undefined }],
+      }).pipe(Effect.forkScoped)
+      const pending = yield* waitForPending(1)
+      const error = invalidReply(
+        yield* replyEffect({ requestID: pending[0].id, answers: [["Yes", "No"]] }).pipe(Effect.exit),
+      )
+      expect(error).toBeInstanceOf(Question.InvalidAnswerError)
+      expect(yield* listEffect).toHaveLength(1)
+
+      // Custom questions (custom unset) accept typed text.
+      yield* replyEffect({ requestID: pending[0].id, answers: [["Something else"]] })
+      expect(yield* Fiber.join(single)).toEqual([["Something else"]])
+
+      const multiple = yield* askEffect({
+        sessionID: SessionID.make("ses_test"),
+        questions: [{ ...closed[0], multiple: true }],
+      }).pipe(Effect.forkScoped)
+      const next = yield* waitForPending(1)
+      yield* replyEffect({ requestID: next[0].id, answers: [["Yes", "No"]] })
+      expect(yield* Fiber.join(multiple)).toEqual([["Yes", "No"]])
+    }),
+  { git: true },
+)
+
+test("reply over HTTP answers 400 with the reason for an invalid answer and keeps the question pending", async () => {
+  await using dir = await tmpdir({ git: true })
+  const memoMap = Layer.makeMemoMapUnsafe()
+  // Share one memo map so the HTTP routes and this test use the same Question service.
+  const web = HttpRouter.toWebHandler(HttpApiApp.routes, { disableLogger: true, memoMap })
+  const post = (requestID: string, answers: string[][]) =>
+    Promise.resolve(
+      web.handler(
+        new Request(`http://localhost/question/${requestID}/reply`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-opencode-directory": dir.path },
+          body: JSON.stringify({ answers }),
+        }),
+        HttpApiApp.context,
+      ),
+    )
+  try {
+    await Effect.gen(function* () {
+      const scope = yield* Scope.Scope
+      const app = yield* Layer.buildWithMemoMap(AppLayer, memoMap, scope)
+      const instance = yield* InstanceStore.Service.use((store) => store.load({ directory: dir.path })).pipe(
+        Effect.provide(app),
+      )
+      const run = <A, E>(effect: Effect.Effect<A, E, Question.Service>) =>
+        effect.pipe(Effect.provideService(InstanceRef, instance), Effect.provide(app))
+
+      // Build the routes first so the question below lands in the service the handlers use.
+      const listed = yield* Effect.promise(() =>
+        Promise.resolve(
+          web.handler(
+            new Request("http://localhost/question", { headers: { "x-opencode-directory": dir.path } }),
+            HttpApiApp.context,
+          ),
+        ),
+      )
+      expect(listed.status).toBe(200)
+
+      const fiber = yield* run(
+        Question.Service.use((svc) => svc.ask({ sessionID: SessionID.make("ses_http"), questions: closed })),
+      ).pipe(Effect.forkScoped)
+      let requestID: QuestionID | undefined
+      for (let attempt = 0; attempt < 100 && !requestID; attempt++) {
+        requestID = (yield* run(Question.Service.use((svc) => svc.list())))[0]?.id
+        if (!requestID) yield* Effect.sleep("20 millis")
+      }
+      if (!requestID) return yield* Effect.die(new Error("question was not asked"))
+
+      const invalid = yield* Effect.promise(() => post(requestID, [["Maybe"]]))
+      expect(invalid.status).toBe(400)
+      // The body says why, so a client can show the reason instead of a bare Bad Request.
+      const body = (yield* Effect.promise(() => invalid.json())) as Record<string, unknown>
+      expect(body).toMatchObject({ _tag: "QuestionInvalidAnswerError", requestID })
+      expect(String(body.message)).toContain("Maybe")
+      expect(yield* run(Question.Service.use((svc) => svc.list()))).toHaveLength(1)
+
+      const valid = yield* Effect.promise(() => post(requestID, [["No"]]))
+      expect(valid.status).toBe(200)
+      expect(yield* Fiber.join(fiber)).toEqual([["No"]])
+    }).pipe(Effect.scoped, Effect.runPromise)
+  } finally {
+    await web.dispose()
+  }
+}, 60_000)
 
 // reject tests
 

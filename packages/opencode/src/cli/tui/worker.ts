@@ -10,6 +10,11 @@ import { Heap } from "@/cli/heap"
 import { AppRuntime } from "@/effect/app-runtime"
 import { Effect } from "effect"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
+import { PermissionLaunchMode } from "@opencode-ai/core/permission/launch-mode"
+
+// The TUI passes --permission-mode in OPENCODE_PERMISSION_MODE. Take it out of this worker's environment before anything
+// is spawned, so no terminal, shell command, installer or server started from here inherits it; config still reads it.
+PermissionLaunchMode.claim()
 
 Heap.start()
 

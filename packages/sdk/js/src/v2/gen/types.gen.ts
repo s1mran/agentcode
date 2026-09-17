@@ -163,9 +163,12 @@ export type PermissionRule = {
   permission: string
   pattern: string
   action: PermissionAction
+  source?: "builtin"
 }
 
 export type PermissionRuleset = Array<PermissionRule>
+
+export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk"
 
 export type Session = {
   id: string
@@ -212,6 +215,7 @@ export type Session = {
     archived?: number
   }
   permission?: PermissionRuleset
+  permissionMode?: PermissionMode
   revert?: {
     messageID: string
     partID?: string
@@ -371,6 +375,7 @@ export type AssistantMessage = {
   structured?: unknown
   variant?: string
   finish?: string
+  permissionMode?: PermissionMode
 }
 
 export type Message = UserMessage | AssistantMessage
@@ -669,6 +674,15 @@ export type Todo = {
    */
   priority: string
 }
+
+export type PermissionGuard = {
+  level: "floor" | "guard"
+  category: "protected_path" | "critical_rm" | "destructive_git" | "secret"
+  reason: string
+  paths?: Array<string>
+}
+
+export type PermissionAlwaysScope = "project" | "session" | "acceptEdits"
 
 export type SessionStatus =
   | {
@@ -1389,6 +1403,8 @@ export type GlobalEvent = {
             messageID: string
             callID: string
           }
+          guard?: PermissionGuard
+          alwaysScope?: PermissionAlwaysScope
         }
       }
     | {
@@ -1675,8 +1691,8 @@ export type PermissionConfig =
       external_directory?: PermissionRuleConfig
       todowrite?: PermissionActionConfig
       question?: PermissionActionConfig
-      webfetch?: PermissionActionConfig
-      websearch?: PermissionActionConfig
+      webfetch?: PermissionRuleConfig
+      websearch?: PermissionRuleConfig
       lsp?: PermissionRuleConfig
       doom_loop?: PermissionActionConfig
       skill?: PermissionRuleConfig
@@ -2000,6 +2016,8 @@ export type Config = {
   instructions?: Array<string>
   layout?: LayoutConfig
   permission?: PermissionConfig
+  default_permission_mode?: PermissionMode
+  disable_bypass_permissions?: boolean
   tools?: {
     [key: string]: boolean
   }
@@ -2237,6 +2255,7 @@ export type GlobalSession = {
     archived?: number
   }
   permission?: PermissionRuleset
+  permissionMode?: PermissionMode
   revert?: {
     messageID: string
     partID?: string
@@ -2459,6 +2478,12 @@ export type QuestionRequest = {
   tool?: QuestionTool
 }
 
+export type QuestionInvalidAnswerError = {
+  _tag: "QuestionInvalidAnswerError"
+  requestID: string
+  message: string
+}
+
 export type QuestionNotFoundError = {
   _tag: "QuestionNotFoundError"
   requestID: string
@@ -2478,6 +2503,8 @@ export type PermissionRequest = {
     messageID: string
     callID: string
   }
+  guard?: PermissionGuard
+  alwaysScope?: PermissionAlwaysScope
 }
 
 export type PermissionNotFoundError = {
@@ -2542,6 +2569,13 @@ export type ProviderAuthError1 = {
 
 export type NotFoundError = {
   name: "NotFoundError"
+  data: {
+    message: string
+  }
+}
+
+export type PermissionModeRejectedError = {
+  name: "BadRequest"
   data: {
     message: string
   }
@@ -5718,6 +5752,8 @@ export type PermissionAsked = {
       messageID: string
       callID: string
     }
+    guard?: PermissionGuard
+    alwaysScope?: PermissionAlwaysScope
   }
 }
 
@@ -6872,6 +6908,8 @@ export type EventPermissionAsked = {
       messageID: string
       callID: string
     }
+    guard?: PermissionGuard
+    alwaysScope?: PermissionAlwaysScope
   }
 }
 
@@ -7246,6 +7284,7 @@ export type GlobalHealthResponses = {
   200: {
     healthy: true
     version: string
+    permissionModes?: true
   }
 }
 
@@ -9179,9 +9218,9 @@ export type QuestionReplyData = {
 
 export type QuestionReplyErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * BadRequest | QuestionInvalidAnswerError | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: EffectHttpApiErrorBadRequest | QuestionInvalidAnswerError | InvalidRequestError
   /**
    * QuestionNotFoundError
    */
@@ -9484,6 +9523,7 @@ export type SessionCreateData = {
       [key: string]: unknown
     }
     permission?: PermissionRuleset
+    permissionMode?: PermissionMode
     workspaceID?: string
   }
   path?: never
@@ -9496,9 +9536,9 @@ export type SessionCreateData = {
 
 export type SessionCreateErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * BadRequest | PermissionModeRejectedError | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: EffectHttpApiErrorBadRequest | PermissionModeRejectedError | InvalidRequestError
 }
 
 export type SessionCreateError = SessionCreateErrors[keyof SessionCreateErrors]
@@ -9617,6 +9657,7 @@ export type SessionUpdateData = {
       [key: string]: unknown
     }
     permission?: PermissionRuleset
+    permissionMode?: PermissionMode | null
     time?: {
       archived?: number
     }
@@ -9633,9 +9674,9 @@ export type SessionUpdateData = {
 
 export type SessionUpdateErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * BadRequest | PermissionModeRejectedError | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: EffectHttpApiErrorBadRequest | PermissionModeRejectedError | InvalidRequestError
   /**
    * NotFoundError
    */
@@ -9806,6 +9847,7 @@ export type SessionPromptData = {
     format?: OutputFormat
     system?: string
     variant?: string
+    permissionMode?: PermissionMode
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -10153,6 +10195,7 @@ export type SessionPromptAsyncData = {
     format?: OutputFormat
     system?: string
     variant?: string
+    permissionMode?: PermissionMode
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -10195,6 +10238,7 @@ export type SessionCommandData = {
     arguments: string
     command: string
     variant?: string
+    permissionMode?: PermissionMode
     parts?: Array<{
       id?: string
       type: "file"
@@ -10248,6 +10292,7 @@ export type SessionShellData = {
       modelID: string
     }
     command: string
+    permissionMode?: PermissionMode
   }
   path: {
     sessionID: string

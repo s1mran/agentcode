@@ -185,6 +185,42 @@ describe("pty", () => {
     }),
   )
 
+  ptyTest("does not pass the launch permission mode to the terminal", () =>
+    Effect.gen(function* () {
+      const pty = yield* Pty.Service
+      const previous = process.env.OPENCODE_PERMISSION_MODE
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          process.env.OPENCODE_PERMISSION_MODE = "bypassPermissions"
+        }),
+        () =>
+          Effect.sync(() => {
+            if (previous === undefined) delete process.env.OPENCODE_PERMISSION_MODE
+            else process.env.OPENCODE_PERMISSION_MODE = previous
+          }),
+      )
+      const probe = (env: Record<string, string>) =>
+        Effect.gen(function* () {
+          const info = yield* Effect.acquireRelease(
+            pty.create({
+              command: "/usr/bin/env",
+              args: ["sh", "-c", 'printf "mode=[%s]end\\n" "$OPENCODE_PERMISSION_MODE"; exec cat'],
+              cwd: "/tmp",
+              env,
+            }),
+            (created) => pty.remove(created.id).pipe(Effect.ignore),
+          )
+          const attached = yield* attachCollecting(info.id)
+          return yield* waitForOutput(attached.output, "end")
+        })
+
+      // A terminal opened from an engine started with --permission-mode must not start nested agents in that mode.
+      expect(yield* probe({})).toContain("mode=[]end")
+      // An explicit environment entry from the caller still applies.
+      expect(yield* probe({ OPENCODE_PERMISSION_MODE: "plan" })).toContain("mode=[plan]end")
+    }),
+  )
+
   ptyTest("notifies attachments with the exit code and rejects attach after exit", () =>
     Effect.gen(function* () {
       const pty = yield* Pty.Service

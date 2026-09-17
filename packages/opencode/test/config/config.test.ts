@@ -2,7 +2,7 @@ import { test, expect, describe, afterEach, beforeEach, spyOn } from "bun:test"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
-import { Cause, Effect, Exit, Layer, Option } from "effect"
+import { Cause, Effect, Exit, Layer, Logger, Option } from "effect"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Config } from "@/config/config"
@@ -1134,7 +1134,7 @@ it.effect("keeps plugin origins aligned with merged plugin list", () =>
 
 // Legacy tools migration tests
 
-it.instance("migrates legacy tools config to permissions - allow", () =>
+it.instance("legacy agent tools set to true do not become allow rules", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance
     yield* writeConfigEffect(test.directory, {
@@ -1142,11 +1142,9 @@ it.instance("migrates legacy tools config to permissions - allow", () =>
       agent: { test: { tools: { bash: true, read: true } } },
     })
 
+    // Enabling a tool is not an approval, so the built-in asks still apply.
     const config = yield* Config.use.get()
-    expect(config.agent?.["test"]?.permission).toEqual({
-      bash: "allow",
-      read: "allow",
-    })
+    expect(config.agent?.["test"]?.permission).toEqual({})
   }),
 )
 
@@ -1166,7 +1164,7 @@ it.instance("migrates legacy tools config to permissions - deny", () =>
   }),
 )
 
-it.instance("migrates legacy write tool to edit permission", () =>
+it.instance("legacy write tool set to true adds no edit permission", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance
     yield* writeConfigEffect(test.directory, {
@@ -1175,7 +1173,7 @@ it.instance("migrates legacy write tool to edit permission", () =>
     })
 
     const config = yield* Config.use.get()
-    expect(config.agent?.["test"]?.permission).toEqual({ edit: "allow" })
+    expect(config.agent?.["test"]?.permission).toEqual({})
   }),
 )
 
@@ -1252,11 +1250,11 @@ it.instance("migrates legacy patch tool to edit permission", () =>
     const test = yield* TestInstance
     yield* writeConfigEffect(test.directory, {
       $schema: "https://opencode.ai/config.json",
-      agent: { test: { tools: { patch: true } } },
+      agent: { test: { tools: { patch: false } } },
     })
 
     const config = yield* Config.use.get()
-    expect(config.agent?.["test"]?.permission).toEqual({ edit: "allow" })
+    expect(config.agent?.["test"]?.permission).toEqual({ edit: "deny" })
   }),
 )
 
@@ -1270,10 +1268,7 @@ it.instance("migrates mixed legacy tools config", () =>
 
     const config = yield* Config.use.get()
     expect(config.agent?.["test"]?.permission).toEqual({
-      bash: "allow",
-      edit: "allow",
       read: "deny",
-      webfetch: "allow",
     })
   }),
 )
@@ -1289,7 +1284,6 @@ it.instance("merges legacy tools with existing permission config", () =>
     const config = yield* Config.use.get()
     expect(config.agent?.["test"]?.permission).toEqual({
       glob: "allow",
-      bash: "allow",
     })
   }),
 )
@@ -1896,6 +1890,305 @@ describe("OPENCODE_PERMISSION env var", () => {
         expect(config).toBeDefined()
       }),
     ),
+  )
+})
+
+// Collects log lines emitted while `effect` runs (config state loads lazily inside the first Config.get).
+const captureLogs = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const logs: { level: string; text: string }[] = []
+    const logger = Logger.make((options) => {
+      logs.push({ level: options.logLevel, text: JSON.stringify(options.message) })
+    })
+    const value = yield* effect.pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: true })))
+    return { value, logs }
+  })
+
+describe("permission mode config", () => {
+  it.effect("project opencode.json cannot set default_permission_mode bypassPermissions", () =>
+    withConfigTree(
+      {
+        global: { default_permission_mode: "acceptEdits" },
+        project: { default_permission_mode: "bypassPermissions" },
+      },
+      Effect.gen(function* () {
+        const { value, logs } = yield* captureLogs(Config.use.get())
+        expect(value.default_permission_mode).toBe("acceptEdits")
+        expect(
+          logs.some(
+            (log) =>
+              log.level === "Warn" &&
+              log.text.includes("default_permission_mode bypassPermissions ignored from project config") &&
+              log.text.includes("opencode.json"),
+          ),
+        ).toBe(true)
+      }),
+    ),
+  )
+
+  it.effect("project .opencode/opencode.json cannot set default_permission_mode bypassPermissions", () =>
+    withConfigTree(
+      { local: { default_permission_mode: "bypassPermissions" } },
+      Effect.gen(function* () {
+        expect((yield* Config.use.get()).default_permission_mode).toBeUndefined()
+      }),
+    ),
+  )
+
+  it.effect("project config can still set the other modes", () =>
+    withConfigTree(
+      { global: { default_permission_mode: "bypassPermissions" }, project: { default_permission_mode: "plan" } },
+      Effect.gen(function* () {
+        expect((yield* Config.use.get()).default_permission_mode).toBe("plan")
+      }),
+    ),
+  )
+
+  it.effect("global config default_permission_mode bypassPermissions is kept", () =>
+    withConfigTree(
+      { global: { default_permission_mode: "bypassPermissions" } },
+      Effect.gen(function* () {
+        const { value, logs } = yield* captureLogs(Config.use.get())
+        expect(value.default_permission_mode).toBe("bypassPermissions")
+        expect(logs.some((log) => log.text.includes("bypassPermissions ignored"))).toBe(false)
+      }),
+    ),
+  )
+
+  it.effect("global disable_bypass_permissions true cannot be turned off by project config", () =>
+    withConfigTree(
+      { global: { disable_bypass_permissions: true }, project: { disable_bypass_permissions: false } },
+      Effect.gen(function* () {
+        expect((yield* Config.use.get()).disable_bypass_permissions).toBe(true)
+      }),
+    ),
+  )
+
+  it.effect("disable_bypass_permissions is unset when no scope sets it true", () =>
+    withConfigTree(
+      { global: { disable_bypass_permissions: false } },
+      Effect.gen(function* () {
+        expect((yield* Config.use.get()).disable_bypass_permissions).toBeUndefined()
+      }),
+    ),
+  )
+
+  it.instance(
+    "managed disable_bypass_permissions is sticky",
+    () =>
+      Effect.gen(function* () {
+        yield* writeManagedSettingsEffect({ disable_bypass_permissions: true })
+        expect((yield* Config.use.get()).disable_bypass_permissions).toBe(true)
+      }),
+    { config: { disable_bypass_permissions: false } },
+  )
+
+  it.instance(
+    "OPENCODE_PERMISSION_MODE sets the default permission mode",
+    () =>
+      withProcessEnv(
+        "OPENCODE_PERMISSION_MODE",
+        "plan",
+        Effect.gen(function* () {
+          expect((yield* Config.use.get()).default_permission_mode).toBe("plan")
+        }),
+      ),
+    { config: { default_permission_mode: "acceptEdits" } },
+  )
+
+  it.instance("OPENCODE_PERMISSION_MODE may select bypassPermissions", () =>
+    withProcessEnv(
+      "OPENCODE_PERMISSION_MODE",
+      "bypassPermissions",
+      Effect.gen(function* () {
+        expect((yield* Config.use.get()).default_permission_mode).toBe("bypassPermissions")
+      }),
+    ),
+  )
+
+  it.effect("the user's ~/.opencode config keeps bypassPermissions when the home folder itself is opened", () =>
+    Effect.gen(function* () {
+      const home = yield* tmpdirScoped()
+      const global = yield* tmpdirScoped()
+      yield* writeConfigEffect(
+        path.join(home, ".opencode"),
+        schemaConfig({ default_permission_mode: "bypassPermissions" }),
+      )
+      yield* withProcessEnv(
+        "OPENCODE_TEST_HOME",
+        home,
+        withGlobalConfigDir(
+          global,
+          withInstanceDir(
+            home,
+            Effect.gen(function* () {
+              const { value, logs } = yield* captureLogs(Config.use.get())
+              expect(value.default_permission_mode).toBe("bypassPermissions")
+              expect(logs.some((log) => log.text.includes("bypassPermissions ignored"))).toBe(false)
+            }),
+          ),
+        ),
+      )
+    }),
+  )
+
+  it.effect("an OPENCODE_CONFIG_DIR inside the project keeps bypassPermissions; OPENCODE_CONFIG_CONTENT too", () =>
+    Effect.gen(function* () {
+      const root = yield* tmpdirScoped()
+      const global = yield* tmpdirScoped()
+      const directory = path.join(root, "project")
+      const configDir = path.join(directory, "my-config")
+      yield* writeConfigEffect(configDir, schemaConfig({ default_permission_mode: "bypassPermissions" }))
+      yield* withProcessEnv(
+        "OPENCODE_CONFIG_DIR",
+        configDir,
+        withGlobalConfigDir(
+          global,
+          withInstanceDir(
+            directory,
+            Effect.gen(function* () {
+              expect((yield* Config.use.get()).default_permission_mode).toBe("bypassPermissions")
+            }),
+          ),
+        ),
+      )
+      yield* withProcessEnv(
+        "OPENCODE_CONFIG_CONTENT",
+        JSON.stringify({ default_permission_mode: "bypassPermissions" }),
+        withGlobalConfigDir(
+          global,
+          withInstanceDir(
+            path.join(root, "other"),
+            Effect.gen(function* () {
+              expect((yield* Config.use.get()).default_permission_mode).toBe("bypassPermissions")
+            }),
+          ),
+        ),
+      )
+    }),
+  )
+
+  it.instance("managed default_permission_mode wins over OPENCODE_PERMISSION_MODE", () =>
+    withProcessEnv(
+      "OPENCODE_PERMISSION_MODE",
+      "acceptEdits",
+      Effect.gen(function* () {
+        yield* writeManagedSettingsEffect({ default_permission_mode: "default" })
+        expect((yield* Config.use.get()).default_permission_mode).toBe("default")
+      }),
+    ),
+  )
+
+  it.instance(
+    "invalid OPENCODE_PERMISSION_MODE is ignored",
+    () =>
+      withProcessEnv(
+        "OPENCODE_PERMISSION_MODE",
+        "yolo",
+        Effect.gen(function* () {
+          expect((yield* Config.use.get()).default_permission_mode).toBe("acceptEdits")
+        }),
+      ),
+    { config: { default_permission_mode: "acceptEdits" } },
+  )
+})
+
+it.instance("new .opencode/.gitignore ignores settings.local.json", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const dir = path.join(test.directory, ".opencode")
+    yield* writeConfigEffect(dir, schemaConfig({}))
+    yield* Config.use.get()
+    const lines = (yield* FSUtil.use.readFileString(path.join(dir, ".gitignore"))).split("\n")
+    expect(lines).toContain("settings.local.json")
+    expect(lines).toContain("node_modules")
+  }),
+)
+
+describe("legacy top-level tools map", () => {
+  it.instance(
+    "true no longer approves a tool; false still denies",
+    () =>
+      Effect.gen(function* () {
+        const value = yield* Config.use.get()
+        expect(value.permission?.edit).toBe("deny")
+        expect(value.permission?.bash).toBeUndefined()
+        expect(value.permission?.read).toBe("allow")
+      }),
+    { config: { tools: { bash: true, edit: false }, permission: { read: "allow" } } },
+  )
+
+  it.instance(
+    "write true does not undo edit false",
+    () =>
+      Effect.gen(function* () {
+        expect((yield* Config.use.get()).permission?.edit).toBe("deny")
+      }),
+    { config: { tools: { edit: false, write: true } } },
+  )
+})
+
+describe("permission lint", () => {
+  it.instance(
+    "also lints per-agent permissions from config and markdown agent files",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* FSUtil.use.writeWithDirs(
+          path.join(test.directory, ".opencode", "agent", "review.md"),
+          `---
+description: Reviews diffs.
+permission:
+  bash:
+    "*": deny
+    "git diff*": allow
+---
+
+Review the diff.
+`,
+        )
+        const { logs } = yield* captureLogs(Config.use.get())
+        const warned = (name: string) =>
+          logs.some(
+            (log) =>
+              log.level === "Warn" &&
+              log.text.includes(`agent.${name}.permission.bash has`) &&
+              log.text.includes("denies are absolute"),
+          )
+        expect(warned("review")).toBe(true)
+        expect(warned("docs")).toBe(true)
+      }),
+    {
+      config: {
+        agent: { docs: { permission: { bash: { "*": "deny", "ls *": "allow" } } } },
+      },
+    },
+  )
+
+  it.instance(
+    "warns when a '*' deny makes allow patterns dead",
+    () =>
+      Effect.gen(function* () {
+        const { value, logs } = yield* captureLogs(Config.use.get())
+        expect(value.permission?.bash).toEqual({ "*": "deny", "ls *": "allow" })
+        const warning = logs.find((log) => log.level === "Warn" && log.text.includes("denies are absolute"))
+        expect(warning).toBeDefined()
+        expect(warning!.text).toContain("permission.bash")
+        expect(warning!.text).toContain("ls *")
+        expect(logs.some((log) => log.text.includes("permission.read has"))).toBe(false)
+      }),
+    { config: { permission: { bash: { "*": "deny", "ls *": "allow" }, read: { "*": "allow", "*.pem": "deny" } } } },
+  )
+
+  it.instance(
+    "notes that edit/bash 'ask' is now the built-in default",
+    () =>
+      Effect.gen(function* () {
+        const { logs } = yield* captureLogs(Config.use.get())
+        expect(logs.some((log) => log.level === "Info" && log.text.includes('permission.edit \\"ask\\"'))).toBe(true)
+        expect(logs.some((log) => log.text.includes("permission.webfetch"))).toBe(false)
+      }),
+    { config: { permission: { edit: "ask", webfetch: "ask" } } },
   )
 })
 

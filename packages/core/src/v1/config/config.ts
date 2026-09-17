@@ -16,6 +16,7 @@ import { ConfigPluginV1 } from "./plugin"
 import { ConfigProviderV1 } from "./provider"
 import { ConfigServerV1 } from "./server"
 import { ConfigSkillsV1 } from "./skills"
+import { PermissionV1 } from "../permission"
 
 export type Layout = ConfigLayoutV1.Layout
 
@@ -126,6 +127,14 @@ export const Info = Schema.Struct({
   }),
   layout: Schema.optional(ConfigLayoutV1.Layout).annotate({ description: "@deprecated Always uses stretch layout." }),
   permission: Schema.optional(ConfigPermissionV1.Info),
+  default_permission_mode: Schema.optional(PermissionV1.Mode).annotate({
+    description:
+      "Permission mode new sessions start in: default, acceptEdits, plan, bypassPermissions or dontAsk. bypassPermissions is ignored when set from a project config file.",
+  }),
+  disable_bypass_permissions: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "Prevent bypassPermissions mode from being enabled. Once true in any config scope, later scopes cannot turn it back off.",
+  }),
   tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
   attachment: Schema.optional(ConfigAttachmentV1.Info).annotate({
     description: "Attachment processing configuration, including image size limits and resizing behavior",

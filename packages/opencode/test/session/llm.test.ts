@@ -1102,7 +1102,8 @@ describe("session.llm.stream", () => {
           name: "test",
           mode: "primary",
           options: {},
-          permission: [{ permission: "question", pattern: "*", action: "deny" }],
+          // Mirrors the built-in question deny from agent defaults; an untagged rule would be an explicit deny.
+          permission: [{ permission: "question", pattern: "*", action: "deny", source: "builtin" }],
         } satisfies Agent.Info
 
         const user = {

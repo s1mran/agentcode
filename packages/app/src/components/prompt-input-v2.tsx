@@ -14,19 +14,24 @@ import { normalizePromptHistoryEntry, promptLength, type PromptHistoryComment } 
 import { createPersistedPromptInputHistory } from "@/components/prompt-input/history-store"
 import { promptDesignPlaceholder, promptPlaceholder } from "@/components/prompt-input/placeholder"
 import { createPromptSubmit } from "@/components/prompt-input/submit"
+import { permissionModeTone } from "@/components/prompt-input/permission-mode-controls"
 import { selectionFromLines, type SelectedLineRange, useFile } from "@/context/file"
 import { useComments } from "@/context/comments"
 import { useCommand } from "@/context/command"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
-import { usePermission } from "@/context/permission"
+import { modeDescriptionKey, modeLabelKey } from "@/context/permission-mode"
 import { type ImageAttachmentPart, usePrompt } from "@/context/prompt"
 import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { useSync } from "@/context/sync"
 import { createSessionTabs } from "@/pages/session/helpers"
 import { showToast } from "@/utils/toast"
-import { PromptInputV2, type PromptInputV2Suggestion } from "@opencode-ai/session-ui/v2/prompt-input"
+import {
+  PromptInputV2,
+  type PromptInputV2ModeControl,
+  type PromptInputV2Suggestion,
+} from "@opencode-ai/session-ui/v2/prompt-input"
 import {
   createPromptInputV2Controller,
   createPromptInputV2State,
@@ -42,6 +47,9 @@ export type PromptInputV2ComposerProps = {
 export type PromptInputV2ControllerProps = Omit<PromptInputProps, "class" | "submission">
 export type PromptInputV2ComposerController = PromptInputV2Interaction & {
   readonly model: PromptInputProps["controls"]["model"]
+  /** The permission mode control, undefined on servers without mode support. */
+  readonly mode: PromptInputV2ModeControl | undefined
+  readonly cycleMode: () => void
 }
 
 export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
@@ -58,6 +66,8 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
         variantControlVisible={!props.controller.model.loading}
         attachKeybind={command.keybindParts("file.attach")}
         attachShortcut={command.keybind("file.attach")}
+        modeControl={props.controller.mode}
+        onCycleMode={props.controller.mode ? props.controller.cycleMode : undefined}
         modelControl={
           <PromptInputV2ModelControl
             loading={props.controller.model.loading}
@@ -86,7 +96,6 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
   const comments = useComments()
   const dialog = useDialog()
   const command = useCommand()
-  const permission = usePermission()
   const language = useLanguage()
   const platform = usePlatform()
   const prompt = props.state ?? usePrompt()
@@ -190,17 +199,14 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     )
   }
 
-  const accepting = createMemo(() => {
-    const id = props.controls.session.id
-    if (!id) return permission.isAutoAcceptingDirectory(sdk().directory)
-    return permission.isAutoAccepting(id, sdk().directory)
-  })
   const submission = createPromptSubmit({
     prompt,
     info,
     imageAttachments: attachments,
     commentCount,
-    autoAccept: accepting,
+    permissionMode: () => props.controls.permissionMode?.submit,
+    permissionModesSupported: () => !!props.controls.permissionMode?.supported,
+    selectPermissionMode: (value) => props.controls.permissionMode?.select(value),
     mode,
     working,
     editor: () => editor,
@@ -290,6 +296,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     })),
   ])
   const slashCommands = createMemo(() => [
+    // The engine's plan command stays listed so picking it inserts `/plan `; submit turns it into Plan mode.
     ...sync().data.command.map((item) => ({
       id: `custom.${item.name}`,
       trigger: item.name,
@@ -409,6 +416,27 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
     },
   })
   Object.defineProperty(controller, "model", { get: () => props.controls.model })
+  const modeControl: PromptInputV2ModeControl = {
+    options: () =>
+      (props.controls.permissionMode?.options ?? []).map((value) => ({
+        id: value,
+        label: language.t(modeLabelKey(value)),
+        description: language.t(modeDescriptionKey(value)),
+        tone: permissionModeTone(value),
+      })),
+    current: () => props.controls.permissionMode?.current ?? "default",
+    onSelect: (value) => {
+      const control = props.controls.permissionMode
+      const next = control?.options.find((option) => option === value)
+      if (next) control?.select(next)
+    },
+    keybind: () => command.keybindParts("permission.mode.cycle"),
+    disabled: () => props.controls.permissionMode?.disabled ?? true,
+  }
+  Object.defineProperty(controller, "mode", {
+    get: () => (props.controls.permissionMode?.supported ? modeControl : undefined),
+  })
+  Object.defineProperty(controller, "cycleMode", { value: () => props.controls.permissionMode?.cycle() })
 
   command.register("prompt-input", () => [
     {

@@ -156,6 +156,34 @@ describe("tool.apply_patch freeform", () => {
   )
 
   it.instance(
+    "asks about a move destination as an edited path",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const calls: AskInput[] = []
+        const stop = new Error("stop after permission")
+        const ctx: ToolCtx = {
+          ...baseCtx,
+          ask: (input) =>
+            Effect.sync(() => {
+              calls.push(input)
+              throw stop
+            }),
+        }
+        yield* writeText(path.join(test.directory, "hook.txt"), "old\n")
+
+        const patchText =
+          "*** Begin Patch\n*** Update File: hook.txt\n*** Move to: .git/config\n@@\n-old\n+new\n*** End Patch"
+
+        yield* expectFailure(execute({ patchText }, ctx), stop.message)
+        expect(calls).toHaveLength(1)
+        expect(calls[0].patterns).toEqual(["hook.txt", ".git/config"])
+        expect(yield* readText(path.join(test.directory, "hook.txt"))).toBe("old\n")
+      }),
+    { git: true },
+  )
+
+  it.instance(
     "permission metadata includes move file info",
     () =>
       Effect.gen(function* () {

@@ -86,6 +86,7 @@ import * as TuiAudio from "./audio"
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./terminal-win32"
 import { destroyRenderer } from "./util/renderer"
 import { cliErrorMessage, errorFormat } from "./util/error"
+import { applyLaunchPermissionMode } from "./context/permission-auto"
 
 registerOpencodeSpinner()
 
@@ -476,6 +477,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   })
 
   const args = useArgs()
+  // The flag's config default only reaches sessions without a stored mode, so a resumed session gets it explicitly.
+  const launchMode = (sessionID: string) => {
+    void applyLaunchPermissionMode((input) => sdk.client.session.update(input), sessionID, args.permissionMode).then(
+      (refused) => {
+        if (refused) toast.show({ message: refused, variant: "error" })
+      },
+    )
+  }
+
   onMount(() => {
     batch(() => {
       if (args.agent) local.agent.set(args.agent)
@@ -490,6 +500,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         local.model.set({ providerID, modelID }, { recent: true })
       }
       if (args.sessionID && !args.fork) {
+        launchMode(args.sessionID)
         route.navigate({
           type: "session",
           sessionID: args.sessionID,
@@ -510,12 +521,14 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       if (args.fork) {
         void sdk.client.session.fork({ sessionID: match }).then((result) => {
           if (result.data?.id) {
+            launchMode(result.data.id)
             route.navigate({ type: "session", sessionID: result.data.id })
           } else {
             toast.show({ message: "Failed to fork session", variant: "error" })
           }
         })
       } else {
+        launchMode(match)
         route.navigate({ type: "session", sessionID: match })
       }
     }
@@ -530,6 +543,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     forked = true
     void sdk.client.session.fork({ sessionID: args.sessionID }).then((result) => {
       if (result.data?.id) {
+        launchMode(result.data.id)
         route.navigate({ type: "session", sessionID: result.data.id })
       } else {
         toast.show({ message: "Failed to fork session", variant: "error" })

@@ -333,7 +333,10 @@ export function Session() {
     if (part.id === lastSwitch) return
 
     if (part.tool === "plan_exit") {
-      local.agent.set("build")
+      // Feedback also completes plan_exit, but planning goes on: only an approved plan switches agents.
+      if (part.state.metadata?.approved !== true) return
+      const agent = part.state.metadata.agent
+      local.agent.set(typeof agent === "string" ? agent : "build")
       lastSwitch = part.id
     } else if (part.tool === "plan_enter") {
       local.agent.set("plan")

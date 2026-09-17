@@ -129,6 +129,7 @@ export const dict: Record<string, string> = {
   "ui.promptInput.attachments": "Obrázky a súbory",
   "ui.promptInput.context": "Kontext",
   "ui.promptInput.shell": "Príkaz shellu",
+  "ui.promptInput.chooseMode": "Režim oprávnení",
   "ui.promptInput.chooseAgent": "Vyberte agenta",
   "ui.promptInput.chooseModel": "Vyberte model",
   "ui.promptInput.chooseVariant": "Vyberte variant modelu",

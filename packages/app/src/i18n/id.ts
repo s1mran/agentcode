@@ -178,6 +178,10 @@ export const dict = {
   "command.prompt.mode.normal": "Prompt",
   "command.permissions.autoaccept.enable": "Terima izin otomatis",
   "command.permissions.autoaccept.disable": "Hentikan penerimaan izin otomatis",
+  "command.permissionMode.cycle": "Ganti mode izin",
+  "command.permissionMode.set": "Mode izin: {{mode}}",
+  "command.permissionMode.bypass": "Lewati izin…",
+  "command.plan": "Mode rencana",
   "command.workspace.toggle": "Alihkan ruang kerja",
   "command.workspace.toggle.description": "Aktifkan atau nonaktifkan beberapa ruang kerja di panel samping",
   "command.session.undo": "Urungkan",
@@ -356,6 +360,18 @@ export const dict = {
   "prompt.mode.shell": "Shell",
   "prompt.mode.normal": "Prompt",
   "prompt.mode.shell.exit": "esc untuk keluar",
+  "prompt.permissionMode.label": "Mode izin",
+  "prompt.permissionMode.default": "Minta izin",
+  "prompt.permissionMode.default.description": "Bertanya sebelum perintah, suntingan, dan akses web",
+  "prompt.permissionMode.acceptEdits": "Terima suntingan",
+  "prompt.permissionMode.acceptEdits.description": "Suntingan di proyek ini disetujui; perintah tetap ditanyakan",
+  "prompt.permissionMode.plan": "Mode rencana",
+  "prompt.permissionMode.plan.description": "Riset hanya-baca; hanya berkas rencana yang dapat disunting",
+  "prompt.permissionMode.bypassPermissions": "Lewati izin",
+  "prompt.permissionMode.bypassPermissions.description":
+    "Berjalan tanpa bertanya, kecuali jalur yang dilindungi, penghapusan kritis, dan aturan tanya Anda",
+  "prompt.permissionMode.dontAsk": "Jangan tanya",
+  "prompt.permissionMode.dontAsk.description": "Apa pun yang perlu ditanyakan akan ditolak",
   "session.child.promptDisabled": "Sesi subagen tidak dapat diberi prompt.",
   "session.child.backToParent": "Kembali ke sesi utama.",
 
@@ -417,6 +433,21 @@ export const dict = {
   "prompt.toast.commandSendFailed.title": "Gagal mengirim perintah",
   "prompt.toast.promptSendFailed.title": "Gagal mengirim prompt",
   "prompt.toast.promptSendFailed.description": "Tidak dapat mengambil sesi",
+
+  "dialog.bypassPermissions.title": "Lewati izin?",
+  "dialog.bypassPermissions.body":
+    "Agen akan menjalankan perintah, menyunting berkas, dan mengakses web tanpa bertanya. Jalur yang dilindungi (.git, konfigurasi agen, berkas startup shell), penghapusan kritis, dan aturan tanya Anda sendiri tetap ditanyakan; aturan tolak tetap berlaku. Gunakan ini hanya di proyek yang Anda percayai.",
+  "dialog.bypassPermissions.confirm": "Lewati izin",
+  "dialog.bypassPermissions.cancel": "Batal",
+  "ui.permission.always.project": "Selalu izinkan di proyek ini",
+  "ui.permission.always.session": "Izinkan untuk sesi ini",
+  "ui.permission.always.acceptEdits": "Izinkan semua suntingan (Terima suntingan)",
+  "ui.permission.always.everything": "semua untuk alat ini",
+  "ui.permission.guard.floor.title": "Tindakan yang dilindungi",
+  "ui.permission.guard.guard.title": "Perlu ditinjau",
+  "ui.permission.guard.noAlways": "Ini hanya dapat disetujui satu kali",
+  "ui.permission.writes": "Menulis ke",
+  "ui.question.planFeedback.placeholder": "Beri tahu agen apa yang perlu diubah dalam rencana",
 
   "dialog.mcp.title": "MCP",
   "dialog.mcp.description": "{{enabled}} dari {{total}} diaktifkan",
@@ -650,6 +681,15 @@ export const dict = {
   "toast.permissions.autoaccept.on.description": "Permintaan izin akan disetujui secara otomatis",
   "toast.permissions.autoaccept.off.title": "Berhenti menerima izin otomatis",
   "toast.permissions.autoaccept.off.description": "Permintaan izin akan memerlukan persetujuan",
+  "toast.permissions.modeMigrated.title": "Terima otomatis kini menjadi Terima suntingan",
+  "toast.permissions.modeMigrated.description":
+    "Suntingan di folder ini disetujui secara otomatis; perintah tetap ditanyakan. Pilih Lewati izin di kolom prompt untuk otonomi penuh.",
+  "toast.permissions.autoAcceptRemoved.title": "Terima otomatis dinonaktifkan",
+  "toast.permissions.autoAcceptRemoved.modes":
+    "Permintaan izin akan ditanyakan lagi. Untuk menyetujui suntingan secara otomatis, pilih Terima suntingan di menu mode di samping prompt atau tekan Shift+Tab.",
+  "toast.permissions.autoAcceptRemoved.rules":
+    "Permintaan izin akan ditanyakan lagi. Untuk melewatinya, izinkan alat tersebut di konfigurasi izin server ini.",
+  "toast.permissions.mode.error.title": "Tidak dapat mengubah mode izin",
 
   "toast.model.none.title": "Tidak ada model dipilih",
   "toast.model.none.description": "Hubungkan penyedia untuk meringkas sesi ini",
@@ -1005,6 +1045,8 @@ export const dict = {
 
   "settings.general.row.language.title": "Bahasa",
   "settings.general.row.language.description": "Ubah bahasa tampilan untuk AgentCode",
+  "settings.general.permissionMode.title": "Mode izin bawaan",
+  "settings.general.permissionMode.description": "Digunakan untuk sesi baru di folder ini",
   "settings.general.row.shell.title": "Shell terminal",
   "settings.general.row.shell.description": "Shell yang digunakan oleh terminal dan alat agen",
   "settings.general.row.shell.autoDefault": "Otomatis (Bawaan)",

@@ -2,9 +2,10 @@ import type { SessionApi, SessionInfo, SessionListInput } from "@opencode-ai/cli
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { withTimestampedFallback } from "./session-title"
 
-export function normalizeSessionInfo(input: SessionInfo | Session): Session {
+export function normalizeSessionInfo(input: (SessionInfo & Pick<Session, "permissionMode">) | Session): Session {
   if (!("location" in input)) return input
   return {
+    ...(input.permissionMode ? { permissionMode: input.permissionMode } : {}),
     id: input.id,
     slug: input.id,
     projectID: input.projectID,

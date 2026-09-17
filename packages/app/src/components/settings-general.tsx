@@ -11,6 +11,7 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useParams } from "@solidjs/router"
 import { useLanguage } from "@/context/language"
 import { usePermission } from "@/context/permission"
+import { folderModeOptions, modeLabelKey, type PermissionMode } from "@/context/permission-mode"
 import { usePlatform, type DisplayBackend } from "@/context/platform"
 import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
@@ -94,29 +95,17 @@ export const SettingsGeneral: Component = () => {
 
   const linux = createMemo(() => platform.platform === "desktop" && platform.os === "linux")
   const dir = createMemo(() => decode64(params.dir))
-  const accepting = createMemo(() => {
+  const folderMode = createMemo(() => {
     const value = dir()
-    if (!value) return false
-    if (!params.id) return permission.isAutoAcceptingDirectory(value)
-    return permission.isAutoAccepting(params.id, value)
+    return value ? permission.defaultMode(value) : "default"
   })
-
-  const toggleAccept = (checked: boolean) => {
+  const permissionModeOptions = createMemo(() =>
+    folderModeOptions(folderMode()).map((mode) => ({ value: mode, label: language.t(modeLabelKey(mode)) })),
+  )
+  const selectFolderMode = (mode: PermissionMode) => {
     const value = dir()
-    if (!value) return
-
-    if (!params.id) {
-      if (permission.isAutoAcceptingDirectory(value) === checked) return
-      permission.toggleAutoAcceptDirectory(value)
-      return
-    }
-
-    if (checked) {
-      permission.enableAutoAccept(params.id, value)
-      return
-    }
-
-    permission.disableAutoAccept(params.id, value)
+    if (!value || mode === folderMode()) return
+    permission.setFolderMode(value, mode)
   }
   const desktop = createMemo(() => platform.platform === "desktop")
 
@@ -316,12 +305,21 @@ export const SettingsGeneral: Component = () => {
         </SettingsRow>
 
         <SettingsRow
-          title={language.t("command.permissions.autoaccept.enable")}
-          description={language.t("toast.permissions.autoaccept.on.description")}
+          title={language.t("settings.general.permissionMode.title")}
+          description={language.t("settings.general.permissionMode.description")}
         >
-          <div data-action="settings-auto-accept-permissions">
-            <Switch checked={accepting()} disabled={!dir()} onChange={toggleAccept} />
-          </div>
+          <Select
+            data-action="settings-default-permission-mode"
+            options={permissionModeOptions()}
+            current={permissionModeOptions().find((o) => o.value === folderMode())}
+            value={(o) => o.value}
+            label={(o) => o.label}
+            onSelect={(option) => option && selectFolderMode(option.value)}
+            disabled={!dir() || !permission.modesSupported()}
+            variant="secondary"
+            size="small"
+            triggerVariant="settings"
+          />
         </SettingsRow>
 
         <SettingsRow

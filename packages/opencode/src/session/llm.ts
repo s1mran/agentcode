@@ -19,7 +19,6 @@ import { Plugin } from "@/plugin"
 import { Permission } from "@/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
-import { Wildcard } from "@/util/wildcard"
 import { SessionID } from "@/session/schema"
 import { Auth } from "@/auth"
 import { EffectBridge } from "@/effect/bridge"
@@ -39,6 +38,8 @@ export type StreamInput = {
   model: Provider.Model
   agent: Agent.Info
   permission?: PermissionV1.Ruleset
+  /** The session's effective permission mode for this step; the local Claude engine narrows its own permissions to it. */
+  permissionMode?: PermissionV1.Mode
   system: string[]
   messages: ModelMessage[]
   small?: boolean
@@ -146,11 +147,10 @@ const live: Layer.Layer<
           }
         }
 
-        const ruleset = Permission.merge(input.agent.permission ?? [], input.permission ?? [])
-        workflowModel.sessionPreapprovedTools = Object.keys(prepared.tools).filter((name) => {
-          const match = ruleset.findLast((rule) => Wildcard.match(name, rule.permission))
-          return !match || match.action !== "ask"
-        })
+        // Every engine tool asks through its own ctx.ask (Permission.ask decides with the session mode), plugin and
+        // custom tools included (the registry asks for them before they run), so the workflow service must not ask
+        // again for them.
+        workflowModel.sessionPreapprovedTools = Object.keys(prepared.tools)
 
         const approvedToolsForSession = new Set<string>()
         workflowModel.approvalHandler = bridge.bind(async (approvalTools) => {

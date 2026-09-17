@@ -122,6 +122,7 @@ export const dict: Record<string, string> = {
   "ui.promptInput.attachments": "छवियाँ और फ़ाइलें",
   "ui.promptInput.context": "संदर्भ",
   "ui.promptInput.shell": "शेल कमांड",
+  "ui.promptInput.chooseMode": "अनुमति मोड",
   "ui.promptInput.chooseAgent": "एजेंट चुनें",
   "ui.promptInput.chooseModel": "मॉडल चुनें",
   "ui.promptInput.chooseVariant": "मॉडल वेरिएंट चुनें",

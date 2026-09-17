@@ -128,6 +128,7 @@ export const dict = {
   "ui.promptInput.attachments": "图片和文件",
   "ui.promptInput.context": "上下文",
   "ui.promptInput.shell": "Shell 命令",
+  "ui.promptInput.chooseMode": "权限模式",
   "ui.promptInput.chooseAgent": "选择智能体",
   "ui.promptInput.chooseModel": "选择模型",
   "ui.promptInput.chooseVariant": "选择模型变体",

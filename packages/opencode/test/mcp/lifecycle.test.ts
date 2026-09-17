@@ -216,6 +216,33 @@ it.instance(
   { init: (directory) => Effect.promise(() => Bun.$`mkdir -p ${path.join(directory, "plugins/sub")}`.quiet()) },
 )
 
+it.instance("local mcp does not inherit the launch permission mode, but an explicit environment still applies", () =>
+  Effect.gen(function* () {
+    const previous = process.env.OPENCODE_PERMISSION_MODE
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        process.env.OPENCODE_PERMISSION_MODE = "bypassPermissions"
+      }),
+      () =>
+        Effect.sync(() => {
+          if (previous === undefined) delete process.env.OPENCODE_PERMISSION_MODE
+          else process.env.OPENCODE_PERMISSION_MODE = previous
+        }),
+    )
+    const mcp = yield* MCP.Service
+    yield* mcp.add("inherited", { type: "local", command: [process.execPath, stdioFixture, "--env"] })
+    yield* mcp.add("explicit", {
+      type: "local",
+      command: [process.execPath, stdioFixture, "--env"],
+      environment: { OPENCODE_PERMISSION_MODE: "plan" },
+    })
+
+    const tools = yield* mcp.tools()
+    expect(JSON.parse(tools["inherited_current_directory"]?.def.description ?? "")).toEqual({ mode: null })
+    expect(JSON.parse(tools["explicit_current_directory"]?.def.description ?? "")).toEqual({ mode: "plan" })
+  }),
+)
+
 it.instance("tools() reuses cached definitions until a protocol notification", () =>
   Effect.gen(function* () {
     const server = yield* lifecycleServer({ capabilities: { tools: { listChanged: true } } })

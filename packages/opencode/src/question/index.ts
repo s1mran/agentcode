@@ -34,6 +34,26 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Que
   requestID: QuestionID,
 }) {}
 
+/** A reply that breaks a question's rules: several answers to a single-select question, or text a closed one refuses. */
+export class InvalidAnswerError extends Schema.TaggedErrorClass<InvalidAnswerError>()("Question.InvalidAnswerError", {
+  requestID: QuestionID,
+  message: Schema.String,
+}) {}
+
+/** Why the answers do not fit the questions, or undefined when they do. */
+export function invalidAnswer(questions: ReadonlyArray<Info>, answers: ReadonlyArray<Answer>): string | undefined {
+  for (const [index, question] of questions.entries()) {
+    const answer = answers[index] ?? []
+    if (question.multiple !== true && answer.length > 1)
+      return `Question ${index + 1} ("${question.header}") accepts a single answer, got ${answer.length}`
+    if (question.custom !== false) continue
+    const labels = new Set(question.options.map((option) => option.label))
+    const unknown = answer.find((item) => !labels.has(item))
+    if (unknown !== undefined)
+      return `"${unknown}" is not an option of question ${index + 1} ("${question.header}"), which does not accept typed answers`
+  }
+}
+
 interface PendingEntry {
   info: Request
   deferred: Deferred.Deferred<ReadonlyArray<Answer>, RejectedError>
@@ -54,7 +74,7 @@ export interface Interface {
   readonly reply: (input: {
     requestID: QuestionID
     answers: ReadonlyArray<Answer>
-  }) => Effect.Effect<void, NotFoundError>
+  }) => Effect.Effect<void, NotFoundError | InvalidAnswerError>
   readonly reject: (requestID: QuestionID) => Effect.Effect<void, NotFoundError>
   readonly list: () => Effect.Effect<ReadonlyArray<Request>>
 }
@@ -120,6 +140,12 @@ const layer = Layer.effect(
       if (!existing) {
         yield* Effect.logWarning("reply for unknown request", { requestID: input.requestID })
         return yield* new NotFoundError({ requestID: input.requestID })
+      }
+      // Validate before settling so an invalid reply leaves the question pending for a corrected answer.
+      const invalid = invalidAnswer(existing.info.questions, input.answers)
+      if (invalid) {
+        yield* Effect.logWarning("invalid reply", { requestID: input.requestID, reason: invalid })
+        return yield* new InvalidAnswerError({ requestID: input.requestID, message: invalid })
       }
       pending.delete(input.requestID)
       yield* Effect.logInfo("replied", { requestID: input.requestID, answers: input.answers })

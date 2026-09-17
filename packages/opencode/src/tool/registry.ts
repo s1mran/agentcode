@@ -55,6 +55,11 @@ import { MCP } from "@/mcp"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { McpCatalog } from "@/mcp/catalog"
 
+/** Whether this client gets the question tool, and with it plan_exit. */
+export function questionToolEnabled(flags: { client: string; enableQuestionTool: boolean }) {
+  return ["app", "cli", "desktop"].includes(flags.client) || flags.enableQuestionTool
+}
+
 export function webSearchEnabled(providerID: ProviderV2.ID, flags = { exa: false, parallel: false }) {
   return (
     providerID === ProviderV2.ID.opencode ||
@@ -83,6 +88,10 @@ export interface Interface {
     modelID: ModelV2.ID
     agent: Agent.Info
     permission?: PermissionV1.Ruleset
+    /** The session's effective permission mode: plan_exit is offered only in plan mode on root sessions. */
+    mode?: Permission.Mode
+    /** Whether the session is a subagent session (has a parent). */
+    child?: boolean
   }) => Effect.Effect<Tool.Def[]>
 }
 
@@ -142,6 +151,16 @@ const layer = Layer.effect(
             description: def.description,
             execute: (args, toolCtx) =>
               Effect.gen(function* () {
+                // A plugin tool asks only when the user configured a rule for it (or a catch-all): the hint keeps the
+                // engine's built-in "*" ask from prompting for every plugin tool, while an explicit ask still asks
+                // (and is denied in dontAsk) and an explicit deny still denies.
+                yield* toolCtx.ask({
+                  permission: id,
+                  patterns: ["*"],
+                  always: ["*"],
+                  metadata: { tool: id },
+                  hints: [{ pattern: "*", readOnly: true }],
+                })
                 // Bridge the host's Effect-based `ask` into a Promise-returning
                 // function for the plugin to make sure context persists
                 const bridge = yield* EffectBridge.make()
@@ -204,7 +223,7 @@ const layer = Layer.effect(
         }
 
         yield* config.get()
-        const questionEnabled = ["app", "cli", "desktop"].includes(flags.client) || flags.enableQuestionTool
+        const questionEnabled = questionToolEnabled(flags)
 
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),
@@ -245,7 +264,7 @@ const layer = Layer.effect(
             tool.patch,
             ...(tool.execute ? [tool.execute] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
-            ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
+            ...(questionEnabled ? [tool.plan] : []),
           ],
           task: tool.task,
           read: tool.read,
@@ -290,6 +309,10 @@ const layer = Layer.effect(
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
       const filtered = (yield* all()).filter((tool) => {
+        // plan_exit is offered to root sessions in plan mode only. dontAsk never asks the user, so question goes too.
+        if (tool.id === PlanExitTool.id) return input.mode === "plan" && !input.child
+        if (tool.id === QuestionTool.id && input.mode === "dontAsk") return false
+
         if (tool.id === WebSearchTool.id) {
           return webSearchEnabled(input.providerID, { exa: flags.enableExa, parallel: flags.enableParallel })
         }
@@ -449,6 +472,7 @@ export const node = LayerNode.make({
     MCP.node,
     Database.node,
     Ripgrep.node,
+    Permission.node,
   ],
 })
 

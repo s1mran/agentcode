@@ -220,6 +220,20 @@ describe("tool.read external_directory permission", () => {
     }),
   )
 
+  it.live("offers Allow always for the asked file only, never every read", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      yield* put(path.join(dir, ".env"), "TOKEN=1")
+
+      const { items, next } = asks()
+      yield* exec(dir, { filePath: path.join(dir, ".env") }, next)
+      const read = items.find((item) => item.permission === "read")
+      expect(read).toBeDefined()
+      expect(read!.patterns).toEqual([".env"])
+      expect(read!.always).toEqual([".env"])
+    }),
+  )
+
   it.live("asks for directory-scoped external_directory permission when reading external directory", () =>
     Effect.gen(function* () {
       const outer = yield* tmpdirScoped()
@@ -673,7 +687,8 @@ describe("tool.read nested instruction claims", () => {
 
 describe("tool.read instruction imports and read rules", () => {
   const envImport = Effect.fn("ReadToolTest.envImport")(function* () {
-    const dir = yield* tmpdirScoped()
+    // "reader" explicitly allows every read, .env included; the built-in agents ask for .env.
+    const dir = yield* tmpdirScoped({ config: { agent: { reader: { permission: { read: "allow" } } } } })
     yield* put(path.join(dir, "sub", "CLAUDE.md"), "@.env\n@.env.example\n# Sub Instructions")
     yield* put(path.join(dir, "sub", ".env"), "ENVSECRET-9401")
     yield* put(path.join(dir, "sub", ".env.example"), "EXAMPLE-OK")
@@ -756,14 +771,14 @@ describe("tool.read instruction imports and read rules", () => {
         { filePath: path.join(dir, "sub", "a.txt") },
         {
           ...ctx,
-          agent: "explore",
+          agent: "reader",
           ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
             Effect.sync(() => {
               asked.push(req.permission)
             }),
         },
       )
-      // explore's read: allow covers .env, so only the read of a.txt itself went through ask.
+      // reader's read: allow covers .env, so only the read of a.txt itself went through ask.
       expect(result.output).toContain("ENVSECRET-9401")
       expect(asked).toEqual(["read"])
     }),
@@ -775,7 +790,7 @@ describe("tool.read instruction imports and read rules", () => {
       const asked: string[] = []
       const output = yield* provideInstance(dir)(
         Effect.gen(function* () {
-          yield* run({ filePath: path.join(dir, "sub", "a.txt") }, { ...ctx, agent: "explore" })
+          yield* run({ filePath: path.join(dir, "sub", "a.txt") }, { ...ctx, agent: "reader" })
           const next = { ...(yield* declining(asked)), messageID: MessageID.make("msg_test-build") }
           return (yield* run({ filePath: path.join(dir, "sub", "a.txt") }, next)).output
         }),

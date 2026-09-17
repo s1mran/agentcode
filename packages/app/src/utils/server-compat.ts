@@ -1,6 +1,13 @@
 import type { ServerApi } from "./server"
 import type { ServerProtocol } from "./server-protocol"
-import type { AgentPartInput, FilePartInput, OpencodeClient, Session, TextPartInput } from "@opencode-ai/sdk/v2/client"
+import type {
+  AgentPartInput,
+  FilePartInput,
+  OpencodeClient,
+  PermissionMode,
+  Session,
+  TextPartInput,
+} from "@opencode-ai/sdk/v2/client"
 import type {
   Project,
   ProjectCurrent,
@@ -20,10 +27,11 @@ type LegacyClient = OpencodeClient
 type LegacyFor = (directory?: string) => LegacyClient
 type CompatibleSessionApi = Omit<
   SessionApi,
-  "prompt" | "command" | "shell" | "compact" | "rename" | "archive" | "remove"
+  "create" | "prompt" | "command" | "shell" | "compact" | "rename" | "archive" | "remove"
 > & {
+  create: (input?: Parameters<SessionApi["create"]>[0] & LegacyMode) => ReturnType<SessionApi["create"]>
   prompt: (input: SessionPromptInput & LegacyPrompt) => Promise<SessionPromptOutput>
-  command: (input: SessionCommandInput) => Promise<SessionCommandOutput>
+  command: (input: SessionCommandInput & LegacyMode) => Promise<SessionCommandOutput>
   shell: (input: SessionShellInput & LegacyPrompt) => Promise<SessionShellOutput>
   compact: (input: SessionCompactInput & { model?: LegacyPrompt["model"] }) => Promise<SessionCompactOutput>
   rename: (input: Parameters<SessionApi["rename"]>[0] & LegacyLocation) => ReturnType<SessionApi["rename"]>
@@ -39,7 +47,9 @@ export type CompatibleApi = Omit<ServerApi, "session" | "permission"> & {
   readonly session: CompatibleSessionApi
   readonly permission: CompatiblePermissionApi
 }
-type LegacyPrompt = {
+// Servers with permission modes resolve the mode in the engine; the client sends it with every create and turn.
+type LegacyMode = { permissionMode?: PermissionMode }
+type LegacyPrompt = LegacyMode & {
   agent?: string
   model?: { providerID: string; modelID: string }
   variant?: string
@@ -58,8 +68,11 @@ function mime(uri: string) {
   return match?.[1] ?? "application/octet-stream"
 }
 
-function sessionInfo(session: Session): SessionInfo {
+// The current client's SessionInfo has no permission mode. Legacy sessions keep theirs so normalizeSessionInfo can hand
+// it back to the composer; without it every session loaded through list/get would read as "default".
+function sessionInfo(session: Session): SessionInfo & LegacyMode {
   return {
+    ...(session.permissionMode ? { permissionMode: session.permissionMode } : {}),
     id: session.id,
     parentID: session.parentID,
     projectID: session.projectID,
@@ -160,9 +173,11 @@ function createV1Api(input: CompatibleInput): CompatibleApi {
         })
         return { data: (result.data ?? []).map(sessionInfo), cursor: {} }
       },
-      async create(value?: Parameters<ServerApi["session"]["create"]>[0]) {
+      async create(value?: Parameters<ServerApi["session"]["create"]>[0] & LegacyMode) {
         const result = await legacy(value?.location ?? undefined).session.create({
           directory: directory(value?.location ?? undefined),
+          // Spread so a create without a mode keeps sending no body at all.
+          ...(value?.permissionMode ? { permissionMode: value.permissionMode } : {}),
         })
         if (!result.data) throw new Error("Failed to create session")
         return sessionInfo(result.data)
@@ -204,6 +219,7 @@ function createV1Api(input: CompatibleInput): CompatibleApi {
           agent: value.agent,
           model: value.model,
           variant: value.variant,
+          permissionMode: value.permissionMode,
           parts: value.legacyParts ?? [
             { type: "text", text: value.text },
             ...(value.files ?? []).map((file) => ({
@@ -238,7 +254,7 @@ function createV1Api(input: CompatibleInput): CompatibleApi {
           delivery: value.delivery ?? "steer",
         }
       },
-      async command(value: SessionCommandInput) {
+      async command(value: SessionCommandInput & LegacyMode) {
         await legacy().session.command({
           sessionID: value.sessionID,
           messageID: value.id ?? undefined,
@@ -247,6 +263,7 @@ function createV1Api(input: CompatibleInput): CompatibleApi {
           agent: value.agent ?? undefined,
           model: value.model ? `${value.model.providerID}/${value.model.id}` : undefined,
           variant: value.model?.variant,
+          permissionMode: value.permissionMode,
           parts: value.files?.map((file) => ({
             type: "file" as const,
             mime: mime(file.uri),
@@ -270,6 +287,7 @@ function createV1Api(input: CompatibleInput): CompatibleApi {
           command: value.command,
           agent: value.agent,
           model: value.model,
+          permissionMode: value.permissionMode,
         })
       },
       compact: async (value: SessionCompactInput & { model?: LegacyPrompt["model"] }) => {

@@ -104,3 +104,21 @@ export type PromptInputV2Suggestion = {
   recent?: boolean
   mention?: PromptInputV2FilePart | PromptInputV2AgentPart
 }
+
+export type PromptInputV2ModeTone = "neutral" | "success" | "info" | "critical" | "warning"
+
+export type PromptInputV2ModeOption = {
+  id: string
+  label: string
+  description?: string
+  tone: PromptInputV2ModeTone
+}
+
+/** The composer's permission mode control, rendered before the agent select. */
+export type PromptInputV2ModeControl = {
+  options: () => PromptInputV2ModeOption[]
+  current: () => string
+  onSelect: (id: string) => void
+  keybind: () => string[]
+  disabled?: () => boolean
+}

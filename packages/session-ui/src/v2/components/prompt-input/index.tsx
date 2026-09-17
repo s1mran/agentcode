@@ -16,6 +16,8 @@ import { typeLabel } from "../../../components/message-file"
 import type {
   PromptInputV2Attachment,
   PromptInputV2Comment,
+  PromptInputV2ModeControl,
+  PromptInputV2ModeTone,
   PromptInputV2Option,
   PromptInputV2PersistedState,
   PromptInputV2Prompt,
@@ -27,6 +29,9 @@ import "./attachments.css"
 export type {
   PromptInputV2Attachment,
   PromptInputV2Comment,
+  PromptInputV2ModeControl,
+  PromptInputV2ModeOption,
+  PromptInputV2ModeTone,
   PromptInputV2Option,
   PromptInputV2PersistedState,
   PromptInputV2Suggestion,
@@ -44,6 +49,10 @@ export type PromptInputV2Props = {
   variantControlVisible?: boolean
   attachKeybind?: string[]
   attachShortcut?: string
+  /** Permission mode control, shown before the agent select. */
+  modeControl?: PromptInputV2ModeControl
+  /** Shift+Tab in the editor (no popover open, not composing) calls this to cycle the mode. */
+  onCycleMode?: () => void
 }
 
 export function PromptInputV2(props: PromptInputV2Props) {
@@ -174,6 +183,21 @@ export function PromptInputV2(props: PromptInputV2Props) {
             }}
             onKeyDown={(event) => {
               if (props.controller.onKeyDown(event)) return
+              if (
+                props.onCycleMode &&
+                !props.modeControl?.disabled?.() &&
+                event.key === "Tab" &&
+                event.shiftKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.altKey &&
+                !event.isComposing &&
+                state.popover.type === "closed"
+              ) {
+                event.preventDefault()
+                props.onCycleMode()
+                return
+              }
               if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
                 event.preventDefault()
                 if (event.repeat) return
@@ -219,6 +243,9 @@ export function PromptInputV2(props: PromptInputV2Props) {
               onContext={props.controller.openContext}
               onShell={props.controller.openShell}
             />
+            <Show when={props.modeControl}>
+              {(control) => <PromptInputV2ModeSelect title={i18n.t("ui.promptInput.chooseMode")} control={control()} />}
+            </Show>
             <Show when={view.agent} keyed>
               {(control) => (
                 <PromptInputV2ConfiguredSelect
@@ -597,6 +624,69 @@ function PromptInputV2ConfiguredSelect(props: {
   )
 }
 
+const MODE_TONE_CLASS: Record<PromptInputV2ModeTone, string> = {
+  neutral: "bg-icon-weak-base",
+  success: "bg-icon-success-base",
+  info: "bg-icon-info-base",
+  critical: "bg-icon-critical-base",
+  warning: "bg-icon-warning-base",
+}
+
+function PromptInputV2ModeSelect(props: { title: string; control: PromptInputV2ModeControl }) {
+  const current = () => props.control.options().find((option) => option.id === props.control.current())
+  return (
+    <TooltipV2
+      placement="top"
+      value={
+        <>
+          {props.title}
+          <KeybindV2 keys={props.control.keybind()} variant="neutral" />
+        </>
+      }
+    >
+      <MenuV2 gutter={6} modal={false} placement="top-start">
+        <MenuV2.Trigger
+          as={ButtonV2}
+          variant="ghost-muted"
+          size="normal"
+          class="max-w-[220px] justify-start ![font-weight:440]"
+          aria-label={props.title}
+          data-action="prompt-permission-mode"
+          data-mode={props.control.current()}
+          disabled={props.control.disabled?.()}
+        >
+          <span class={`size-1.5 shrink-0 rounded-full ${MODE_TONE_CLASS[current()?.tone ?? "neutral"]}`} />
+          <span class="truncate leading-5">{current()?.label ?? props.control.current()}</span>
+          <span class="-ms-0.5 -me-1 flex shrink-0">
+            <IconV2 name="chevron-down" />
+          </span>
+        </MenuV2.Trigger>
+        <MenuV2.Portal>
+          <MenuV2.Content>
+            <MenuV2.RadioGroup value={props.control.current()} onChange={props.control.onSelect}>
+              <For each={props.control.options()}>
+                {(option) => (
+                  <MenuV2.RadioItem value={option.id} closeOnSelect>
+                    <span class="flex items-start gap-2 max-w-[280px]">
+                      <span class={`mt-1.5 size-1.5 shrink-0 rounded-full ${MODE_TONE_CLASS[option.tone]}`} />
+                      <span class="flex min-w-0 flex-col">
+                        <span>{option.label}</span>
+                        <Show when={option.description}>
+                          <span class="whitespace-normal text-v2-text-text-faint">{option.description}</span>
+                        </Show>
+                      </span>
+                    </span>
+                  </MenuV2.RadioItem>
+                )}
+              </For>
+            </MenuV2.RadioGroup>
+          </MenuV2.Content>
+        </MenuV2.Portal>
+      </MenuV2>
+    </TooltipV2>
+  )
+}
+
 export function PromptInputV2Select(props: {
   title: string
   keybind?: string[]
@@ -800,8 +890,7 @@ export function PromptInputV2MicButton(props: {
   const startMeter = (stream: MediaStream) => {
     const Ctx: typeof AudioContext =
       (window as unknown as { AudioContext: typeof AudioContext; webkitAudioContext?: typeof AudioContext })
-        .AudioContext ??
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+        .AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
     if (!Ctx) return
     audioCtx = new Ctx()
     const analyser = audioCtx.createAnalyser()
@@ -934,45 +1023,45 @@ export function PromptInputV2MicButton(props: {
       </Show>
       <Show when={status() !== "recording"} fallback={<Meter />}>
         <TooltipV2 value="Dictate">
-        <IconButtonV2
-          type="button"
-          data-action="prompt-mic"
-          variant="ghost-muted"
-          size="normal"
-          disabled={props.disabled || status() === "working"}
-          aria-label="Dictate"
-          style={{ height: "28px" }}
-          onClick={() => void start()}
-        >
-        <Show
-          when={status() !== "working"}
-          fallback={
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" opacity="0.25" />
-              <path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-                <animateTransform
-                  attributeName="transform"
-                  type="rotate"
-                  from="0 8 8"
-                  to="360 8 8"
-                  dur="0.8s"
-                  repeatCount="indefinite"
+          <IconButtonV2
+            type="button"
+            data-action="prompt-mic"
+            variant="ghost-muted"
+            size="normal"
+            disabled={props.disabled || status() === "working"}
+            aria-label="Dictate"
+            style={{ height: "28px" }}
+            onClick={() => void start()}
+          >
+            <Show
+              when={status() !== "working"}
+              fallback={
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" opacity="0.25" />
+                  <path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                    <animateTransform
+                      attributeName="transform"
+                      type="rotate"
+                      from="0 8 8"
+                      to="360 8 8"
+                      dur="0.8s"
+                      repeatCount="indefinite"
+                    />
+                  </path>
+                </svg>
+              }
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="6" y="2" width="4" height="7" rx="2" fill="currentColor" />
+                <path
+                  d="M4 7.5a4 4 0 0 0 8 0M8 11.5V14M6 14h4"
+                  stroke="currentColor"
+                  stroke-width="1.3"
+                  stroke-linecap="round"
                 />
-              </path>
-            </svg>
-          }
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <rect x="6" y="2" width="4" height="7" rx="2" fill="currentColor" />
-            <path
-              d="M4 7.5a4 4 0 0 0 8 0M8 11.5V14M6 14h4"
-              stroke="currentColor"
-              stroke-width="1.3"
-              stroke-linecap="round"
-            />
-          </svg>
-          </Show>
-        </IconButtonV2>
+              </svg>
+            </Show>
+          </IconButtonV2>
         </TooltipV2>
       </Show>
     </>
@@ -1031,35 +1120,35 @@ export function PromptInputV2SubmitButton(props: {
   return (
     <>
       <ElapsedTimer active={props.stopping} />
-    <TooltipV2
-      placement="top"
-      inactive={!props.stopping && props.disabled}
-      value={props.stopping ? props.stopLabel : props.sendLabel}
-    >
-      <IconButton
-        data-action="prompt-submit"
-        type="button"
-        disabled={!props.stopping && props.disabled}
-        tabIndex={props.mode === "normal" ? undefined : -1}
-        icon={props.stopping ? "stop" : props.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
-        variant="primary"
-        class="size-7 rounded-md p-[6px] text-v2-icon-icon-muted shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
-        style={{
-          "background-image":
-            "linear-gradient(180deg,var(--v2-alpha-light-20) 0%,var(--v2-alpha-light-0) 100%),linear-gradient(90deg,var(--v2-background-bg-contrast) 0%,var(--v2-background-bg-contrast) 100%)",
-        }}
-        aria-label={props.stopping ? props.stopLabel : props.sendLabel}
-        onClick={(event) => {
-          event.preventDefault()
-          event.stopPropagation()
-          if (props.stopping) {
-            props.onStop()
-            return
-          }
-          props.onSubmit()
-        }}
-      />
-    </TooltipV2>
+      <TooltipV2
+        placement="top"
+        inactive={!props.stopping && props.disabled}
+        value={props.stopping ? props.stopLabel : props.sendLabel}
+      >
+        <IconButton
+          data-action="prompt-submit"
+          type="button"
+          disabled={!props.stopping && props.disabled}
+          tabIndex={props.mode === "normal" ? undefined : -1}
+          icon={props.stopping ? "stop" : props.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
+          variant="primary"
+          class="size-7 rounded-md p-[6px] text-v2-icon-icon-muted shadow-[var(--v2-elevation-button-contrast)] disabled:opacity-50"
+          style={{
+            "background-image":
+              "linear-gradient(180deg,var(--v2-alpha-light-20) 0%,var(--v2-alpha-light-0) 100%),linear-gradient(90deg,var(--v2-background-bg-contrast) 0%,var(--v2-background-bg-contrast) 100%)",
+          }}
+          aria-label={props.stopping ? props.stopLabel : props.sendLabel}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            if (props.stopping) {
+              props.onStop()
+              return
+            }
+            props.onSubmit()
+          }}
+        />
+      </TooltipV2>
     </>
   )
 }

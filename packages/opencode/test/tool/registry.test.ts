@@ -20,6 +20,8 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { MCP } from "@/mcp"
+import { Permission } from "@/permission"
+import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import type { Tool as MCPToolDef } from "@modelcontextprotocol/sdk/types.js"
 
 const configLayer = TestConfig.layer({
@@ -94,6 +96,28 @@ const withEmptyCodeMode = testEffect(
   ]),
 )
 const withBrokenPlugin = testEffect(LayerNode.compile(root, [...replacements, [Plugin.node, brokenPluginLayer]]))
+const forClient = (client: string) =>
+  testEffect(
+    LayerNode.compile(root, [
+      [Config.node, configLayer],
+      [RuntimeFlags.node, RuntimeFlags.layer({ client })],
+    ]),
+  )
+const desktop = forClient("desktop")
+const acp = forClient("acp")
+
+const promptToolIDs = (input: { mode?: Permission.Mode; child?: boolean }) =>
+  Effect.gen(function* () {
+    const registry = yield* ToolRegistry.Service
+    const agents = yield* Agent.Service
+    const tools = yield* registry.tools({
+      providerID: ProviderV2.ID.opencode,
+      modelID: ModelV2.ID.make("test"),
+      agent: yield* agents.defaultInfo(),
+      ...input,
+    })
+    return tools.map((tool) => tool.id)
+  })
 
 afterEach(async () => {
   await disposeAllInstances()
@@ -147,6 +171,35 @@ describe("tool.registry", () => {
       })
 
       expect(tools.map((tool) => tool.id)).not.toContain("execute")
+    }),
+  )
+
+  desktop.instance("offers plan_exit only in plan mode on a root session, without the experimental flag", () =>
+    Effect.gen(function* () {
+      expect(yield* promptToolIDs({ mode: "plan" })).toContain("plan_exit")
+      expect(yield* promptToolIDs({ mode: "plan", child: false })).toContain("plan_exit")
+      expect(yield* promptToolIDs({ mode: "default" })).not.toContain("plan_exit")
+      expect(yield* promptToolIDs({ mode: "acceptEdits" })).not.toContain("plan_exit")
+      expect(yield* promptToolIDs({})).not.toContain("plan_exit")
+      expect(yield* promptToolIDs({ mode: "plan", child: true })).not.toContain("plan_exit")
+    }),
+  )
+
+  desktop.instance("hides question and plan_exit in dontAsk mode", () =>
+    Effect.gen(function* () {
+      expect(yield* promptToolIDs({ mode: "default" })).toContain("question")
+      expect(yield* promptToolIDs({ mode: "plan" })).toContain("question")
+      const ids = yield* promptToolIDs({ mode: "dontAsk" })
+      expect(ids).not.toContain("question")
+      expect(ids).not.toContain("plan_exit")
+    }),
+  )
+
+  acp.instance("does not offer plan_exit to clients without the question tool", () =>
+    Effect.gen(function* () {
+      const ids = yield* promptToolIDs({ mode: "plan" })
+      expect(ids).not.toContain("plan_exit")
+      expect(ids).not.toContain("question")
     }),
   )
 
@@ -459,6 +512,68 @@ describe("tool.registry", () => {
       expect(result.attachments).toEqual([
         { type: "file", mime: "image/png", filename: "picture.png", url: "data:image/png;base64,AAAA" },
       ])
+    }),
+  )
+
+  it.instance("a custom tool asks through the permission check, which prompts only when a configured rule asks", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const customTools = path.join(test.directory, ".opencode", "tools")
+      const pluginTool = pathToFileURL(path.resolve(import.meta.dir, "../../../plugin/src/tool.ts")).href
+      yield* Effect.promise(() => fs.mkdir(customTools, { recursive: true }))
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(customTools, "deploy.ts"),
+          [
+            `import { tool } from ${JSON.stringify(pluginTool)}`,
+            "export default tool({ description: 'deploy', args: {}, execute: async () => 'deployed' })",
+            "",
+          ].join("\n"),
+        ),
+      )
+
+      const registry = yield* ToolRegistry.Service
+      const loaded = (yield* registry.all()).find((tool) => tool.id === "deploy")
+      if (!loaded) throw new Error("custom deploy tool was not loaded")
+      const agents = yield* Agent.Service
+      const asks: Array<Omit<PermissionV1.AskInput, "sessionID" | "ruleset">> = []
+      const result = yield* loaded.execute({}, {
+        sessionID: SessionID.make("ses_test"),
+        messageID: MessageID.make("msg_test"),
+        agent: "build",
+        abort: new AbortController().signal,
+        messages: [],
+        metadata: () => Effect.void,
+        ask: (req) => Effect.sync(() => void asks.push(req)),
+      } satisfies Tool.Context)
+      expect(result.output).toBe("deployed")
+      expect(asks).toHaveLength(1)
+      const ask = asks[0]
+      expect(ask.permission).toBe("deploy")
+
+      const build = yield* agents.get("build")
+      const decide = (rules: PermissionV1.Rule[], mode: Permission.Mode) =>
+        Permission.combine(
+          ask.patterns.map((pattern) =>
+            Permission.decide({
+              permission: ask.permission,
+              pattern,
+              hint: ask.hints?.find((item) => item.pattern === pattern),
+              rules,
+              mode,
+            }),
+          ),
+        ).action
+      // No rule for the tool: the built-in "*" ask does not prompt for it, in any mode.
+      expect(decide(build!.permission, "default")).toBe("allow")
+      expect(decide(build!.permission, "dontAsk")).toBe("allow")
+      // A configured ask prompts (and is denied in dontAsk); a configured deny denies even in bypassPermissions.
+      const asking = Permission.merge(build!.permission, Permission.fromConfig({ deploy: "ask" }))
+      expect(decide(asking, "default")).toBe("ask")
+      expect(decide(asking, "bypassPermissions")).toBe("ask")
+      expect(decide(asking, "dontAsk")).toBe("deny")
+      const denying = Permission.merge(build!.permission, Permission.fromConfig({ deploy: "deny" }))
+      expect(decide(denying, "bypassPermissions")).toBe("deny")
     }),
   )
 

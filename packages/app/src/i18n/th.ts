@@ -176,6 +176,10 @@ export const dict = {
   "command.prompt.mode.normal": "พรอมต์",
   "command.permissions.autoaccept.enable": "ยอมรับสิทธิ์โดยอัตโนมัติ",
   "command.permissions.autoaccept.disable": "หยุดยอมรับสิทธิ์โดยอัตโนมัติ",
+  "command.permissionMode.cycle": "สลับโหมดสิทธิ์",
+  "command.permissionMode.set": "โหมดสิทธิ์: {{mode}}",
+  "command.permissionMode.bypass": "ข้ามการขอสิทธิ์…",
+  "command.plan": "โหมดวางแผน",
   "command.workspace.toggle": "สลับพื้นที่ทำงาน",
   "command.workspace.toggle.description": "เปิดหรือปิดใช้งานพื้นที่ทำงานหลายรายการในแถบด้านข้าง",
   "command.session.undo": "เลิกทำ",
@@ -353,6 +357,18 @@ export const dict = {
   "prompt.mode.shell": "เชลล์",
   "prompt.mode.normal": "พรอมต์",
   "prompt.mode.shell.exit": "กด esc เพื่อออก",
+  "prompt.permissionMode.label": "โหมดสิทธิ์",
+  "prompt.permissionMode.default": "ถามเพื่อขอสิทธิ์",
+  "prompt.permissionMode.default.description": "ถามก่อนเรียกใช้คำสั่ง แก้ไข และเข้าถึงเว็บ",
+  "prompt.permissionMode.acceptEdits": "ยอมรับการแก้ไข",
+  "prompt.permissionMode.acceptEdits.description": "การแก้ไขในโปรเจกต์นี้ได้รับการอนุมัติ ส่วนคำสั่งยังคงต้องถาม",
+  "prompt.permissionMode.plan": "โหมดวางแผน",
+  "prompt.permissionMode.plan.description": "ค้นคว้าแบบอ่านอย่างเดียว แก้ไขได้เฉพาะไฟล์แผนเท่านั้น",
+  "prompt.permissionMode.bypassPermissions": "ข้ามการขอสิทธิ์",
+  "prompt.permissionMode.bypassPermissions.description":
+    "ทำงานโดยไม่ถาม ยกเว้นพาธที่ได้รับการป้องกัน การลบที่สำคัญ และกฎการถามของคุณ",
+  "prompt.permissionMode.dontAsk": "ไม่ต้องถาม",
+  "prompt.permissionMode.dontAsk.description": "สิ่งใดที่ต้องถามจะถูกปฏิเสธ",
   "session.child.promptDisabled": "ไม่สามารถส่งพรอมต์ในเซสชันเอเจนต์ย่อยได้",
   "session.child.backToParent": "กลับไปยังเซสชันหลัก",
 
@@ -414,6 +430,22 @@ export const dict = {
   "prompt.toast.commandSendFailed.title": "ไม่สามารถส่งคำสั่ง",
   "prompt.toast.promptSendFailed.title": "ไม่สามารถส่งพรอมต์",
   "prompt.toast.promptSendFailed.description": "ไม่สามารถดึงเซสชันได้",
+
+  "dialog.bypassPermissions.title": "ข้ามการขอสิทธิ์หรือไม่",
+  "dialog.bypassPermissions.body":
+    "เอเจนต์จะเรียกใช้คำสั่ง แก้ไขไฟล์ และเข้าถึงเว็บโดยไม่ถาม พาธที่ได้รับการป้องกัน (.git, การกำหนดค่าเอเจนต์, ไฟล์เริ่มต้นของเชลล์) การลบที่สำคัญ และกฎการถามของคุณเองจะยังคงถาม ส่วนกฎการปฏิเสธยังคงมีผล ใช้ตัวเลือกนี้เฉพาะในโปรเจกต์ที่คุณเชื่อถือเท่านั้น",
+  "dialog.bypassPermissions.confirm": "ข้ามการขอสิทธิ์",
+  "dialog.bypassPermissions.cancel": "ยกเลิก",
+
+  "ui.permission.always.project": "อนุญาตเสมอในโปรเจกต์นี้",
+  "ui.permission.always.session": "อนุญาตสำหรับเซสชันนี้",
+  "ui.permission.always.acceptEdits": "อนุญาตการแก้ไขทั้งหมด (ยอมรับการแก้ไข)",
+  "ui.permission.always.everything": "ทุกอย่างสำหรับเครื่องมือนี้",
+  "ui.permission.guard.floor.title": "การดำเนินการที่ได้รับการป้องกัน",
+  "ui.permission.guard.guard.title": "ต้องตรวจสอบ",
+  "ui.permission.guard.noAlways": "อนุมัติได้ครั้งเดียวเท่านั้น",
+  "ui.permission.writes": "เขียนไปยัง",
+  "ui.question.planFeedback.placeholder": "บอกเอเจนต์ว่าต้องการเปลี่ยนอะไรในแผน",
 
   "dialog.mcp.title": "MCPs",
   "dialog.mcp.description": "{{enabled}} จาก {{total}} ที่เปิดใช้งาน",
@@ -636,6 +668,15 @@ export const dict = {
   "toast.permissions.autoaccept.on.description": "คำขอสิทธิ์จะได้รับการอนุมัติโดยอัตโนมัติ",
   "toast.permissions.autoaccept.off.title": "หยุดยอมรับสิทธิ์โดยอัตโนมัติแล้ว",
   "toast.permissions.autoaccept.off.description": "คำขอสิทธิ์จะต้องได้รับการอนุมัติ",
+  "toast.permissions.modeMigrated.title": "การยอมรับอัตโนมัติเปลี่ยนเป็นยอมรับการแก้ไขแล้ว",
+  "toast.permissions.modeMigrated.description":
+    "การแก้ไขในโฟลเดอร์นี้จะได้รับการอนุมัติโดยอัตโนมัติ ส่วนคำสั่งยังคงต้องถาม เลือกข้ามการขอสิทธิ์ในช่องเขียนข้อความเพื่อให้ทำงานได้อย่างอิสระเต็มที่",
+  "toast.permissions.autoAcceptRemoved.title": "ปิดการยอมรับอัตโนมัติแล้ว",
+  "toast.permissions.autoAcceptRemoved.modes":
+    "คำขอสิทธิ์จะถามอีกครั้ง หากต้องการอนุมัติการแก้ไขโดยอัตโนมัติ ให้เลือกยอมรับการแก้ไขในเมนูโหมดข้างพรอมต์ หรือกด Shift+Tab",
+  "toast.permissions.autoAcceptRemoved.rules":
+    "คำขอสิทธิ์จะถามอีกครั้ง หากต้องการข้าม ให้อนุญาตเครื่องมือเหล่านั้นในการกำหนดค่าสิทธิ์ของเซิร์ฟเวอร์นี้",
+  "toast.permissions.mode.error.title": "ไม่สามารถเปลี่ยนโหมดสิทธิ์ได้",
 
   "toast.model.none.title": "ไม่ได้เลือกโมเดล",
   "toast.model.none.description": "เชื่อมต่อผู้ให้บริการเพื่อสรุปเซสชันนี้",
@@ -899,6 +940,8 @@ export const dict = {
 
   "settings.general.row.language.title": "ภาษา",
   "settings.general.row.language.description": "เปลี่ยนภาษาที่แสดงสำหรับ AgentCode",
+  "settings.general.permissionMode.title": "โหมดสิทธิ์เริ่มต้น",
+  "settings.general.permissionMode.description": "ใช้สำหรับเซสชันใหม่ในโฟลเดอร์นี้",
   "settings.general.row.shell.title": "เชลล์เทอร์มินัล",
   "settings.general.row.shell.description":
     "เลือกเชลล์ที่จะใช้กับเทอร์มินัล เชลล์ที่เข้ากันได้จะใช้สำหรับการเรียกเครื่องมือของเอเจนต์ด้วย",

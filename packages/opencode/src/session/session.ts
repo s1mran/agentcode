@@ -1,5 +1,6 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { PermissionMode } from "@/permission/mode"
 import { Slug } from "@opencode-ai/core/util/slug"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
@@ -38,7 +39,7 @@ import { SessionID, MessageID, PartID } from "./schema"
 
 import type { Provider } from "@/provider/provider"
 import { Global } from "@opencode-ai/core/global"
-import { Effect, Layer, Option, Context, Schema, Types } from "effect"
+import { Effect, Layer, Option, Context, Schema, Semaphore, Types } from "effect"
 import { NonNegativeInt, optional } from "@opencode-ai/core/schema"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -108,6 +109,9 @@ export function fromRow(row: SessionRow): Info {
     metadata: row.metadata ?? undefined,
     revert,
     permission: row.permission ? [...row.permission] : undefined,
+    // The column is plain text: a mode this build does not know (a newer build, a shared or edited database) is
+    // dropped so encoding the session never fails and the mode resolves as if unset.
+    permissionMode: isMode(row.permission_mode) ? row.permission_mode : undefined,
     time: {
       created: row.time_created,
       updated: row.time_updated,
@@ -150,12 +154,33 @@ export function toRow(info: Info) {
           diff: info.revert.diff,
         }
       : null,
-    permission: info.permission,
+    // toRow persists externally supplied sessions (import), so it never trusts a
+    // built-in rule tag or a bypassPermissions mode from the input.
+    permission: info.permission ? stripRuleSource(info.permission) : info.permission,
+    permission_mode: info.permissionMode === "bypassPermissions" ? null : (info.permissionMode ?? null),
     time_created: info.time.created,
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
     time_archived: info.time.archived,
   }
+}
+
+const isMode = Schema.is(PermissionV1.Mode)
+
+/**
+ * The mode a session effectively carries from its own chain (self first) for a copy that has no parent: plan and
+ * dontAsk carry down, and a descendant's stored mode only narrows its ancestor's. Undefined when nothing is stored,
+ * so the copy keeps following the config default. bypassPermissions is never copied.
+ */
+export function inheritedMode(chain: ReadonlyArray<{ permissionMode?: PermissionV1.Mode }>) {
+  if (chain.every((item) => item.permissionMode === undefined)) return undefined
+  const mode = PermissionMode.pick({ chain })
+  return mode === "bypassPermissions" ? undefined : mode
+}
+
+// Clients may not mark rules as built-in; only agent defaults carry source.
+export function stripRuleSource(rules: PermissionV1.Ruleset): PermissionV1.Rule[] {
+  return rules.map(({ permission, pattern, action }) => ({ permission, pattern, action }))
 }
 
 function getForkedTitle(title: string): string {
@@ -240,6 +265,7 @@ export const Info = Schema.Struct({
   metadata: optional(Metadata),
   time: Time,
   permission: optional(PermissionV1.Ruleset),
+  permissionMode: optional(PermissionV1.Mode),
   revert: optional(Revert),
 }).annotate({ identifier: "Session" })
 export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
@@ -265,6 +291,7 @@ export const CreateInput = Schema.optional(
     model: Schema.optional(Model),
     metadata: Schema.optional(Metadata),
     permission: Schema.optional(PermissionV1.Ruleset),
+    permissionMode: Schema.optional(PermissionV1.Mode),
     workspaceID: Schema.optional(WorkspaceV2.ID),
   }),
 )
@@ -420,6 +447,7 @@ export interface Interface {
     model?: Schema.Schema.Type<typeof Model>
     metadata?: typeof Metadata.Type
     permission?: PermissionV1.Ruleset
+    permissionMode?: PermissionV1.Mode
     workspaceID?: WorkspaceV2.ID
   }) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
@@ -435,6 +463,8 @@ export interface Interface {
     time: number
   }) => Effect.Effect<void>
   readonly setPermission: (input: { sessionID: SessionID; permission: PermissionV1.Ruleset }) => Effect.Effect<void>
+  /** Stores the session permission mode (null clears it). No gate: callers enforce bypassPermissions checks. */
+  readonly setPermissionMode: (input: { sessionID: SessionID; mode: PermissionV1.Mode | null }) => Effect.Effect<void>
   readonly setRevert: (input: {
     sessionID: SessionID
     revert: Info["revert"]
@@ -475,12 +505,13 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Se
 
 export const use = serviceUse(Service)
 
-export type Patch = Omit<Partial<Info>, "time" | "share" | "summary" | "revert" | "permission"> & {
+export type Patch = Omit<Partial<Info>, "time" | "share" | "summary" | "revert" | "permission" | "permissionMode"> & {
   time?: Partial<Info["time"]>
   share?: Partial<NonNullable<Info["share"]>> | null
   summary?: Info["summary"] | null
   revert?: Info["revert"] | null
   permission?: Info["permission"] | null
+  permissionMode?: PermissionV1.Mode | null
 }
 
 const layer: Layer.Layer<
@@ -507,6 +538,7 @@ const layer: Layer.Layer<
       path?: string
       metadata?: typeof Metadata.Type
       permission?: PermissionV1.Ruleset
+      permissionMode?: PermissionV1.Mode
     }) {
       const ctx = yield* InstanceState.context
       const result: Info = {
@@ -522,7 +554,9 @@ const layer: Layer.Layer<
         agent: input.agent,
         model: input.model,
         metadata: input.metadata,
-        permission: input.permission ? [...input.permission] : undefined,
+        permission: input.permission ? stripRuleSource(input.permission) : undefined,
+        // bypassPermissions can only be entered through the gated Permission.setMode.
+        permissionMode: input.permissionMode === "bypassPermissions" ? undefined : input.permissionMode,
         cost: 0,
         tokens: EmptyTokens,
         time: {
@@ -671,6 +705,7 @@ const layer: Layer.Layer<
       model?: Schema.Schema.Type<typeof Model>
       metadata?: typeof Metadata.Type
       permission?: PermissionV1.Ruleset
+      permissionMode?: PermissionV1.Mode
       workspaceID?: WorkspaceV2.ID
     }) {
       const ctx = yield* InstanceState.context
@@ -684,6 +719,7 @@ const layer: Layer.Layer<
         model: input?.model,
         metadata: input?.metadata,
         permission: input?.permission,
+        permissionMode: input?.permissionMode,
         workspaceID: input?.workspaceID ?? workspace,
       })
     })
@@ -692,12 +728,22 @@ const layer: Layer.Layer<
       const ctx = yield* InstanceState.context
       const original = yield* get(input.sessionID)
       const title = getForkedTitle(original.title)
+      // The fork has no parent, so it takes the mode the original inherited through its parents, not only its own.
+      const chain = [original]
+      let parentID = original.parentID
+      while (parentID && chain.length < PermissionMode.MAX_DEPTH && !chain.some((item) => item.id === parentID)) {
+        const parent = yield* get(parentID).pipe(Effect.option)
+        if (Option.isNone(parent)) break
+        chain.push(parent.value)
+        parentID = parent.value.parentID
+      }
       const session = yield* createNext({
         directory: ctx.directory,
         path: sessionPath(ctx.worktree, ctx.directory),
         workspaceID: original.workspaceID,
         title,
         metadata: structuredClone(original.metadata),
+        permissionMode: inheritedMode(chain),
       })
       const msgs = yield* messages({ sessionID: input.sessionID })
       const idMap = new Map<string, MessageID>()
@@ -731,6 +777,17 @@ const layer: Layer.Layer<
       return session
     })
 
+    // patch publishes a full-row snapshot, so two patches of one session must not interleave: a stale snapshot would
+    // write back an old permission mode (or title, summary) over a newer one.
+    const locks = new Map<string, Semaphore.Semaphore>()
+    const lock = (sessionID: SessionID) => {
+      const hit = locks.get(sessionID)
+      if (hit) return hit
+      const next = Semaphore.makeUnsafe(1)
+      locks.set(sessionID, next)
+      return next
+    }
+
     const patch = (sessionID: SessionID, info: Patch) =>
       Effect.gen(function* () {
         const current = yield* get(sessionID)
@@ -742,9 +799,10 @@ const layer: Layer.Layer<
           summary: info.summary === null ? undefined : (info.summary ?? current.summary),
           revert: info.revert === null ? undefined : (info.revert ?? current.revert),
           permission: info.permission === null ? undefined : (info.permission ?? current.permission),
+          permissionMode: info.permissionMode === null ? undefined : (info.permissionMode ?? current.permissionMode),
         } as Info
         yield* events.publish(SessionV1.Event.Updated, { sessionID, info: next })
-      })
+      }).pipe(lock(sessionID).withPermits(1))
 
     const touch = Effect.fn("Session.touch")(function* (sessionID: SessionID) {
       yield* patch(sessionID, { time: { updated: Date.now() } }).pipe(Effect.orDie)
@@ -779,9 +837,17 @@ const layer: Layer.Layer<
       sessionID: SessionID
       permission: PermissionV1.Ruleset
     }) {
-      yield* patch(input.sessionID, { permission: [...input.permission], time: { updated: Date.now() } }).pipe(
-        Effect.orDie,
-      )
+      yield* patch(input.sessionID, {
+        permission: stripRuleSource(input.permission),
+        time: { updated: Date.now() },
+      }).pipe(Effect.orDie)
+    })
+
+    const setPermissionMode = Effect.fn("Session.setPermissionMode")(function* (input: {
+      sessionID: SessionID
+      mode: PermissionV1.Mode | null
+    }) {
+      yield* patch(input.sessionID, { permissionMode: input.mode, time: { updated: Date.now() } }).pipe(Effect.orDie)
     })
 
     const setRevert = Effect.fn("Session.setRevert")(function* (input: {
@@ -915,6 +981,7 @@ const layer: Layer.Layer<
       setMetadata,
       setAgentModel,
       setPermission,
+      setPermissionMode,
       setRevert,
       clearRevert,
       setSummary,

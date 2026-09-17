@@ -55,6 +55,30 @@ export const Info = Schema.Struct({
 }).annotate({ identifier: "Agent" })
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
 
+// Documentation hosts webfetch may read without asking. Every other host asks by default.
+export const WEBFETCH_PREAPPROVED = [
+  "docs.github.com",
+  "developer.mozilla.org",
+  "nodejs.org",
+  "docs.python.org",
+  "go.dev",
+  "pkg.go.dev",
+  "doc.rust-lang.org",
+  "docs.rs",
+  "react.dev",
+  "www.typescriptlang.org",
+  "learn.microsoft.com",
+  "bun.sh",
+  "effect.website",
+  "code.claude.com",
+  "docs.anthropic.com",
+] as const
+
+// Tag engine-defined rules so the permission check can tell built-in defaults (which modes may loosen)
+// apart from explicit user rules (which modes never override).
+const builtin = (rules: PermissionV1.Rule[]): PermissionV1.Rule[] =>
+  rules.map((rule) => ({ ...rule, source: "builtin" as const }))
+
 const GeneratedAgent = Schema.Struct({
   identifier: Schema.String,
   whenToUse: Schema.String,
@@ -115,25 +139,43 @@ const layer = Layer.effect(
           "*": "ask",
           ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
         } satisfies Record<string, "allow" | "ask" | "deny">
-
-        const defaults = Permission.fromConfig({
+        // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
+        const read = {
           "*": "allow",
-          doom_loop: "ask",
-          external_directory: {
+          "*.env": "ask",
+          "*.env.*": "ask",
+          "*.env.example": "allow",
+        } satisfies Record<string, "allow" | "ask" | "deny">
+        const webfetch = {
+          "*": "ask",
+          ...Object.fromEntries(WEBFETCH_PREAPPROVED.map((host) => [host, "allow"])),
+        } satisfies Record<string, "allow" | "ask" | "deny">
+
+        // Claude Code-style defaults: reads and navigation run silently, anything that changes the machine or
+        // reaches the network asks. The "*" ask also covers MCP tools, workflow approvals and unknown plugin
+        // permissions.
+        const defaults = builtin(
+          Permission.fromConfig({
             "*": "ask",
-            ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
-          },
-          question: "deny",
-          plan_enter: "deny",
-          plan_exit: "deny",
-          // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
-          read: {
-            "*": "allow",
-            "*.env": "ask",
-            "*.env.*": "ask",
-            "*.env.example": "allow",
-          },
-        })
+            read,
+            glob: "allow",
+            grep: "allow",
+            list: "allow",
+            lsp: "allow",
+            task: "allow",
+            skill: "allow",
+            todowrite: "allow",
+            bash: "ask",
+            edit: "ask",
+            websearch: "ask",
+            doom_loop: "ask",
+            webfetch,
+            external_directory: readonlyExternalDirectory,
+            question: "deny",
+            plan_enter: "deny",
+            plan_exit: "deny",
+          }),
+        )
 
         const user = Permission.fromConfig(cfg.permission ?? {})
 
@@ -144,10 +186,12 @@ const layer = Layer.effect(
             options: {},
             permission: Permission.merge(
               defaults,
-              Permission.fromConfig({
-                question: "allow",
-                plan_enter: "allow",
-              }),
+              builtin(
+                Permission.fromConfig({
+                  question: "allow",
+                  plan_enter: "allow",
+                }),
+              ),
               user,
             ),
             mode: "primary",
@@ -159,21 +203,20 @@ const layer = Layer.effect(
             options: {},
             permission: Permission.merge(
               defaults,
-              Permission.fromConfig({
-                question: "allow",
-                plan_exit: "allow",
-                task: {
-                  general: "deny",
-                },
-                external_directory: {
-                  [path.join(Global.Path.data, "plans", "*")]: "allow",
-                },
-                edit: {
-                  "*": "deny",
-                  [path.join(".opencode", "plans", "*.md")]: "allow",
-                  [path.relative(ctx.worktree, path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
-                },
-              }),
+              builtin(
+                Permission.fromConfig({
+                  question: "allow",
+                  plan_exit: "allow",
+                  external_directory: {
+                    [path.join(Global.Path.data, "plans", "*")]: "allow",
+                  },
+                  edit: {
+                    "*": "deny",
+                    [path.join(".opencode", "plans", "*.md")]: "allow",
+                    [path.relative(ctx.worktree, path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
+                  },
+                }),
+              ),
               user,
             ),
             mode: "primary",
@@ -184,9 +227,11 @@ const layer = Layer.effect(
             description: `General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.`,
             permission: Permission.merge(
               defaults,
-              Permission.fromConfig({
-                todowrite: "deny",
-              }),
+              builtin(
+                Permission.fromConfig({
+                  todowrite: "deny",
+                }),
+              ),
               user,
             ),
             options: {},
@@ -197,17 +242,21 @@ const layer = Layer.effect(
             name: "explore",
             permission: Permission.merge(
               defaults,
-              Permission.fromConfig({
-                "*": "deny",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-                bash: "allow",
-                webfetch: "allow",
-                websearch: "allow",
-                read: "allow",
-                external_directory: readonlyExternalDirectory,
-              }),
+              builtin(
+                Permission.fromConfig({
+                  "*": "deny",
+                  grep: "allow",
+                  glob: "allow",
+                  list: "allow",
+                  bash: "ask",
+                  // keep the preapproved docs hosts silent here too
+                  webfetch,
+                  websearch: "ask",
+                  // same .env asks as every other agent, so delegating to explore cannot read secrets silently
+                  read,
+                  external_directory: readonlyExternalDirectory,
+                }),
+              ),
               user,
             ),
             description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
@@ -224,9 +273,11 @@ const layer = Layer.effect(
             prompt: PROMPT_COMPACTION,
             permission: Permission.merge(
               defaults,
-              Permission.fromConfig({
-                "*": "deny",
-              }),
+              builtin(
+                Permission.fromConfig({
+                  "*": "deny",
+                }),
+              ),
               user,
             ),
             options: {},
@@ -240,9 +291,11 @@ const layer = Layer.effect(
             temperature: 0.5,
             permission: Permission.merge(
               defaults,
-              Permission.fromConfig({
-                "*": "deny",
-              }),
+              builtin(
+                Permission.fromConfig({
+                  "*": "deny",
+                }),
+              ),
               user,
             ),
             prompt: PROMPT_TITLE,
@@ -255,9 +308,11 @@ const layer = Layer.effect(
             hidden: true,
             permission: Permission.merge(
               defaults,
-              Permission.fromConfig({
-                "*": "deny",
-              }),
+              builtin(
+                Permission.fromConfig({
+                  "*": "deny",
+                }),
+              ),
               user,
             ),
             prompt: PROMPT_SUMMARY,
@@ -305,7 +360,7 @@ const layer = Layer.effect(
 
           agents[name].permission = Permission.merge(
             agents[name].permission,
-            Permission.fromConfig({ external_directory: { [Truncate.GLOB]: "allow" } }),
+            builtin(Permission.fromConfig({ external_directory: { [Truncate.GLOB]: "allow" } })),
           )
         }
 

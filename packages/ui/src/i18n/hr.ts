@@ -126,6 +126,7 @@ export const dict: Record<string, string> = {
   "ui.promptInput.attachments": "Slike i datoteke",
   "ui.promptInput.context": "Kontekst",
   "ui.promptInput.shell": "Naredba ljuske",
+  "ui.promptInput.chooseMode": "Način dopuštenja",
   "ui.promptInput.chooseAgent": "Odaberite agenta",
   "ui.promptInput.chooseModel": "Odaberite model",
   "ui.promptInput.chooseVariant": "Odaberite varijantu modela",

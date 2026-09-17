@@ -275,6 +275,27 @@ describe("PublicApi OpenAPI v2 errors", () => {
     }
   })
 
+  test("documents session permission mode refusals and the nullable PATCH mode", () => {
+    const spec = OpenApi.fromApi(PublicApi) as OpenApiSpec
+
+    for (const route of [
+      ["post", "/session"],
+      ["patch", "/session/{sessionID}"],
+    ] as const) {
+      expect(componentNames(spec.paths[route[1]]?.[route[0]]?.responses?.["400"])).toContain(
+        "PermissionModeRejectedError",
+      )
+    }
+    expect(spec.components.schemas.PermissionModeRejectedError?.properties?.name?.enum).toEqual(["BadRequest"])
+    const body = spec.paths["/session/{sessionID}"]?.patch?.requestBody as
+      | { content?: Record<string, { schema?: OpenApiSchema }> }
+      | undefined
+    expect(body?.content?.["application/json"]?.schema?.properties?.permissionMode?.anyOf).toEqual([
+      { $ref: "#/components/schemas/PermissionMode" },
+      { type: "null" },
+    ])
+  })
+
   test("documents permission and question not-found errors", () => {
     const spec = OpenApi.fromApi(PublicApi) as OpenApiSpec
 

@@ -131,6 +131,16 @@ export class QuestionNotFoundError extends Schema.TaggedErrorClass<QuestionNotFo
   { httpApiStatus: 404 },
 ) {}
 
+/** An answer a pending question does not accept; the question stays pending so a corrected answer can be sent. */
+export class QuestionInvalidAnswerError extends Schema.TaggedErrorClass<QuestionInvalidAnswerError>()(
+  "QuestionInvalidAnswerError",
+  {
+    requestID: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 400 },
+) {}
+
 export class PermissionNotFoundError extends Schema.TaggedErrorClass<PermissionNotFoundError>()(
   "PermissionNotFoundError",
   {

@@ -123,6 +123,7 @@ import type {
   PathGetResponses,
   PermissionListErrors,
   PermissionListResponses,
+  PermissionMode,
   PermissionReplyErrors,
   PermissionReplyResponses,
   PermissionRespondErrors,
@@ -3423,6 +3424,7 @@ export class Session2 extends HeyApiClient {
         [key: string]: unknown
       }
       permission?: PermissionRuleset
+      permissionMode?: PermissionMode
       workspaceID?: string
     },
     options?: Options<never, ThrowOnError>,
@@ -3440,6 +3442,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "model" },
             { in: "body", key: "metadata" },
             { in: "body", key: "permission" },
+            { in: "body", key: "permissionMode" },
             { in: "body", key: "workspaceID" },
           ],
         },
@@ -3566,6 +3569,7 @@ export class Session2 extends HeyApiClient {
         [key: string]: unknown
       }
       permission?: PermissionRuleset
+      permissionMode?: PermissionMode | null
       time?: {
         archived?: number
       }
@@ -3583,6 +3587,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "title" },
             { in: "body", key: "metadata" },
             { in: "body", key: "permission" },
+            { in: "body", key: "permissionMode" },
             { in: "body", key: "time" },
           ],
         },
@@ -3757,6 +3762,7 @@ export class Session2 extends HeyApiClient {
       format?: OutputFormat
       system?: string
       variant?: string
+      permissionMode?: PermissionMode
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,
@@ -3777,6 +3783,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "format" },
             { in: "body", key: "system" },
             { in: "body", key: "variant" },
+            { in: "body", key: "permissionMode" },
             { in: "body", key: "parts" },
           ],
         },
@@ -4110,6 +4117,7 @@ export class Session2 extends HeyApiClient {
       format?: OutputFormat
       system?: string
       variant?: string
+      permissionMode?: PermissionMode
       parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
     },
     options?: Options<never, ThrowOnError>,
@@ -4130,6 +4138,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "format" },
             { in: "body", key: "system" },
             { in: "body", key: "variant" },
+            { in: "body", key: "permissionMode" },
             { in: "body", key: "parts" },
           ],
         },
@@ -4163,6 +4172,7 @@ export class Session2 extends HeyApiClient {
       arguments?: string
       command?: string
       variant?: string
+      permissionMode?: PermissionMode
       parts?: Array<{
         id?: string
         type: "file"
@@ -4188,6 +4198,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "arguments" },
             { in: "body", key: "command" },
             { in: "body", key: "variant" },
+            { in: "body", key: "permissionMode" },
             { in: "body", key: "parts" },
           ],
         },
@@ -4222,6 +4233,7 @@ export class Session2 extends HeyApiClient {
         modelID: string
       }
       command?: string
+      permissionMode?: PermissionMode
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -4237,6 +4249,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "agent" },
             { in: "body", key: "model" },
             { in: "body", key: "command" },
+            { in: "body", key: "permissionMode" },
           ],
         },
       ],

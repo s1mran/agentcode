@@ -11,6 +11,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_INITIALIZE_AGENTS from "./template/initialize-agents.txt"
 import PROMPT_REVIEW from "./template/review.txt"
+import PROMPT_PLAN_COMMAND from "./template/plan.txt"
 import { LegacyEvent } from "@opencode-ai/schema/legacy-event"
 
 type State = {
@@ -48,7 +49,19 @@ export function hints(template: string) {
 export const Default = {
   INIT: "init",
   REVIEW: "review",
+  PLAN: "plan",
 } as const
+
+/** The prompt the built-in /plan command sends when it is run without arguments. */
+export const PLAN_BLANK_PROMPT = "Plan mode is on. Ask the user what they want to plan."
+
+// Built-in commands the session handles itself; a user command, MCP prompt or skill with the same name replaces them.
+const builtins = new WeakSet<Info>()
+
+/** Whether the command is the built-in /plan, which turns on plan mode, and not a user command named plan. */
+export function isBuiltinPlan(command: Info) {
+  return command.name === Default.PLAN && builtins.has(command)
+}
 
 export interface Interface {
   readonly get: (name: string) => Effect.Effect<Info | undefined>
@@ -157,6 +170,19 @@ const layer = Layer.effect(
           },
           hints: [],
         }
+      }
+
+      if (!commands[Default.PLAN]) {
+        const plan: Info = {
+          name: Default.PLAN,
+          description: "Plan before changing anything (read-only until you approve the plan)",
+          agent: "plan",
+          source: "command",
+          template: PROMPT_PLAN_COMMAND,
+          hints: hints(PROMPT_PLAN_COMMAND),
+        }
+        builtins.add(plan)
+        commands[Default.PLAN] = plan
       }
 
       return {

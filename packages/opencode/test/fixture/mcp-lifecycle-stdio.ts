@@ -16,7 +16,10 @@ server.setRequestHandler(ListToolsRequestSchema, () =>
     tools: [
       {
         name: "current_directory",
-        description: process.cwd(),
+        // --env reports the permission mode the server inherited instead of its working directory.
+        description: process.argv.includes("--env")
+          ? JSON.stringify({ mode: process.env.OPENCODE_PERMISSION_MODE ?? null })
+          : process.cwd(),
         inputSchema: { type: "object", properties: {} },
       },
     ],

@@ -9,6 +9,7 @@ import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { useUpdaterAction } from "../updater-action"
 import { useSettings } from "@/context/settings"
+import { modeLabelKey } from "@/context/permission-mode"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import { LayoutRetirementNotice, LayoutTransitionToggle } from "./interface-transition"
@@ -72,16 +73,20 @@ const PermissionScopeSetting: Component<{ controller: PermissionScopeController 
   const language = useLanguage()
   return (
     <SettingsRowV2
-      title={language.t("command.permissions.autoaccept.enable")}
-      description={language.t("toast.permissions.autoaccept.on.description")}
+      title={language.t("settings.general.permissionMode.title")}
+      description={language.t("settings.general.permissionMode.description")}
     >
-      <div data-action="settings-auto-accept-permissions">
-        <Switch
-          checked={props.controller.accepting()}
-          disabled={!props.controller.enabled()}
-          onChange={props.controller.set}
-        />
-      </div>
+      <SelectV2
+        appearance="inline"
+        data-action="settings-default-permission-mode"
+        options={props.controller.options()}
+        current={props.controller.options().find((option) => option === props.controller.value())}
+        placement="bottom-end"
+        gutter={6}
+        label={(option) => language.t(modeLabelKey(option))}
+        disabled={!props.controller.enabled()}
+        onSelect={(option) => option && props.controller.set(option)}
+      />
     </SettingsRowV2>
   )
 }

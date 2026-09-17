@@ -5,6 +5,9 @@ Plan mode is active. The user indicated that they do not want you to execute yet
 ${planInfo}
 You should build your plan incrementally by writing to or editing this file. NOTE that this is the only file you are allowed to edit - other than this you are only allowed to take READ-ONLY actions.
 
+## Shell Commands
+Read-only shell commands (for example ls, cat, grep, find, git status, git diff and git log) run without approval. Any other command needs the user's approval in plan mode, even when a rule would normally allow it. Only run commands that inspect the system; never use the shell to write, move or delete files.
+
 ## Plan Workflow
 
 ### Phase 1: Initial Understanding
@@ -23,12 +26,12 @@ Goal: Gain a comprehensive understanding of the user's request by reading throug
 ### Phase 2: Design
 Goal: Design an implementation approach.
 
-Launch general agent(s) to design the implementation based on the user's intent and your exploration results from Phase 1.
+Launch general agent(s) to pressure-test the design based on the user's intent and your exploration results from Phase 1. Subagents run read-only in plan mode, so they can review and suggest but cannot change anything.
 
 You can launch up to 1 agent(s) in parallel.
 
 **Guidelines:**
-- **Default**: Launch at least 1 Plan agent for most tasks - it helps validate your understanding and consider alternatives
+- **Default**: Launch at least 1 general agent for most tasks - it helps validate your understanding and consider alternatives
 - **Skip agents**: Only for truly trivial tasks (typo fixes, single-line changes, simple renames)
 
 Examples of when to use multiple agents:
@@ -45,12 +48,12 @@ Example perspectives by task type:
 In the agent prompt:
 - Provide comprehensive background context from Phase 1 exploration including filenames and code path traces
 - Describe requirements and constraints
-- Request a detailed implementation plan
+- Ask for a critique of the proposed approach and a detailed implementation plan
 
 ### Phase 3: Review
-Goal: Review the plan(s) from Phase 2 and ensure alignment with the user's intentions.
+Goal: Review the feedback from Phase 2 and ensure alignment with the user's intentions.
 1. Read the critical files identified by agents to deepen your understanding
-2. Ensure that the plans align with the user's original request
+2. Ensure that the plan aligns with the user's original request
 3. Use question tool to clarify any remaining questions with the user
 
 ### Phase 4: Final Plan
@@ -60,11 +63,11 @@ Goal: Write your final plan to the plan file (the only file you can edit).
 - Include the paths of critical files to be modified
 - Include a verification section describing how to test the changes end-to-end (run the code, use MCP tools, run tests)
 
-### Phase 5: Call plan_exit tool
-At the very end of your turn, once you have asked the user questions and are happy with your final plan file - you should always call plan_exit to indicate to the user that you are done planning.
-This is critical - your turn should only end with either asking the user a question or calling plan_exit. Do not stop unless it's for these 2 reasons.
+### Phase 5: Finish
+At the very end of your turn, once you have asked the user questions and are happy with your final plan file, ${exitInfo}.
+This is critical - your turn should only end with either asking the user a question or finishing as described above. Do not stop for any other reason.
 
-**Important:** Use question tool to clarify requirements/approach, use plan_exit to request plan approval. Do NOT use question tool to ask "Is this plan okay?" - that's what plan_exit does.
+**Important:** Use question tool to clarify requirements/approach. Do NOT use question tool to ask "Is this plan okay?" or to request approval - finishing as described above is how the user reviews the plan.
 
 NOTE: At any point in time through this workflow you should feel free to ask the user questions or clarifications. Don't make large assumptions about user intent. The goal is to present a well researched plan to the user, and tie any loose ends before implementation begins.
 </system-reminder>

@@ -21,29 +21,24 @@ test("session settings use the remote server context", async ({ page }) => {
   await page.keyboard.press("Control+,")
 
   const dialog = page.locator(".settings-v2-dialog")
-  const autoAccept = dialog.locator('[data-action="settings-auto-accept-permissions"]')
-  const input = autoAccept.getByRole("switch")
-  await expect(autoAccept).toBeVisible()
-  await expect(input).toBeEnabled()
-  permissionRequests.length = 0
-  await autoAccept.locator('[data-slot="switch-control"]').click()
-  await expect(input).toBeChecked()
-  await expect
-    .poll(() =>
-      permissionRequests.some((request) => {
-        const url = new URL(request)
-        return url.origin === serverB && url.searchParams.get("directory") === directoryB
-      }),
-    )
-    .toBe(true)
-  expect(permissionRequests.every((request) => new URL(request).origin === serverB)).toBe(true)
+  const setting = dialog.locator('[data-action="settings-default-permission-mode"]')
+  const trigger = setting.locator('[data-component="select-v2"]')
+  await expect(trigger).toBeVisible()
+  await expect(trigger).not.toHaveAttribute("data-disabled", "")
+  await expect(trigger).toContainText("Ask permissions")
+  await trigger.click()
+  await page.getByRole("option", { name: "Plan mode" }).click()
+  await expect(trigger).toContainText("Plan mode")
+
+  // The folder default is stored for server B's folder only.
+  await expect.poll(() => storedFolderModes(page)).toEqual([{ folder: base64Encode(directoryB), mode: "plan" }])
 
   await dialog.getByRole("tab", { name: "Models" }).click()
   await expect(dialog.getByRole("switch", { name: "Server B Model" })).toBeEnabled()
   await expect(dialog.getByRole("switch", { name: "Server A Model" })).toHaveCount(0)
 })
 
-test("auto-accept responds for an unfocused server session", async ({ page }) => {
+test("permission requests on an unfocused server are shown, never auto-answered", async ({ page }) => {
   const permissionRequests: string[] = []
   const permissionResponses: PermissionResponse[] = []
   const transport = await installSseTransport<{ directory: string; payload: Record<string, unknown> }>(page, {
@@ -55,23 +50,14 @@ test("auto-accept responds for an unfocused server session", async ({ page }) =>
     { type: "session", server: serverA, sessionId: sessionA.id },
     { type: "session", server: serverB, sessionId: sessionB.id },
   ])
+  // An auto-accept switch saved by an older build for server A's folder must not approve anything any more.
+  await page.addInitScript((folder) => {
+    localStorage.setItem("opencode.global.dat:permission", JSON.stringify({ autoAccept: { [`${folder}/*`]: true } }))
+  }, base64Encode(directoryA))
 
   const hrefB = `/server/${base64Encode(serverB)}/session/${sessionB.id}`
   await page.goto(`/server/${base64Encode(serverA)}/session/${sessionA.id}`)
   await expect(page.getByText(sessionA.title).first()).toBeVisible()
-  await page.keyboard.press("Control+,")
-  const autoAccept = page.locator(".settings-v2-dialog").locator('[data-action="settings-auto-accept-permissions"]')
-  await autoAccept.locator('[data-slot="switch-control"]').click()
-  await expect(autoAccept.getByRole("switch")).toBeChecked()
-  await expect
-    .poll(() =>
-      permissionRequests.some((request) => {
-        const url = new URL(request)
-        return url.origin === serverA && url.searchParams.get("directory") === directoryA
-      }),
-    )
-    .toBe(true)
-  await page.keyboard.press("Escape")
 
   await page.locator(`[data-titlebar-tab-slot]:has(a[href="${hrefB}"])`).click()
   await expect(page).toHaveURL(new RegExp(`${hrefB.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`))
@@ -93,53 +79,25 @@ test("auto-accept responds for an unfocused server session", async ({ page }) =>
       },
     },
   })
-
-  await expect
-    .poll(() => permissionResponses)
-    .toEqual([
-      {
-        origin: serverA,
-        directory: directoryA,
-        sessionID: sessionA.id,
-        permissionID: "permission-background-a",
-        body: { response: "once" },
-      },
-    ])
-
   await transport.send({
     directory: directoryA,
     payload: {
-      id: "event-permission-background-a-child",
+      id: "event-permission-background-a-guard",
       type: "permission.asked",
       properties: {
-        id: "permission-background-a-child",
+        id: "permission-background-a-guard",
         sessionID: childSessionA.id,
         permission: "bash",
-        patterns: ["git diff"],
-        metadata: {},
+        patterns: ["git push --force origin main"],
+        metadata: { command: "git push --force origin main" },
         always: [],
+        guard: { level: "guard", category: "destructive_git", reason: "Force push rewrites shared history" },
       },
     },
   })
 
-  await expect
-    .poll(() => permissionResponses)
-    .toEqual([
-      {
-        origin: serverA,
-        directory: directoryA,
-        sessionID: sessionA.id,
-        permissionID: "permission-background-a",
-        body: { response: "once" },
-      },
-      {
-        origin: serverA,
-        directory: directoryA,
-        sessionID: childSessionA.id,
-        permissionID: "permission-background-a-child",
-        body: { response: "once" },
-      },
-    ])
+  await page.waitForTimeout(1_000)
+  expect(permissionResponses).toEqual([])
 })
 
 type PermissionResponse = {
@@ -148,6 +106,28 @@ type PermissionResponse = {
   sessionID: string
   permissionID: string
   body: unknown
+}
+
+async function storedFolderModes(page: Page) {
+  return page.evaluate(() => {
+    const result: { folder: string; mode: string }[] = []
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index)
+      if (!key?.includes("permission-mode")) continue
+      const parsed = (() => {
+        try {
+          return JSON.parse(localStorage.getItem(key) ?? "null") as unknown
+        } catch {
+          return undefined
+        }
+      })()
+      const value = typeof parsed === "string" ? (JSON.parse(parsed) as unknown) : parsed
+      if (!value || typeof value !== "object" || !("folder" in value)) continue
+      const folder = (value as { folder?: Record<string, string> }).folder ?? {}
+      for (const [name, mode] of Object.entries(folder)) result.push({ folder: name, mode })
+    }
+    return result
+  })
 }
 
 async function configureServers(page: Page, tabs: { type: "session"; server: string; sessionId: string }[] = []) {
@@ -183,7 +163,7 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
     if (requestDirectory && requestDirectory !== directory) return json(route, { name: "InvalidDirectory" }, 500)
     if (url.pathname === "/global/event" || url.pathname === "/event" || url.pathname === "/api/event")
       return sse(route)
-    if (url.pathname === "/global/health") return json(route, { healthy: true })
+    if (url.pathname === "/global/health") return json(route, { healthy: true, permissionModes: true })
     if (url.pathname === "/api/provider" || url.pathname === "/api/model" || url.pathname === "/api/agent")
       return json(route, { data: [] })
     if (url.pathname === "/api/model/default") return json(route, { data: null })
@@ -205,7 +185,8 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
     }
     if (url.pathname === "/api/project/current")
       return json(route, { id: remote ? sessionB.projectID : "project-server-a", directory })
-    if (url.pathname === "/api/session") return json(route, { data: sessions.map(currentSession), cursor: {} })
+    if (url.pathname === "/api/session")
+      return json(route, { data: sessions.map((item) => currentSession(item)), cursor: {} })
     if (url.pathname === "/api/session/active") return json(route, { data: {} })
     const currentSessionInfo = sessions.find((session) => url.pathname === `/api/session/${session.id}`)
     if (currentSessionInfo) return json(route, { data: currentSession(currentSessionInfo) })

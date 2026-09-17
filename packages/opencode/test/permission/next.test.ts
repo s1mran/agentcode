@@ -128,9 +128,9 @@ test("fromConfig - does not expand tilde in middle of path", () => {
   expect(result).toEqual([{ permission: "external_directory", pattern: "/some/~/path", action: "allow" }])
 })
 
-// Permission precedence follows config insertion order. `evaluate()` uses the
-// last matching rule, so later config entries intentionally override earlier
-// entries even when a wildcard appears after a specific permission.
+// Config insertion order is preserved. Precedence is tiered (D3): explicit denies always win, a specific pattern
+// refines a tool-level rule, and the user "*" catch-all only applies when no explicit rule for the tool matches, so a
+// tool-level rule beats a catch-all wherever it appears.
 
 test("fromConfig - preserves top-level config key order", () => {
   const wildcardFirst = Permission.fromConfig({ "*": "deny", bash: "allow" })
@@ -140,7 +140,8 @@ test("fromConfig - preserves top-level config key order", () => {
   expect(specificFirst.map((r) => r.permission)).toEqual(["bash", "*"])
 
   expect(Permission.evaluate("bash", "ls", wildcardFirst).action).toBe("allow")
-  expect(Permission.evaluate("bash", "ls", specificFirst).action).toBe("deny")
+  expect(Permission.evaluate("bash", "ls", specificFirst).action).toBe("allow")
+  expect(Permission.evaluate("edit", "foo.ts", specificFirst).action).toBe("deny")
 })
 
 test("fromConfig - wildcard acts as fallback when it appears before specifics", () => {
@@ -163,7 +164,8 @@ test("fromConfig - sub-pattern insertion order inside a tool key is preserved", 
   const ruleset = Permission.fromConfig({ bash: { "*": "deny", "git *": "allow" } })
   expect(ruleset.map((r) => r.pattern)).toEqual(["*", "git *"])
   expect(Permission.evaluate("bash", "rm foo", ruleset).action).toBe("deny")
-  expect(Permission.evaluate("bash", "git status", ruleset).action).toBe("allow")
+  // A tool-level deny is absolute: specific allows under it never apply.
+  expect(Permission.evaluate("bash", "git status", ruleset).action).toBe("deny")
 })
 
 test("fromConfig - documented fallback-first example", () => {
@@ -295,12 +297,12 @@ test("evaluate - last matching rule wins", () => {
   expect(result.action).toBe("deny")
 })
 
-test("evaluate - last matching rule wins (wildcard after specific)", () => {
+test("evaluate - explicit deny wins over a later wildcard allow", () => {
   const result = Permission.evaluate("bash", "rm", [
     { permission: "bash", pattern: "rm", action: "deny" },
     { permission: "bash", pattern: "*", action: "allow" },
   ])
-  expect(result.action).toBe("allow")
+  expect(result.action).toBe("deny")
 })
 
 test("evaluate - glob pattern match", () => {
@@ -308,12 +310,12 @@ test("evaluate - glob pattern match", () => {
   expect(result.action).toBe("allow")
 })
 
-test("evaluate - last matching glob wins", () => {
+test("evaluate - matching glob deny wins over a later narrower allow", () => {
   const result = Permission.evaluate("edit", "src/components/Button.tsx", [
     { permission: "edit", pattern: "src/*", action: "deny" },
     { permission: "edit", pattern: "src/components/*", action: "allow" },
   ])
-  expect(result.action).toBe("allow")
+  expect(result.action).toBe("deny")
 })
 
 test("evaluate - order matters for specificity", () => {
@@ -372,12 +374,12 @@ test("evaluate - exact match at end wins over earlier wildcard", () => {
   expect(result.action).toBe("deny")
 })
 
-test("evaluate - wildcard at end overrides earlier exact match", () => {
+test("evaluate - wildcard allow at end does not override earlier exact deny", () => {
   const result = Permission.evaluate("bash", "/bin/rm", [
     { permission: "bash", pattern: "/bin/rm", action: "deny" },
     { permission: "bash", pattern: "*", action: "allow" },
   ])
-  expect(result.action).toBe("allow")
+  expect(result.action).toBe("deny")
 })
 
 // wildcard permission tests
@@ -432,12 +434,12 @@ test("evaluate - wildcard permission fallback for unknown tool", () => {
   expect(result.action).toBe("ask")
 })
 
-test("evaluate - later wildcard permission can override earlier specific permission", () => {
+test("evaluate - later catch-all permission does not override a tool-level rule", () => {
   const result = Permission.evaluate("bash", "rm", [
     { permission: "bash", pattern: "*", action: "allow" },
     { permission: "*", pattern: "*", action: "deny" },
   ])
-  expect(result.action).toBe("deny")
+  expect(result.action).toBe("allow")
 })
 
 test("evaluate - merges multiple rulesets", () => {
@@ -497,7 +499,7 @@ test("disabled - does not disable when action is ask", () => {
   expect(result.size).toBe(0)
 })
 
-test("disabled - does not disable when specific allow after wildcard deny", () => {
+test("disabled - disables when a tool-level deny exists even with a later specific allow", () => {
   const result = Permission.disabled(
     ["bash"],
     [
@@ -505,7 +507,7 @@ test("disabled - does not disable when specific allow after wildcard deny", () =
       { permission: "bash", pattern: "echo *", action: "allow" },
     ],
   )
-  expect(result.has("bash")).toBe(false)
+  expect(result.has("bash")).toBe(true)
 })
 
 test("disabled - does not disable when wildcard allow after deny", () => {

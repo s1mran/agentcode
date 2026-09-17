@@ -125,6 +125,7 @@ export const dict = {
   "ui.promptInput.attachments": "画像とファイル",
   "ui.promptInput.context": "コンテキスト",
   "ui.promptInput.shell": "シェルコマンド",
+  "ui.promptInput.chooseMode": "権限モード",
   "ui.promptInput.chooseAgent": "エージェントを選択",
   "ui.promptInput.chooseModel": "モデルを選択",
   "ui.promptInput.chooseVariant": "モデルバリアントを選択",

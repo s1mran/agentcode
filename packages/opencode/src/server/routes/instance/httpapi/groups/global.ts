@@ -11,6 +11,9 @@ import { described } from "./metadata"
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
   version: Schema.String,
+  // Advertises that this engine resolves permission modes (session permissionMode, plan_exit), so clients can tell it
+  // apart from servers that silently ignore the field.
+  permissionModes: Schema.optional(Schema.Literal(true)),
 })
 
 const SyncEventSchemas = EventManifest.Latest.values()

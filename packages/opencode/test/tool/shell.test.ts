@@ -181,6 +181,31 @@ const mustTruncate = (result: {
 }
 
 describe("tool.shell", () => {
+  if (process.platform !== "win32")
+    it.live("does not pass the launch permission mode on to commands", () =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const prev = process.env.OPENCODE_PERMISSION_MODE
+          process.env.OPENCODE_PERMISSION_MODE = "bypassPermissions"
+          return prev
+        }),
+        () =>
+          runIn(
+            projectRoot,
+            Effect.gen(function* () {
+              const result = yield* run({ command: 'echo "mode=[$OPENCODE_PERMISSION_MODE]"' })
+              expect(result.metadata.exit).toBe(0)
+              expect(result.metadata.output).toContain("mode=[]")
+            }),
+          ),
+        (prev) =>
+          Effect.sync(() => {
+            if (prev === undefined) delete process.env.OPENCODE_PERMISSION_MODE
+            else process.env.OPENCODE_PERMISSION_MODE = prev
+          }),
+      ),
+    )
+
   each("basic", () =>
     runIn(
       projectRoot,
@@ -935,13 +960,17 @@ describe("tool.shell permissions", () => {
       yield* runIn(
         tmp,
         Effect.gen(function* () {
+          // Read-only commands (git log) run without an "Allow always" rule, so use one that needs approval.
+          const err = new Error("stop after permission")
           const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
-          yield* run(
-            {
-              command: "git log --oneline -5",
-            },
-            capture(requests),
-          )
+          expect(
+            yield* fail(
+              {
+                command: "npm install left-pad",
+              },
+              capture(requests, err),
+            ),
+          ).toMatchObject({ message: err.message })
           expect(requests.length).toBe(1)
           expect(requests[0].always.length).toBeGreaterThan(0)
           expect(requests[0].always.some((item) => item.endsWith("*"))).toBe(true)
@@ -995,11 +1024,14 @@ describe("tool.shell permissions", () => {
       yield* runIn(
         tmp,
         Effect.gen(function* () {
+          const err = new Error("stop after permission")
           const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
-          yield* run({ command: "ls -la" }, capture(requests))
+          expect(yield* fail({ command: "touch -c output.txt" }, capture(requests, err))).toMatchObject({
+            message: err.message,
+          })
           const bashReq = requests.find((r) => r.permission === "bash")
           expect(bashReq).toBeDefined()
-          expect(bashReq!.always[0]).toBe("ls *")
+          expect(bashReq!.always[0]).toBe("touch *")
         }),
       )
     }),

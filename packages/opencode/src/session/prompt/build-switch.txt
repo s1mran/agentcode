@@ -1,5 +1,4 @@
 <system-reminder>
-Your operational mode has changed from plan to build.
-You are no longer in read-only mode.
-You are permitted to make file changes, run shell commands, and utilize your arsenal of tools as needed.
+Plan mode has ended. You are no longer in read-only mode.
+You may now edit files and run shell commands to carry out the work. Edits and commands follow the current permission mode, so some of them may still ask the user for approval.
 </system-reminder>

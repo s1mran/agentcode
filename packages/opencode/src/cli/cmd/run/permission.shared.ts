@@ -13,11 +13,22 @@
 //
 // permissionInfo() extracts display info (icon, title, lines, diff) from
 // the request, delegating to tool.ts for tool-specific formatting.
+//
+// Floor and guard requests (protected paths, critical removals, destructive
+// git, likely secrets) and requests without always patterns never offer the
+// always stage: the engine would only treat that answer as once.
+import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import type { PermissionReply } from "./types"
 import { toolPath, toolPermissionInfo } from "./tool"
 
 type Dict = Record<string, unknown>
+
+// guard and alwaysScope are optional on the wire: older servers never send them.
+export type PermissionRequestInput = PermissionRequest & {
+  guard?: PermissionV1.Guard
+  alwaysScope?: PermissionV1.AlwaysScope
+}
 
 export type PermissionStage = "permission" | "always" | "reject"
 export type PermissionOption = "once" | "always" | "reject" | "confirm" | "cancel"
@@ -55,7 +66,7 @@ function text(v: unknown): string {
   return typeof v === "string" ? v : ""
 }
 
-function data(request: PermissionRequest): Dict {
+function data(request: PermissionRequestInput): Dict {
   const meta = dict(request.metadata)
   return {
     ...meta,
@@ -63,7 +74,7 @@ function data(request: PermissionRequest): Dict {
   }
 }
 
-function patterns(request: PermissionRequest): string[] {
+function patterns(request: PermissionRequestInput): string[] {
   return request.patterns.filter((item): item is string => typeof item === "string")
 }
 
@@ -77,8 +88,17 @@ export function createPermissionBodyState(requestID: string): PermissionBodyStat
   }
 }
 
-export function permissionOptions(stage: PermissionStage): PermissionOption[] {
+/** Whether "Allow always" may be offered: the request has always patterns and no floor or guard. */
+export function permissionAlwaysAvailable(request: PermissionRequestInput): boolean {
+  return request.always.length > 0 && !request.guard
+}
+
+export function permissionOptions(stage: PermissionStage, request?: PermissionRequestInput): PermissionOption[] {
   if (stage === "permission") {
+    if (request && !permissionAlwaysAvailable(request)) {
+      return ["once", "reject"]
+    }
+
     return ["once", "always", "reject"]
   }
 
@@ -89,7 +109,27 @@ export function permissionOptions(stage: PermissionStage): PermissionOption[] {
   return []
 }
 
-export function permissionInfo(request: PermissionRequest): PermissionInfo {
+export function permissionInfo(request: PermissionRequestInput): PermissionInfo {
+  const info = baseInfo(request)
+  if (!request.guard) {
+    return info
+  }
+
+  // The guard reason explains why this prompt cannot be pre-approved, so it leads. A diff view hides the lines, so
+  // the title carries it too.
+  const line = permissionGuardLine(request.guard)
+  return {
+    ...info,
+    ...(info.diff ? { title: `${line} · ${info.title}` } : {}),
+    lines: [line, ...info.lines],
+  }
+}
+
+export function permissionGuardLine(guard: PermissionV1.Guard): string {
+  return `${guard.level === "floor" ? "Protected" : "Needs review"}: ${guard.reason}`
+}
+
+function baseInfo(request: PermissionRequestInput): PermissionInfo {
   const pats = patterns(request)
   const input = data(request)
   const info = toolPermissionInfo(request.permission, input, dict(request.metadata), pats)
@@ -123,15 +163,23 @@ export function permissionInfo(request: PermissionRequest): PermissionInfo {
   }
 }
 
-export function permissionAlwaysLines(request: PermissionRequest): string[] {
-  if (request.always.length === 1 && request.always[0] === "*") {
-    return [`This will allow ${request.permission} until OpenCode is restarted.`]
+function alwaysScopeText(scope: PermissionV1.AlwaysScope | undefined): string {
+  if (scope === "project") return "saved for this project"
+  if (scope === "acceptEdits") return "switches this session to Accept edits"
+  return "for this session"
+}
+
+export function permissionAlwaysLines(request: PermissionRequestInput): string[] {
+  const scope = alwaysScopeText(request.alwaysScope)
+  if (request.alwaysScope === "acceptEdits") {
+    return [`This allows all edits inside the project and ${scope}.`]
   }
 
-  return [
-    "This will allow the following patterns until OpenCode is restarted.",
-    ...request.always.map((item) => `- ${item}`),
-  ]
+  if (request.always.length === 1 && request.always[0] === "*") {
+    return [`This will allow ${request.permission} (${scope}).`]
+  }
+
+  return [`This will allow the following patterns (${scope}).`, ...request.always.map((item) => `- ${item}`)]
 }
 
 export function permissionLabel(option: PermissionOption): string {
@@ -150,8 +198,12 @@ export function permissionReply(requestID: string, reply: PermissionReply["reply
   }
 }
 
-export function permissionShift(state: PermissionBodyState, dir: -1 | 1): PermissionBodyState {
-  const list = permissionOptions(state.stage)
+export function permissionShift(
+  state: PermissionBodyState,
+  dir: -1 | 1,
+  request?: PermissionRequestInput,
+): PermissionBodyState {
+  const list = permissionOptions(state.stage, request)
   if (list.length === 0) {
     return state
   }
@@ -171,13 +223,23 @@ export function permissionHover(state: PermissionBodyState, option: PermissionOp
   }
 }
 
-export function permissionRun(state: PermissionBodyState, requestID: string, option: PermissionOption): PermissionStep {
+export function permissionRun(
+  state: PermissionBodyState,
+  requestID: string,
+  option: PermissionOption,
+  request?: PermissionRequestInput,
+): PermissionStep {
   if (state.submitting) {
     return { state }
   }
 
+  const alwaysAvailable = !request || permissionAlwaysAvailable(request)
   if (state.stage === "permission") {
     if (option === "always") {
+      if (!alwaysAvailable) {
+        return { state }
+      }
+
       return {
         state: {
           ...state,
@@ -207,12 +269,12 @@ export function permissionRun(state: PermissionBodyState, requestID: string, opt
     return { state }
   }
 
-  if (option === "cancel") {
+  if (option === "cancel" || !alwaysAvailable) {
     return {
       state: {
         ...state,
         stage: "permission",
-        selected: "always",
+        selected: alwaysAvailable ? "always" : "once",
       },
     }
   }
@@ -239,12 +301,12 @@ export function permissionCancel(state: PermissionBodyState): PermissionBodyStat
   }
 }
 
-export function permissionEscape(state: PermissionBodyState): PermissionBodyState {
+export function permissionEscape(state: PermissionBodyState, request?: PermissionRequestInput): PermissionBodyState {
   if (state.stage === "always") {
     return {
       ...state,
       stage: "permission",
-      selected: "always",
+      selected: !request || permissionAlwaysAvailable(request) ? "always" : "once",
     }
   }
 

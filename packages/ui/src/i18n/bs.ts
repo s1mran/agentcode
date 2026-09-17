@@ -134,6 +134,7 @@ export const dict = {
   "ui.promptInput.attachments": "Slike i datoteke",
   "ui.promptInput.context": "Kontekst",
   "ui.promptInput.shell": "Shell komanda",
+  "ui.promptInput.chooseMode": "Način dozvola",
   "ui.promptInput.chooseAgent": "Odaberi agenta",
   "ui.promptInput.chooseModel": "Odaberi model",
   "ui.promptInput.chooseVariant": "Odaberi varijantu modela",

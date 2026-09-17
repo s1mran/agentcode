@@ -65,6 +65,7 @@ const requests = Effect.fnUntraced(function* (filepath: string) {
         }),
     },
     filepath,
+    { access: "read" },
   )
   result.push({
     permission: "read",

@@ -3,7 +3,7 @@ import { QuestionID } from "@/question/schema"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
-import { QuestionNotFoundError } from "../errors"
+import { QuestionInvalidAnswerError, QuestionNotFoundError } from "../errors"
 
 export const questionHandlers = HttpApiBuilder.group(InstanceHttpApi, "question", (handlers) =>
   Effect.gen(function* () {
@@ -30,6 +30,10 @@ export const questionHandlers = HttpApiBuilder.group(InstanceHttpApi, "question"
                 message: `Question request not found: ${error.requestID}`,
               }),
             ),
+          ),
+          // The question stays pending, so the client can send a corrected answer.
+          Effect.catchTag("Question.InvalidAnswerError", (error) =>
+            Effect.fail(new QuestionInvalidAnswerError({ requestID: String(error.requestID), message: error.message })),
           ),
         )
       return true

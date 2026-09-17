@@ -1,16 +1,30 @@
 import { describe, expect, test } from "bun:test"
-import type { PermissionRequest } from "@opencode-ai/sdk/v2"
 import {
   createPermissionBodyState,
+  permissionAlwaysAvailable,
   permissionAlwaysLines,
   permissionCancel,
   permissionEscape,
   permissionInfo,
+  permissionOptions,
   permissionReject,
   permissionRun,
+  permissionShift,
+  type PermissionRequestInput,
 } from "@/cli/cmd/run/permission.shared"
 
-function req(input: Partial<PermissionRequest> = {}): PermissionRequest {
+const floor = {
+  level: "floor" as const,
+  category: "protected_path" as const,
+  reason: "writes to a protected path (.git/config)",
+}
+const guard = {
+  level: "guard" as const,
+  category: "destructive_git" as const,
+  reason: "git push --force rewrites remote history",
+}
+
+function req(input: Partial<PermissionRequestInput> = {}): PermissionRequestInput {
   return {
     id: "perm-1",
     sessionID: "session-1",
@@ -130,15 +144,97 @@ describe("run permission shared", () => {
     })
   })
 
-  test("formats always-allow copy for wildcard and explicit patterns", () => {
-    expect(permissionAlwaysLines(req({ permission: "bash", always: ["*"] }))).toEqual([
-      "This will allow bash until OpenCode is restarted.",
+  test("formats always-allow copy for wildcard and explicit patterns with the scope it grants", () => {
+    expect(permissionAlwaysLines(req({ permission: "websearch", always: ["*"], alwaysScope: "project" }))).toEqual([
+      "This will allow websearch (saved for this project).",
     ])
 
-    expect(permissionAlwaysLines(req({ always: ["src/**/*.ts", "src/**/*.tsx"] }))).toEqual([
-      "This will allow the following patterns until OpenCode is restarted.",
+    expect(permissionAlwaysLines(req({ always: ["src/**/*.ts", "src/**/*.tsx"], alwaysScope: "session" }))).toEqual([
+      "This will allow the following patterns (for this session).",
       "- src/**/*.ts",
       "- src/**/*.tsx",
     ])
+
+    expect(
+      permissionAlwaysLines(req({ permission: "bash", always: ["git checkout *"], alwaysScope: "project" })),
+    ).toEqual(["This will allow the following patterns (saved for this project).", "- git checkout *"])
+
+    expect(
+      permissionAlwaysLines(req({ permission: "edit", always: ["src/a.ts"], alwaysScope: "acceptEdits" })),
+    ).toEqual(["This allows all edits inside the project and switches this session to Accept edits."])
+
+    // Older servers send no alwaysScope; an unknown scope is described as the narrowest one.
+    expect(permissionAlwaysLines(req({ permission: "read", always: ["*"] }))).toEqual([
+      "This will allow read (for this session).",
+    ])
+  })
+
+  test("offers the always stage only when the request has always patterns and no guard", () => {
+    const plain = req({ permission: "bash", always: ["npm test *"] })
+    expect(permissionAlwaysAvailable(plain)).toBe(true)
+    expect(permissionOptions("permission", plain)).toEqual(["once", "always", "reject"])
+
+    for (const request of [
+      req({ permission: "bash", always: [] }),
+      req({ permission: "bash", always: ["git push *"], guard }),
+      req({ permission: "edit", always: [".git/config"], guard: floor }),
+    ]) {
+      expect(permissionAlwaysAvailable(request)).toBe(false)
+      expect(permissionOptions("permission", request)).toEqual(["once", "reject"])
+
+      const state = createPermissionBodyState("perm-1")
+      const step = permissionRun(state, "perm-1", "always", request)
+      expect(step.reply).toBeUndefined()
+      expect(step.state.stage).toBe("permission")
+
+      // A stale always stage can never confirm an always reply for such a request.
+      const stale = permissionRun({ ...state, stage: "always", selected: "confirm" }, "perm-1", "confirm", request)
+      expect(stale.reply).toBeUndefined()
+      expect(stale.state).toMatchObject({ stage: "permission", selected: "once" })
+
+      expect(permissionShift({ ...state, selected: "once" }, 1, request).selected).toBe("reject")
+      expect(permissionEscape({ ...state, stage: "always", selected: "confirm" }, request)).toMatchObject({
+        stage: "permission",
+        selected: "once",
+      })
+    }
+
+    // Without the request (older callers) the three options stay.
+    expect(permissionOptions("permission")).toEqual(["once", "always", "reject"])
+  })
+
+  test("renders the guard reason as the first line", () => {
+    const info = permissionInfo(
+      req({
+        permission: "bash",
+        metadata: { input: { command: "git push --force origin main" } },
+        always: [],
+        guard,
+      }),
+    )
+    expect(info.lines[0]).toBe("Needs review: git push --force rewrites remote history")
+    expect(info.lines).toContain("$ git push --force origin main")
+
+    const external = permissionInfo(
+      req({ permission: "external_directory", patterns: ["/etc/*"], always: [], guard: floor }),
+    )
+    expect(external.lines).toEqual(["Protected: writes to a protected path (.git/config)", "- /etc/*"])
+
+    // A diff view hides the lines, so the guard also leads the title.
+    const edit = permissionInfo(
+      req({
+        permission: "edit",
+        patterns: [".git/config"],
+        metadata: { filepath: ".git/config", diff: "--- a\n+++ b\n" },
+        always: [],
+        guard: floor,
+      }),
+    )
+    expect(edit.diff).toBeDefined()
+    expect(edit.title).toBe("Protected: writes to a protected path (.git/config) · Edit .git/config")
+
+    expect(permissionInfo(req({ permission: "doom_loop" })).lines[0]).toBe(
+      "This keeps the session running despite repeated failures.",
+    )
   })
 })

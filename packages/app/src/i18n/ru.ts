@@ -177,6 +177,10 @@ export const dict = {
   "command.prompt.mode.normal": "Промпт",
   "command.permissions.autoaccept.enable": "Автоматически принимать разрешения",
   "command.permissions.autoaccept.disable": "Остановить автоматическое принятие разрешений",
+  "command.permissionMode.cycle": "Переключить режим разрешений",
+  "command.permissionMode.set": "Режим разрешений: {{mode}}",
+  "command.permissionMode.bypass": "Обойти разрешения…",
+  "command.plan": "Режим планирования",
   "command.workspace.toggle": "Переключить рабочие пространства",
   "command.workspace.toggle.description": "Включить или отключить несколько рабочих пространств в боковой панели",
   "command.session.undo": "Отменить",
@@ -354,6 +358,19 @@ export const dict = {
   "prompt.mode.shell": "Оболочка",
   "prompt.mode.normal": "Промпт",
   "prompt.mode.shell.exit": "esc для выхода",
+  "prompt.permissionMode.label": "Режим разрешений",
+  "prompt.permissionMode.default": "Запрашивать разрешения",
+  "prompt.permissionMode.default.description": "Спрашивает перед командами, изменениями и доступом в интернет",
+  "prompt.permissionMode.acceptEdits": "Принимать изменения",
+  "prompt.permissionMode.acceptEdits.description":
+    "Изменения в этом проекте одобряются; перед командами по-прежнему спрашивает",
+  "prompt.permissionMode.plan": "Режим планирования",
+  "prompt.permissionMode.plan.description": "Исследование только для чтения; редактировать можно только файл плана",
+  "prompt.permissionMode.bypassPermissions": "Обход разрешений",
+  "prompt.permissionMode.bypassPermissions.description":
+    "Работает без запросов, кроме защищённых путей, критических удалений и ваших правил «Спрашивать»",
+  "prompt.permissionMode.dontAsk": "Не спрашивать",
+  "prompt.permissionMode.dontAsk.description": "Всё, что потребовало бы запроса, запрещается",
   "session.child.promptDisabled": "В сессиях субагентов нельзя отправлять запросы.",
   "session.child.backToParent": "Вернуться к основной сессии.",
 
@@ -415,6 +432,22 @@ export const dict = {
   "prompt.toast.commandSendFailed.title": "Не удалось отправить команду",
   "prompt.toast.promptSendFailed.title": "Не удалось отправить запрос",
   "prompt.toast.promptSendFailed.description": "Не удалось получить сессию",
+
+  "dialog.bypassPermissions.title": "Обойти разрешения?",
+  "dialog.bypassPermissions.body":
+    "Агент будет выполнять команды, редактировать файлы и обращаться к интернету без запросов. Для защищённых путей (.git, конфигурация агента, файлы запуска оболочки), критических удалений и ваших собственных правил «Спрашивать» запрос по-прежнему появляется; правила «Запретить» продолжают действовать. Используйте этот режим только в проекте, которому доверяете.",
+  "dialog.bypassPermissions.confirm": "Обойти разрешения",
+  "dialog.bypassPermissions.cancel": "Отмена",
+
+  "ui.permission.always.project": "Всегда разрешать в этом проекте",
+  "ui.permission.always.session": "Разрешить для этой сессии",
+  "ui.permission.always.acceptEdits": "Разрешить все изменения (Принимать изменения)",
+  "ui.permission.always.everything": "всё для этого инструмента",
+  "ui.permission.guard.floor.title": "Защищённое действие",
+  "ui.permission.guard.guard.title": "Требуется проверка",
+  "ui.permission.guard.noAlways": "Это можно одобрить только один раз",
+  "ui.permission.writes": "Запись в",
+  "ui.question.planFeedback.placeholder": "Напишите агенту, что изменить в плане",
 
   "dialog.mcp.title": "MCP",
   "dialog.mcp.description": "{{enabled}} из {{total}} включено",
@@ -635,6 +668,15 @@ export const dict = {
   "toast.permissions.autoaccept.on.description": "Запросы на разрешения будут одобряться автоматически",
   "toast.permissions.autoaccept.off.title": "Автоматическое принятие разрешений остановлено",
   "toast.permissions.autoaccept.off.description": "Запросы на разрешения будут требовать одобрения",
+  "toast.permissions.modeMigrated.title": "Автоматическое принятие теперь — «Принимать изменения»",
+  "toast.permissions.modeMigrated.description":
+    "Изменения в этой папке одобряются автоматически; перед командами по-прежнему спрашивает. Для полной автономии выберите «Обход разрешений» в редакторе запросов.",
+  "toast.permissions.autoAcceptRemoved.title": "Автоматическое принятие отключено",
+  "toast.permissions.autoAcceptRemoved.modes":
+    "Запросы разрешений снова появляются. Чтобы автоматически одобрять изменения, выберите «Принимать изменения» в меню режима рядом с полем запроса или нажмите Shift+Tab.",
+  "toast.permissions.autoAcceptRemoved.rules":
+    "Запросы разрешений снова появляются. Чтобы пропускать их, разрешите эти инструменты в конфигурации разрешений этого сервера.",
+  "toast.permissions.mode.error.title": "Не удалось изменить режим разрешений",
 
   "toast.workspace.enabled.title": "Рабочие пространства включены",
   "toast.workspace.enabled.description": "В боковой панели теперь отображаются несколько рабочих деревьев",
@@ -914,6 +956,8 @@ export const dict = {
 
   "settings.general.row.language.title": "Язык",
   "settings.general.row.language.description": "Изменить язык отображения AgentCode",
+  "settings.general.permissionMode.title": "Режим разрешений по умолчанию",
+  "settings.general.permissionMode.description": "Используется для новых сессий в этой папке",
   "settings.general.row.shell.title": "Оболочка терминала",
   "settings.general.row.shell.description":
     "Выберите оболочку для терминала. Совместимые оболочки также используются агентом при вызове инструментов.",

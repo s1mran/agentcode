@@ -4,7 +4,7 @@ import { Schema } from "effect"
 import { define, inventory } from "../event"
 import { ascending } from "../identifier"
 import { Project } from "../project"
-import { statics } from "../schema"
+import { optional, statics } from "../schema"
 import { SessionID } from "../session-id"
 
 export const ID = Schema.String.check(Schema.isStartsWith("per")).pipe(
@@ -16,7 +16,44 @@ export type ID = typeof ID.Type
 export const Action = Schema.Literals(["allow", "deny", "ask"]).annotate({ identifier: "PermissionAction" })
 export type Action = typeof Action.Type
 
-export const Rule = Schema.Struct({ permission: Schema.String, pattern: Schema.String, action: Action }).annotate({
+export const Mode = Schema.Literals(["default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"]).annotate({
+  identifier: "PermissionMode",
+})
+export type Mode = typeof Mode.Type
+
+export const Guard = Schema.Struct({
+  level: Schema.Literals(["floor", "guard"]),
+  category: Schema.Literals(["protected_path", "critical_rm", "destructive_git", "secret"]),
+  reason: Schema.String,
+  paths: optional(Schema.Array(Schema.String)),
+}).annotate({ identifier: "PermissionGuard" })
+export type Guard = typeof Guard.Type
+
+export const AlwaysScope = Schema.Literals(["project", "session", "acceptEdits"]).annotate({
+  identifier: "PermissionAlwaysScope",
+})
+export type AlwaysScope = typeof AlwaysScope.Type
+
+// Per-pattern classification supplied by the asking tool (for example the shell
+// classifier). Hints only inform the permission decision and are never copied
+// into the Request that clients see.
+export const Hint = Schema.Struct({
+  pattern: Schema.String,
+  readOnly: optional(Schema.Boolean),
+  projectWrite: optional(Schema.Boolean),
+  strict: optional(Schema.String),
+  loose: optional(Schema.String),
+  withholdAlways: optional(Schema.Boolean),
+  guard: optional(Guard),
+}).annotate({ identifier: "PermissionHint" })
+export type Hint = typeof Hint.Type
+
+export const Rule = Schema.Struct({
+  permission: Schema.String,
+  pattern: Schema.String,
+  action: Action,
+  source: optional(Schema.Literals(["builtin"])),
+}).annotate({
   identifier: "PermissionRule",
 })
 export type Rule = typeof Rule.Type
@@ -32,6 +69,8 @@ export const Request = Schema.Struct({
   metadata: Schema.Record(Schema.String, Schema.Unknown),
   always: Schema.Array(Schema.String),
   tool: Schema.optional(Schema.Struct({ messageID: Schema.String, callID: Schema.String })),
+  guard: optional(Guard),
+  alwaysScope: optional(AlwaysScope),
 }).annotate({ identifier: "PermissionRequest" })
 export type Request = typeof Request.Type
 
@@ -48,7 +87,15 @@ export const Approval = Schema.Struct({ projectID: Project.ID, patterns: Schema.
 })
 export type Approval = typeof Approval.Type
 
-export const AskInput = Schema.Struct({ ...Request.fields, id: Schema.optional(ID), ruleset: Ruleset }).annotate({
+export const AskInput = Schema.Struct({
+  ...Request.fields,
+  id: Schema.optional(ID),
+  ruleset: Ruleset,
+  hints: optional(Schema.Array(Hint)),
+  // The agent running the tool call. Plan mode follows it; it is set by the engine's ask wrappers, never by tools,
+  // and is not copied into the Request.
+  agent: optional(Schema.String),
+}).annotate({
   identifier: "PermissionAskInput",
 })
 export type AskInput = typeof AskInput.Type

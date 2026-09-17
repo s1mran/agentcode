@@ -140,13 +140,14 @@ export const TaskTool = Tool.define(
         parentSessionPermission: parent.permission ?? [],
         subagent: next,
       })
+      // Built-in defaults allow todowrite and task for every agent, so only rules the subagent's config sets count.
+      const configured = (permission: string) =>
+        next.permission.some((rule) => rule.permission === permission && rule.source !== "builtin")
       const childToolDenies = [
-        ...(next.permission.some((rule) => rule.permission === "todowrite")
+        ...(configured("todowrite")
           ? []
           : [{ permission: "todowrite" as const, pattern: "*" as const, action: "deny" as const }]),
-        ...(next.permission.some((rule) => rule.permission === id)
-          ? []
-          : [{ permission: id, pattern: "*" as const, action: "deny" as const }]),
+        ...(configured(id) ? [] : [{ permission: id, pattern: "*" as const, action: "deny" as const }]),
         ...(cfg.experimental?.primary_tools?.map((permission) => ({
           permission,
           pattern: "*" as const,

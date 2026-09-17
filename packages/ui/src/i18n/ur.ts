@@ -122,6 +122,7 @@ export const dict: Record<string, string> = {
   "ui.promptInput.attachments": "تصاویر اور فائلیں",
   "ui.promptInput.context": "سیاق و سباق",
   "ui.promptInput.shell": "شیل کمانڈ",
+  "ui.promptInput.chooseMode": "اجازت کا موڈ",
   "ui.promptInput.chooseAgent": "ایجنٹ منتخب کریں",
   "ui.promptInput.chooseModel": "ماڈل منتخب کریں",
   "ui.promptInput.chooseVariant": "ماڈل کی قسم منتخب کریں",

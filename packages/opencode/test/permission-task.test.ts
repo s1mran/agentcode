@@ -57,12 +57,12 @@ describe("Permission.evaluate for permission.task", () => {
     expect(Permission.evaluate("task", "code-reviewer", globalRuleset).action).toBe("ask")
   })
 
-  test("later rules take precedence (last match wins)", () => {
+  test("a matching deny wins over a later specific allow", () => {
     const ruleset = createRuleset({
       "orchestrator-*": "deny",
       "orchestrator-fast": "allow",
     })
-    expect(Permission.evaluate("task", "orchestrator-fast", ruleset).action).toBe("allow")
+    expect(Permission.evaluate("task", "orchestrator-fast", ruleset).action).toBe("deny")
     expect(Permission.evaluate("task", "orchestrator-slow", ruleset).action).toBe("deny")
   })
 
@@ -75,8 +75,8 @@ describe("Permission.evaluate for permission.task", () => {
 
 describe("Permission.disabled for task tool", () => {
   // Note: The `disabled` function checks if a TOOL should be completely removed from the tool list.
-  // It only disables a tool when there's a rule with `pattern: "*"` and `action: "deny"`.
-  // It does NOT evaluate complex subagent patterns - those are handled at runtime by `evaluate`.
+  // It disables a tool when an explicit rule has `pattern: "*"` and `action: "deny"`: denies are absolute, so no
+  // specific allow under it can ever apply. Specific subagent patterns are handled at runtime by `evaluate`.
   const createRuleset = (rules: Record<string, "allow" | "deny" | "ask">): PermissionV1.Ruleset =>
     Object.entries(rules).map(([pattern, action]) => ({
       permission: "task",
@@ -129,17 +129,15 @@ describe("Permission.disabled for task tool", () => {
     expect(disabled.has("task")).toBe(false)
   })
 
-  test("task tool is NOT disabled when last wildcard pattern is allow", () => {
-    // Last matching rule wins - if wildcard allow comes after wildcard deny, tool is enabled
+  test("task tool is disabled by a wildcard deny even when a specific allow comes after it", () => {
+    // Explicit denies always win, so "orchestrator-coder" is denied too and the tool is hidden
     const ruleset = createRuleset({
       "*": "deny",
       "orchestrator-coder": "allow",
     })
     const disabled = Permission.disabled(["task"], ruleset)
-    // The disabled() function uses findLast and checks if the last matching rule
-    // has pattern: "*" and action: "deny". In this case, the last rule matching
-    // "task" permission has pattern "orchestrator-coder", not "*", so not disabled
-    expect(disabled.has("task")).toBe(false)
+    expect(Permission.evaluate("task", "orchestrator-coder", ruleset).action).toBe("deny")
+    expect(disabled.has("task")).toBe(true)
   })
 })
 
@@ -224,8 +222,8 @@ describe("permission.task with real config files", () => {
         const config = yield* load
         const ruleset = Permission.fromConfig(config.permission ?? {})
 
-        // Verify task permissions
-        expect(Permission.evaluate("task", "general", ruleset).action).toBe("allow")
+        // Verify task permissions: the "*" deny is absolute, so the "general" allow never applies
+        expect(Permission.evaluate("task", "general", ruleset).action).toBe("deny")
         expect(Permission.evaluate("task", "code-reviewer", ruleset).action).toBe("deny")
 
         // Verify other tool permissions
@@ -236,9 +234,8 @@ describe("permission.task with real config files", () => {
         const disabled = Permission.disabled(["bash", "edit", "task"], ruleset)
         expect(disabled.has("bash")).toBe(false)
         expect(disabled.has("edit")).toBe(false)
-        // task is NOT disabled because disabled() uses findLast, and the last rule
-        // matching "task" permission is {pattern: "general", action: "allow"}, not pattern: "*"
-        expect(disabled.has("task")).toBe(false)
+        // task is disabled because an explicit "*" deny matches it
+        expect(disabled.has("task")).toBe(true)
       }),
     {
       git: true,
@@ -262,13 +259,12 @@ describe("permission.task with real config files", () => {
         const config = yield* load
         const ruleset = Permission.fromConfig(config.permission ?? {})
 
-        // Last matching rule wins - "*" deny is last, so all agents are denied
+        // The explicit "*" deny matches every agent, so all agents are denied
         expect(Permission.evaluate("task", "general", ruleset).action).toBe("deny")
         expect(Permission.evaluate("task", "code-reviewer", ruleset).action).toBe("deny")
         expect(Permission.evaluate("task", "unknown", ruleset).action).toBe("deny")
 
-        // Since "*": "deny" is the last rule, disabled() finds it with findLast
-        // and sees pattern: "*" with action: "deny", so task is disabled
+        // disabled() sees an explicit pattern: "*" rule with action: "deny", so task is disabled
         const disabled = Permission.disabled(["task"], ruleset)
         expect(disabled.has("task")).toBe(true)
       }),
@@ -287,22 +283,19 @@ describe("permission.task with real config files", () => {
   )
 
   it.instance(
-    "task tool NOT disabled when specific allow comes last in config",
+    "task tool disabled when a specific allow comes after a wildcard deny in config",
     () =>
       Effect.gen(function* () {
         const config = yield* load
         const ruleset = Permission.fromConfig(config.permission ?? {})
 
-        // Evaluate uses findLast - "general" allow comes after "*" deny
-        expect(Permission.evaluate("task", "general", ruleset).action).toBe("allow")
-        // Other agents still denied by the earlier "*" deny
+        // Explicit denies always win, whatever the order: "general" is denied by the "*" deny
+        expect(Permission.evaluate("task", "general", ruleset).action).toBe("deny")
         expect(Permission.evaluate("task", "code-reviewer", ruleset).action).toBe("deny")
 
-        // disabled() uses findLast and checks if the last rule has pattern: "*" with action: "deny"
-        // In this case, the last rule is {pattern: "general", action: "allow"}, not pattern: "*"
-        // So the task tool is NOT disabled (even though most subagents are denied)
+        // disabled() hides the tool because an explicit "*" deny matches it
         const disabled = Permission.disabled(["task"], ruleset)
-        expect(disabled.has("task")).toBe(false)
+        expect(disabled.has("task")).toBe(true)
       }),
     {
       git: true,

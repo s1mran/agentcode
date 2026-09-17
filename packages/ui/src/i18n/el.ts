@@ -121,6 +121,7 @@ export const dict: Record<string, string> = {
   "ui.promptInput.attachments": "Εικόνες και αρχεία",
   "ui.promptInput.context": "Πλαίσιο",
   "ui.promptInput.shell": "εντολή Shell",
+  "ui.promptInput.chooseMode": "Λειτουργία δικαιωμάτων",
   "ui.promptInput.chooseAgent": "Επιλογή πράκτορα",
   "ui.promptInput.chooseModel": "Επιλογή μοντέλου",
   "ui.promptInput.chooseVariant": "Επιλογή παραλλαγής μοντέλου",

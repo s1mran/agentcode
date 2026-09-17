@@ -33,7 +33,8 @@ import { setTimeout as sleep } from "node:timers/promises"
 import { Process } from "@/util/process"
 import { parseGitHubRemote } from "@/util/repository"
 import { Effect } from "effect"
-import { extractResponseText, formatPromptTooLargeError } from "./github.shared"
+import { Permission } from "@/permission"
+import { autoReplyPermissions, extractResponseText, formatPromptTooLargeError } from "./github.shared"
 
 type GitHubAuthor = {
   login: string
@@ -383,6 +384,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
   const sessionShare = yield* SessionShare.Service
   const sessionPrompt = yield* SessionPrompt.Service
   const events = yield* EventV2Bridge.Service
+  const permissionSvc = yield* Permission.Service
   const runLocalEffect = <A, E>(effect: Effect.Effect<A, E>) =>
     Effect.runPromise(effect.pipe(Effect.provideService(InstanceRef, ctx)))
   yield* Effect.promise(async () => {
@@ -510,6 +512,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: { event?: 
         }),
       )
       await subscribeSessionEvents()
+      await runLocalEffect(autoReplyPermissions({ events, reply: permissionSvc.reply, log: console.log }))
       shareId = await (async () => {
         if (share === false) return
         if (!share && repoData.data.private) return

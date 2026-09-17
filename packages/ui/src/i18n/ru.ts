@@ -133,6 +133,7 @@ export const dict = {
   "ui.promptInput.attachments": "Изображения и файлы",
   "ui.promptInput.context": "Контекст",
   "ui.promptInput.shell": "Команда оболочки",
+  "ui.promptInput.chooseMode": "Режим разрешений",
   "ui.promptInput.chooseAgent": "Выбрать агента",
   "ui.promptInput.chooseModel": "Выбрать модель",
   "ui.promptInput.chooseVariant": "Выбрать вариант модели",

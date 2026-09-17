@@ -1,4 +1,4 @@
-import type { Message, Session } from "@opencode-ai/sdk/v2/client"
+import type { Message, PermissionMode, Session } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { Binary } from "@opencode-ai/core/util/binary"
@@ -23,6 +23,7 @@ import { createPromptSubmissionState } from "./submission-state"
 import { normalizeSessionInfo } from "@/utils/session"
 import { Event } from "@opencode-ai/schema/event"
 import { blobDataUrl } from "@/utils/draft-store"
+import { isBuiltinPlanCommand, planCommandArguments } from "./permission-mode-controls"
 
 type PendingPrompt = {
   abort: AbortController
@@ -39,6 +40,8 @@ export type FollowupDraft = {
   agent: string
   model: { providerID: string; modelID: string }
   variant?: string
+  /** Sent with the request so the engine runs the turn in this mode; left out for queued follow-ups. */
+  permissionMode?: PermissionMode
 }
 
 type FollowupSendInput = {
@@ -96,6 +99,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
           providerID: input.draft.model.providerID,
           variant: input.draft.variant,
         },
+        permissionMode: input.draft.permissionMode,
         files: await Promise.all(
           images.map(async (attachment) => ({
             uri: await blobDataUrl(attachment.blob, attachment.mime),
@@ -171,6 +175,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       agent: input.draft.agent,
       model: input.draft.model,
       variant: input.draft.variant,
+      permissionMode: input.draft.permissionMode,
       legacyParts: requestParts,
       text: requestParts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n"),
       files: requestParts.flatMap((part) => {
@@ -212,7 +217,15 @@ type PromptSubmitInput = {
   info: Accessor<{ id: string } | undefined>
   imageAttachments: Accessor<ImageAttachmentPart[]>
   commentCount: Accessor<number>
-  autoAccept: Accessor<boolean>
+  /**
+   * The composer's permission mode, sent with every create, prompt, command and shell. Undefined sends nothing, which
+   * keeps the engine's stored mode.
+   */
+  permissionMode?: Accessor<PermissionMode | undefined>
+  /** Whether the server supports permission modes; `/plan` is handled by the composer only then. */
+  permissionModesSupported?: Accessor<boolean>
+  /** Changes the composer's mode, for `/plan`. */
+  selectPermissionMode?: (mode: PermissionMode) => void
   mode: Accessor<"normal" | "shell">
   working: Accessor<boolean>
   editor: () => HTMLDivElement | undefined
@@ -329,11 +342,31 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const text = currentPrompt.map((part) => ("content" in part ? part.content : "")).join("")
     const images = input.imageAttachments().slice()
     const mode = input.mode()
+    const composerMode = input.permissionMode?.()
 
     if (text.trim().length === 0 && images.length === 0 && input.commentCount() === 0) {
       if (input.working()) void abort()
       return
     }
+
+    // `/plan` is handled by the composer when the server supports modes: bare switches to Plan mode, with a task it
+    // runs the engine's built-in /plan command in Plan mode.
+    const planArguments =
+      mode === "normal" && input.permissionModesSupported?.() ? planCommandArguments(text) : undefined
+    const planCommand =
+      planArguments === undefined ? undefined : sync().data.command.find((item) => item.name === "plan")
+    const isPlan = !!planCommand && isBuiltinPlanCommand(planCommand)
+    // Bare /plan only switches the mode; with attachments it runs as a command so nothing typed is lost.
+    if (isPlan && planArguments === "" && images.length === 0 && input.commentCount() === 0) {
+      input.addToHistory(currentPrompt, mode)
+      input.resetHistoryNavigation()
+      input.selectPermissionMode?.("plan")
+      submission.clear()
+      input.setMode("normal")
+      input.setPopover(null)
+      return
+    }
+    const requestedMode = isPlan ? "plan" : composerMode
 
     const modelSelection = input.model ?? local.model
     const currentModel = modelSelection.current()
@@ -353,7 +386,13 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const projectDirectory = sdk().directory
     const permissionState = permission.currentServerState()
     const isNewSession = !params.id
-    const shouldAutoAccept = isNewSession && input.autoAccept()
+    // A new session cannot be queued, so the pill switches before it is created. An existing session switches only when
+    // the command is actually sent below: a queued `/plan <task>` must not flip the turn that is still running.
+    if (isPlan && isNewSession) input.selectPermissionMode?.("plan")
+    // bypassPermissions is never sent on create: the session is created first and then switched, so the engine's
+    // bypass gate decides (and a refusal leaves the new session in its default mode).
+    const bypass = isNewSession && requestedMode === "bypassPermissions"
+    let sendMode = requestedMode
     const worktreeSelection = input.newSessionWorktree?.() || "main"
 
     let sessionDirectory = projectDirectory
@@ -405,6 +444,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           agent: currentAgent.name,
           model: { id: currentModel.id, providerID: currentModel.provider.id, variant },
           location: { directory: sessionDirectory },
+          ...(requestedMode && !bypass ? { permissionMode: requestedMode } : {}),
         })
         .then(normalizeSessionInfo)
         .catch((err) => {
@@ -415,11 +455,16 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           return undefined
         })
       if (created) {
-        seed(sessionDirectory, created)
+        // The engine stored the requested mode at creation; keep it on the seeded info so the pill shows it at once.
+        seed(sessionDirectory, requestedMode && !bypass ? { ...created, permissionMode: requestedMode } : created)
         session = created
+        permissionState.setDraftMode(projectDirectory, undefined)
+        if (bypass) {
+          const applied = await permissionState.setSessionMode(created.id, sessionDirectory, "bypassPermissions")
+          if (!applied) sendMode = undefined
+        }
         await startTransition(() => {
           if (!session) return
-          if (shouldAutoAccept) permissionState.enableAutoAccept(session.id, sessionDirectory)
           local.session.promote(sessionDirectory, session.id, {
             agent: currentAgent.name,
             model: { providerID: currentModel.provider.id, modelID: currentModel.id },
@@ -480,11 +525,15 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     }
 
     if (!isNewSession && mode === "normal" && input.shouldQueue?.()) {
-      input.onQueue?.(draft)
+      // A queued follow-up is sent later; the session's stored mode applies then, not the mode at queue time. A queued
+      // `/plan <task>` carries Plan mode, so the engine switches only when that command runs.
+      input.onQueue?.(isPlan ? { ...draft, permissionMode: "plan" } : draft)
       clearContext(submission.target())
       clearInput()
       return
     }
+
+    if (isPlan && !isNewSession) input.selectPermissionMode?.("plan")
 
     input.onSubmit?.()
 
@@ -498,6 +547,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           command: text,
           agent,
           model,
+          permissionMode: sendMode,
         })
         .catch((err) => {
           showToast({
@@ -525,6 +575,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             arguments: args.join(" "),
             agent,
             model: { id: model.modelID, providerID: model.providerID, variant },
+            permissionMode: sendMode,
             files: await Promise.all(
               images.map(async (attachment) => ({
                 uri: await blobDataUrl(attachment.blob, attachment.mime),
@@ -620,7 +671,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       api: sdk().api.session,
       sync: sync(),
       serverSync: serverSync(),
-      draft,
+      draft: { ...draft, permissionMode: sendMode },
       messageID,
       optimisticBusy: sessionDirectory === projectDirectory,
       before: waitForWorktree,

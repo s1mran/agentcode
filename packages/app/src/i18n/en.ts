@@ -81,6 +81,10 @@ export const dict = {
   "command.prompt.mode.normal": "Prompt",
   "command.permissions.autoaccept.enable": "Auto-accept permissions",
   "command.permissions.autoaccept.disable": "Stop auto-accepting permissions",
+  "command.permissionMode.cycle": "Cycle permission mode",
+  "command.permissionMode.set": "Permission mode: {{mode}}",
+  "command.permissionMode.bypass": "Bypass permissions…",
+  "command.plan": "Plan mode",
   "command.workspace.toggle": "Toggle workspaces",
   "command.workspace.toggle.description": "Enable or disable multiple workspaces in the sidebar",
   "command.session.undo": "Undo",
@@ -258,6 +262,18 @@ export const dict = {
   "prompt.mode.shell": "Shell",
   "prompt.mode.normal": "Prompt",
   "prompt.mode.shell.exit": "esc to exit",
+  "prompt.permissionMode.label": "Permission mode",
+  "prompt.permissionMode.default": "Ask permissions",
+  "prompt.permissionMode.default.description": "Asks before commands, edits and web access",
+  "prompt.permissionMode.acceptEdits": "Accept edits",
+  "prompt.permissionMode.acceptEdits.description": "Edits in this project are approved; commands still ask",
+  "prompt.permissionMode.plan": "Plan mode",
+  "prompt.permissionMode.plan.description": "Read-only research; only the plan file can be edited",
+  "prompt.permissionMode.bypassPermissions": "Bypass permissions",
+  "prompt.permissionMode.bypassPermissions.description":
+    "Runs without asking, except protected paths, critical deletes and your ask rules",
+  "prompt.permissionMode.dontAsk": "Don't ask",
+  "prompt.permissionMode.dontAsk.description": "Anything that would ask is denied",
   "session.child.promptDisabled": "Subagent sessions cannot be prompted.",
   "session.child.backToParent": "Back to main session.",
 
@@ -319,6 +335,22 @@ export const dict = {
   "prompt.toast.commandSendFailed.title": "Failed to send command",
   "prompt.toast.promptSendFailed.title": "Failed to send prompt",
   "prompt.toast.promptSendFailed.description": "Unable to retrieve session",
+
+  "dialog.bypassPermissions.title": "Bypass permissions?",
+  "dialog.bypassPermissions.body":
+    "The agent will run commands, edit files and access the web without asking. Protected paths (.git, agent config, shell startup files), critical deletes and your own ask rules still ask; deny rules still apply. Only use this in a project you trust.",
+  "dialog.bypassPermissions.confirm": "Bypass permissions",
+  "dialog.bypassPermissions.cancel": "Cancel",
+
+  "ui.permission.always.project": "Always allow in this project",
+  "ui.permission.always.session": "Allow for this session",
+  "ui.permission.always.acceptEdits": "Allow all edits (Accept edits)",
+  "ui.permission.always.everything": "everything for this tool",
+  "ui.permission.guard.floor.title": "Protected action",
+  "ui.permission.guard.guard.title": "Needs review",
+  "ui.permission.guard.noAlways": "This can only be approved one time",
+  "ui.permission.writes": "Writes to",
+  "ui.question.planFeedback.placeholder": "Tell the agent what to change in the plan",
 
   "dialog.mcp.title": "MCPs",
   "dialog.mcp.description": "{{enabled}} of {{total}} enabled",
@@ -551,6 +583,15 @@ export const dict = {
   "toast.permissions.autoaccept.on.description": "Permission requests will be automatically approved",
   "toast.permissions.autoaccept.off.title": "Stopped auto-accepting permissions",
   "toast.permissions.autoaccept.off.description": "Permission requests will require approval",
+  "toast.permissions.modeMigrated.title": "Auto-accept is now Accept edits",
+  "toast.permissions.modeMigrated.description":
+    "Edits in this folder are approved automatically; commands still ask. Choose Bypass permissions in the composer for full autonomy.",
+  "toast.permissions.autoAcceptRemoved.title": "Auto-accept was turned off",
+  "toast.permissions.autoAcceptRemoved.modes":
+    "Permission requests ask again. To approve edits automatically, pick Accept edits in the mode menu next to the prompt or press Shift+Tab.",
+  "toast.permissions.autoAcceptRemoved.rules":
+    "Permission requests ask again. To skip them, allow those tools in this server's permission config.",
+  "toast.permissions.mode.error.title": "Could not change permission mode",
 
   "toast.model.none.title": "No model selected",
   "toast.model.none.description": "Connect a provider to summarize this session",
@@ -907,6 +948,8 @@ export const dict = {
 
   "settings.general.row.language.title": "Language",
   "settings.general.row.language.description": "Change the display language for AgentCode",
+  "settings.general.permissionMode.title": "Default permission mode",
+  "settings.general.permissionMode.description": "Used for new sessions in this folder",
   "settings.general.row.shell.title": "Terminal shell",
   "settings.general.row.shell.description": "Shell used by the terminal and agent tools",
   "settings.general.row.shell.autoDefault": "Auto (Default)",

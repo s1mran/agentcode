@@ -7,6 +7,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { Patch } from "../patch"
 import { createTwoFilesPatch, diffLines } from "diff"
 import { assertExternalDirectoryEffect } from "./external-directory"
+import { PlanEditGuard } from "./plan-edit-guard"
 import { trimDiff } from "./edit"
 import { LSP } from "@/lsp/lsp"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -26,6 +27,7 @@ export const ApplyPatchTool = Tool.define(
     const afs = yield* FSUtil.Service
     const format = yield* Format.Service
     const events = yield* EventV2Bridge.Service
+    const denyPlanModeEdits = yield* PlanEditGuard.make
 
     const run = Effect.fn("ApplyPatchTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -53,6 +55,13 @@ export const ApplyPatchTool = Tool.define(
       }
 
       const instance = yield* InstanceState.context
+      yield* denyPlanModeEdits(
+        ctx,
+        hunks.flatMap((hunk) => [
+          path.resolve(instance.directory, hunk.path),
+          hunk.type === "update" && hunk.move_path ? path.resolve(instance.directory, hunk.move_path) : undefined,
+        ]),
+      )
 
       // Validate file paths and check permissions
       const fileChanges: Array<{
@@ -203,9 +212,13 @@ export const ApplyPatchTool = Tool.define(
 
       // Check permissions if needed
       const relativePaths = fileChanges.map((c) => path.relative(instance.worktree, c.filePath).replaceAll("\\", "/"))
+      // A move writes its destination too, so the destination is checked like any other edited path.
+      const movePaths = fileChanges.flatMap((c) =>
+        c.movePath ? [path.relative(instance.worktree, c.movePath).replaceAll("\\", "/")] : [],
+      )
       yield* ctx.ask({
         permission: "edit",
-        patterns: relativePaths,
+        patterns: Array.from(new Set([...relativePaths, ...movePaths])),
         always: ["*"],
         metadata: {
           filepath: relativePaths.join(", "),

@@ -182,6 +182,10 @@ export const dict = {
   "command.prompt.mode.normal": "İstem",
   "command.permissions.autoaccept.enable": "İzinleri otomatik kabul et",
   "command.permissions.autoaccept.disable": "İzinleri otomatik kabul etmeyi durdur",
+  "command.permissionMode.cycle": "İzin modunu değiştir",
+  "command.permissionMode.set": "İzin modu: {{mode}}",
+  "command.permissionMode.bypass": "İzinleri atla…",
+  "command.plan": "Plan modu",
   "command.workspace.toggle": "Çalışma alanlarını aç/kapat",
   "command.workspace.toggle.description": "Kenar çubuğunda birden fazla çalışma alanını göster veya gizle",
   "command.session.undo": "Geri al",
@@ -360,6 +364,18 @@ export const dict = {
   "prompt.mode.shell": "Kabuk",
   "prompt.mode.normal": "İstem",
   "prompt.mode.shell.exit": "çıkmak için esc",
+  "prompt.permissionMode.label": "İzin modu",
+  "prompt.permissionMode.default": "İzin iste",
+  "prompt.permissionMode.default.description": "Komutlardan, düzenlemelerden ve web erişiminden önce sorar",
+  "prompt.permissionMode.acceptEdits": "Düzenlemeleri kabul et",
+  "prompt.permissionMode.acceptEdits.description": "Bu projedeki düzenlemeler onaylanır; komutlar için yine sorar",
+  "prompt.permissionMode.plan": "Plan modu",
+  "prompt.permissionMode.plan.description": "Salt okunur araştırma; yalnızca plan dosyası düzenlenebilir",
+  "prompt.permissionMode.bypassPermissions": "İzinleri atla",
+  "prompt.permissionMode.bypassPermissions.description":
+    "Korunan yollar, kritik silmeler ve Sor kurallarınız dışında sormadan çalışır",
+  "prompt.permissionMode.dontAsk": "Sorma",
+  "prompt.permissionMode.dontAsk.description": "Sorulması gereken her şey reddedilir",
   "session.child.promptDisabled": "Alt ajan oturumlarına istem gönderilemez.",
   "session.child.backToParent": "Ana oturuma dön.",
 
@@ -421,6 +437,22 @@ export const dict = {
   "prompt.toast.commandSendFailed.title": "Komut gönderilemedi",
   "prompt.toast.promptSendFailed.title": "İstem gönderilemedi",
   "prompt.toast.promptSendFailed.description": "Oturum alınamadı",
+
+  "dialog.bypassPermissions.title": "İzinler atlansın mı?",
+  "dialog.bypassPermissions.body":
+    "Ajan sormadan komut çalıştıracak, dosya düzenleyecek ve web'e erişecek. Korunan yollar (.git, ajan yapılandırması, kabuk başlangıç dosyaları), kritik silmeler ve kendi Sor kurallarınız için yine sorulur; Reddet kuralları geçerliliğini korur. Bunu yalnızca güvendiğiniz bir projede kullanın.",
+  "dialog.bypassPermissions.confirm": "İzinleri atla",
+  "dialog.bypassPermissions.cancel": "İptal",
+
+  "ui.permission.always.project": "Bu projede her zaman izin ver",
+  "ui.permission.always.session": "Bu oturum için izin ver",
+  "ui.permission.always.acceptEdits": "Tüm düzenlemelere izin ver (Düzenlemeleri kabul et)",
+  "ui.permission.always.everything": "bu araç için her şey",
+  "ui.permission.guard.floor.title": "Korunan işlem",
+  "ui.permission.guard.guard.title": "İnceleme gerekiyor",
+  "ui.permission.guard.noAlways": "Bu yalnızca bir kez onaylanabilir",
+  "ui.permission.writes": "Şuraya yazar",
+  "ui.question.planFeedback.placeholder": "Ajana planda neyi değiştirmesi gerektiğini söyleyin",
 
   "dialog.mcp.title": "MCP'ler",
   "dialog.mcp.description": "Toplam {{total}} öğeden {{enabled}} tanesi etkin",
@@ -644,6 +676,15 @@ export const dict = {
   "toast.permissions.autoaccept.on.description": "İzin istekleri otomatik olarak onaylanacak",
   "toast.permissions.autoaccept.off.title": "İzinleri otomatik kabul etme durduruldu",
   "toast.permissions.autoaccept.off.description": "İzin istekleri onay gerektirecek",
+  "toast.permissions.modeMigrated.title": "Otomatik kabul artık Düzenlemeleri kabul et oldu",
+  "toast.permissions.modeMigrated.description":
+    "Bu klasördeki düzenlemeler otomatik olarak onaylanır; komutlar için yine sorar. Tam özerklik için düzenleyicide İzinleri atla seçeneğini belirleyin.",
+  "toast.permissions.autoAcceptRemoved.title": "Otomatik kabul kapatıldı",
+  "toast.permissions.autoAcceptRemoved.modes":
+    "İzin istekleri yeniden soruluyor. Düzenlemeleri otomatik onaylamak için istemin yanındaki mod menüsünden Düzenlemeleri kabul et seçeneğini belirleyin veya Shift+Tab tuşuna basın.",
+  "toast.permissions.autoAcceptRemoved.rules":
+    "İzin istekleri yeniden soruluyor. Bunları atlamak için bu sunucunun izin yapılandırmasında o araçlara izin verin.",
+  "toast.permissions.mode.error.title": "İzin modu değiştirilemedi",
 
   "toast.model.none.title": "Model seçilmedi",
   "toast.model.none.description": "Bu oturumu özetlemek için bir sağlayıcı bağlayın",
@@ -917,6 +958,8 @@ export const dict = {
 
   "settings.general.row.language.title": "Dil",
   "settings.general.row.language.description": "AgentCode'un görünüm dilini değiştirin",
+  "settings.general.permissionMode.title": "Varsayılan izin modu",
+  "settings.general.permissionMode.description": "Bu klasördeki yeni oturumlar için kullanılır",
   "settings.general.row.shell.title": "Terminal Kabuğu",
   "settings.general.row.shell.description":
     "Terminalinizde kullanılacak kabuğu seçin. Uyumlu kabuklar, ajan araç çağrılarında da kullanılır.",

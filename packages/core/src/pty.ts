@@ -7,6 +7,7 @@ import { Pty } from "@opencode-ai/schema/pty"
 import { Config } from "./config"
 import { EventV2 } from "./event"
 import { Location } from "./location"
+import { PermissionLaunchMode } from "./permission/launch-mode"
 import { PtyID } from "./pty/schema"
 import { Shell } from "./shell"
 import { lazy } from "./util/lazy"
@@ -167,8 +168,10 @@ const layer = Layer.effect(
       const command = input.command || Shell.preferred(Config.latest(yield* config.entries(), "shell"))
       const args = Shell.login(command) ? [...(input.args ?? []), "-l"] : [...(input.args ?? [])]
       const cwd = input.cwd || location.directory
+      // The launch permission mode is this engine's setting: a nested agent started in the terminal must not inherit
+      // it. An explicit `env` entry still applies.
       const env = {
-        ...process.env,
+        ...PermissionLaunchMode.inherited(),
         ...input.env,
         TERM: "xterm-256color",
         OPENCODE_TERMINAL: "1",

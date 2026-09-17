@@ -122,6 +122,7 @@ export const dict = {
   "ui.promptInput.attachments": "រូបភាព និងឯកសារ",
   "ui.promptInput.context": "បរិបទ",
   "ui.promptInput.shell": "ពាក្យបញ្ជា Shell",
+  "ui.promptInput.chooseMode": "របៀបការអនុញ្ញាត",
   "ui.promptInput.chooseAgent": "ជ្រើសរើសភ្នាក់ងារ",
   "ui.promptInput.chooseModel": "ជ្រើសរើសម៉ូដែល",
   "ui.promptInput.chooseVariant": "ជ្រើសរើសវ៉ារ្យ៉ង់ម៉ូដែល",

@@ -31,3 +31,23 @@ test("edge cases", () => {
   expect(BashArity.prefix(["single"])).toEqual(["single"])
   expect(BashArity.prefix(["git"])).toEqual(["git"])
 })
+
+test("added entries keep prefixes meaningful", () => {
+  expect(BashArity.prefix(["gh", "pr", "view", "12"])).toEqual(["gh", "pr", "view"])
+  expect(BashArity.prefix(["docker", "compose", "up", "-d"])).toEqual(["docker", "compose", "up"])
+  expect(BashArity.prefix(["kubectl", "get", "pods"])).toEqual(["kubectl", "get"])
+  expect(BashArity.prefix(["cargo", "test", "--release"])).toEqual(["cargo", "test"])
+  expect(BashArity.prefix(["go", "test", "./..."])).toEqual(["go", "test"])
+  expect(BashArity.prefix(["uv", "sync", "--frozen"])).toEqual(["uv", "sync"])
+  expect(BashArity.prefix(["uv", "run", "pytest", "-x"])).toEqual(["uv", "run", "pytest"])
+  expect(BashArity.prefix(["poetry", "install"])).toEqual(["poetry", "install"])
+  expect(BashArity.prefix(["make", "build", "VERBOSE=1"])).toEqual(["make", "build"])
+  expect(BashArity.prefix(["pnpm", "run", "dev", "--port"])).toEqual(["pnpm", "run", "dev"])
+  expect(BashArity.prefix(["yarn", "run", "dev", "x"])).toEqual(["yarn", "run", "dev"])
+})
+
+test("object prototype names are not arity entries", () => {
+  expect(BashArity.prefix(["constructor", "x"])).toEqual(["constructor"])
+  expect(BashArity.prefix(["toString"])).toEqual(["toString"])
+  expect(BashArity.prefix(["hasOwnProperty", "a", "b"])).toEqual(["hasOwnProperty"])
+})

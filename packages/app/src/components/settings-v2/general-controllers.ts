@@ -2,6 +2,7 @@ import { createMemo, createResource, onMount, type Accessor } from "solid-js"
 import type { ColorScheme } from "@opencode-ai/ui/theme/context"
 import { useTheme } from "@opencode-ai/ui/theme/context"
 import { usePermission } from "@/context/permission"
+import { folderModeOptions, type PermissionMode } from "@/context/permission-mode"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import {
@@ -25,26 +26,29 @@ export type { ShellOption, ShellSelectOption } from "./general-controller-behavi
 export function createPermissionScopeController(sessionID: Accessor<string | undefined>) {
   const permission = usePermission()
   const serverSync = useServerSync()
+  // The open session's directory, else the route or draft directory, so the setting also works before a session
+  // exists. The permission context stores it under the project root, so worktree sessions and drafts share it.
   const directory = createMemo(() => {
     const id = sessionID()
-    if (!id) return undefined
-    return serverSync().session.lineage.peek(id)?.session.directory
+    const session = id ? serverSync().session.lineage.peek(id)?.session.directory : undefined
+    return session ?? permission.activeDirectory()
+  })
+  const value = createMemo<PermissionMode>(() => {
+    const dir = directory()
+    if (!dir) return "default"
+    return permission.defaultMode(dir)
   })
 
+  // The default permission mode for new sessions in this folder. Picking what the engine would use anyway clears the
+  // stored override, so a config default_permission_mode applies again.
   return {
-    accepting: createMemo(() => {
-      const id = sessionID()
+    value,
+    options: createMemo(() => folderModeOptions(value())),
+    enabled: createMemo(() => !!directory() && permission.modesSupported()),
+    set: (mode: PermissionMode) => {
       const dir = directory()
-      if (!id || !dir) return false
-      return permission.isAutoAccepting(id, dir)
-    }),
-    enabled: createMemo(() => !!directory()),
-    set: (checked: boolean) => {
-      const id = sessionID()
-      const dir = directory()
-      if (!id || !dir) return
-      if (checked) return permission.enableAutoAccept(id, dir)
-      permission.disableAutoAccept(id, dir)
+      if (!dir) return
+      permission.setFolderMode(dir, mode)
     },
   }
 }

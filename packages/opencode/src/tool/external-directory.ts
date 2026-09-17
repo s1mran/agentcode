@@ -10,6 +10,8 @@ type Kind = "file" | "directory"
 type Options = {
   bypass?: boolean
   kind?: Kind
+  /** "read" marks a read-only lookup, so a protected folder outside the project is not treated as a write target. */
+  access?: "read"
 }
 
 export const assertExternalDirectoryEffect = Effect.fn("Tool.assertExternalDirectory")(function* (
@@ -39,6 +41,7 @@ export const assertExternalDirectoryEffect = Effect.fn("Tool.assertExternalDirec
     metadata: {
       filepath: full,
       parentDir: dir,
+      ...(options?.access ? { access: options.access } : {}),
     },
   })
   return true

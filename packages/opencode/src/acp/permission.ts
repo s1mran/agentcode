@@ -6,6 +6,7 @@ import type {
   ToolCallLocation,
   ToolCallUpdate,
 } from "@agentclientprotocol/sdk"
+import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2"
 import { applyPatch } from "diff"
 import { exists, readText } from "@/util/filesystem"
@@ -16,12 +17,33 @@ import { Effect } from "effect"
 type PermissionEvent = Extract<Event, { type: "permission.asked" }>
 type Reply = "once" | "always" | "reject"
 type Connection = Partial<Pick<AgentSideConnection, "requestPermission" | "writeTextFile">>
+// guard and alwaysScope are optional on the wire: servers without the permission floor never send them.
+type PermissionRequest = PermissionEvent["properties"] & {
+  guard?: PermissionV1.Guard
+  alwaysScope?: PermissionV1.AlwaysScope
+}
 
-const permissionOptions: PermissionOption[] = [
-  { optionId: "once", kind: "allow_once", name: "Allow once" },
-  { optionId: "always", kind: "allow_always", name: "Always allow" },
-  { optionId: "reject", kind: "reject_once", name: "Reject" },
-]
+/** Whether "Always allow" may be offered: floor and guard requests, and requests without patterns, never offer it. */
+function alwaysAllowed(request: PermissionRequest) {
+  return request.always.length > 0 && !request.guard
+}
+
+function alwaysName(scope: PermissionV1.AlwaysScope | undefined) {
+  if (scope === "project") return "Always allow in this project"
+  if (scope === "acceptEdits") return "Allow all edits (Accept edits)"
+  if (scope === "session") return "Allow for this session"
+  return "Always allow"
+}
+
+export function permissionOptions(request: PermissionRequest): PermissionOption[] {
+  return [
+    { optionId: "once", kind: "allow_once", name: "Allow once" },
+    ...(alwaysAllowed(request)
+      ? [{ optionId: "always", kind: "allow_always", name: alwaysName(request.alwaysScope) } satisfies PermissionOption]
+      : []),
+    { optionId: "reject", kind: "reject_once", name: "Reject" },
+  ]
+}
 
 export class Handler {
   private readonly queues = new Map<string, Promise<void>>()
@@ -49,7 +71,7 @@ export class Handler {
   }
 
   private async process(event: PermissionEvent) {
-    const permission = event.properties
+    const permission: PermissionRequest = event.properties
     const session = await Effect.runPromise(this.input.session.tryGet(permission.sessionID))
     if (!session) return
 
@@ -65,8 +87,9 @@ export class Handler {
           toolCallId: permission.tool?.callID ?? permission.id,
           toolName: permission.permission,
           input: permission.metadata,
+          guard: permission.guard,
         }),
-        options: permissionOptions,
+        options: permissionOptions(permission),
       })
       .catch(async () => {
         await this.reply(permission.id, "reject", session.cwd)
@@ -75,11 +98,13 @@ export class Handler {
 
     if (!result) return
 
-    const reply = selectedReply(result)
-    if (reply !== "once" && reply !== "always") {
+    const selected = selectedReply(result)
+    if (selected !== "once" && selected !== "always") {
       await this.reply(permission.id, "reject", session.cwd)
       return
     }
+    // "always" was not offered for this request (a floor or guard, or nothing to remember): approve this call only.
+    const reply = selected === "always" && !alwaysAllowed(permission) ? "once" : selected
 
     if (permission.permission === "edit") {
       await this.writeProposedEdit(session.id, permission.metadata).catch(() => {})
@@ -119,6 +144,7 @@ async function permissionToolCall(input: {
   readonly toolCallId: string
   readonly toolName: string
   readonly input: ToolInput
+  readonly guard?: PermissionV1.Guard
 }): Promise<ToolCallUpdate> {
   const toolCall = pendingToolCall({
     toolCallId: input.toolCallId,
@@ -131,6 +157,10 @@ async function permissionToolCall(input: {
   const content = await permissionContent(input.toolName, input.input)
   return {
     ...toolCall,
+    // A floor or guard prefix tells the client why this call cannot be pre-approved.
+    ...(input.guard
+      ? { title: `${input.guard.level === "floor" ? "Protected: " : "Needs review: "}${toolCall.title}` }
+      : {}),
     locations: permissionLocations(input.toolName, input.input),
     ...(content.length ? { content } : {}),
   }

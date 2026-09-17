@@ -1,4 +1,5 @@
 import { Agent } from "@/agent/agent"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
@@ -38,6 +39,20 @@ const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
   "image/webp",
 ])
 
+/**
+ * Session rules a permission mode adds on top of the stored session permission. In plan mode a root session may call
+ * plan_exit and ask questions whatever agent runs, and a subagent session loses its edit tools (its edit asks are
+ * denied too). Explicit user denies still win over these allows.
+ */
+export function modeRules(input: { mode: Permission.Mode; child: boolean }): PermissionV1.Rule[] {
+  if (input.mode !== "plan") return []
+  if (input.child) return [{ permission: "edit", pattern: "*", action: "deny" }]
+  return [
+    { permission: "plan_exit", pattern: "*", action: "allow" },
+    { permission: "question", pattern: "*", action: "allow" },
+  ]
+}
+
 export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   agent: Agent.Info
   model: Provider.Model
@@ -55,6 +70,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const mcp = yield* MCP.Service
   const truncate = yield* Truncate.Service
   const flags = yield* RuntimeFlags.Service
+  const mode = yield* permission.mode(input.session.id, input.agent.name)
+  const child = !!input.session.parentID
+  const sessionPermission = [...(input.session.permission ?? []), ...modeRules({ mode, child })]
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
@@ -83,8 +101,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         .ask({
           ...req,
           sessionID: input.session.id,
+          agent: input.agent.name,
           tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-          ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
+          ruleset: Permission.merge(input.agent.permission, sessionPermission),
         })
         .pipe(Effect.orDie),
   })
@@ -93,7 +112,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     modelID: ModelV2.ID.make(input.model.api.id),
     providerID: input.model.providerID,
     agent: input.agent,
-    permission: input.session.permission,
+    permission: sessionPermission,
+    mode,
+    child,
   })) {
     const schema = ProviderTransform.schema(input.model, ToolJsonSchema.fromTool(item))
     tools[item.id] = tool({
@@ -405,7 +426,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             { args },
           )
           const result: Awaited<ReturnType<NonNullable<typeof execute>>> = yield* Effect.gen(function* () {
-            yield* ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] })
+            yield* ctx.ask({ permission: key, metadata: { tool: key }, patterns: ["*"], always: ["*"] })
             return yield* Effect.promise(() => execute(args, opts))
           }).pipe(
             Effect.withSpan("Tool.execute", {

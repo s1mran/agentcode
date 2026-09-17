@@ -15,6 +15,7 @@ import { Plugin } from "../../src/plugin"
 import { Provider } from "../../src/provider/provider"
 import { Skill } from "../../src/skill"
 import { Truncate } from "../../src/tool/truncate"
+import { deriveSubagentSessionPermission } from "../../src/agent/subagent-permissions"
 
 const agentLayer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   LayerNode.compile(
@@ -64,9 +65,71 @@ it.instance("build agent has correct default properties", () =>
     expect(build).toBeDefined()
     expect(build?.mode).toBe("primary")
     expect(build?.native).toBe(true)
-    expect(evalPerm(build, "edit")).toBe("allow")
-    expect(evalPerm(build, "bash")).toBe("allow")
+    expect(evalPerm(build, "edit")).toBe("ask")
+    expect(evalPerm(build, "bash")).toBe("ask")
   }),
+)
+
+it.instance("built-in defaults ask for commands, edits, network and MCP but allow reads", () =>
+  Effect.gen(function* () {
+    const build = yield* load((svc) => svc.get("build"))
+    expect(build).toBeDefined()
+    const rules = build!.permission
+    expect(Permission.evaluate("bash", "npm test", rules).action).toBe("ask")
+    expect(Permission.evaluate("edit", "src/a.ts", rules).action).toBe("ask")
+    expect(Permission.evaluate("read", "src/a.ts", rules).action).toBe("allow")
+    expect(Permission.evaluate("read", ".env", rules).action).toBe("ask")
+    expect(Permission.evaluate("read", ".env.local", rules).action).toBe("ask")
+    expect(Permission.evaluate("read", ".env.example", rules).action).toBe("allow")
+    expect(Permission.evaluate("webfetch", "docs.github.com", rules).action).toBe("allow")
+    expect(Permission.evaluate("webfetch", "evil.com", rules).action).toBe("ask")
+    expect(Permission.evaluate("websearch", "*", rules).action).toBe("ask")
+    expect(Permission.evaluate("mcp_tool", "*", rules).action).toBe("ask")
+    expect(Permission.evaluate("workflow_tool_approval", "*", rules).action).toBe("ask")
+    for (const tool of ["glob", "grep", "list", "lsp", "task", "skill", "todowrite", "question", "plan_enter"]) {
+      expect(Permission.evaluate(tool, "*", rules).action).toBe("allow")
+    }
+    expect(Permission.evaluate("plan_exit", "*", rules).action).toBe("deny")
+    for (const host of Agent.WEBFETCH_PREAPPROVED) {
+      expect(Permission.evaluate("webfetch", host, rules).action).toBe("allow")
+    }
+  }),
+)
+
+it.instance(
+  "built-in rules are tagged builtin and user rules are not",
+  () =>
+    Effect.gen(function* () {
+      const build = yield* load((svc) => svc.get("build"))
+      expect(build).toBeDefined()
+      const user = build!.permission.filter((rule) => rule.source !== "builtin")
+      expect(user).toEqual([
+        { permission: "bash", pattern: "git status *", action: "allow" },
+        { permission: "webfetch", pattern: "example.com", action: "deny" },
+      ])
+      const builtin = build!.permission.filter((rule) => rule.source === "builtin")
+      expect(builtin.length).toBeGreaterThan(0)
+      expect(builtin).toContainEqual({ permission: "*", pattern: "*", action: "ask", source: "builtin" })
+      expect(builtin).toContainEqual({ permission: "question", pattern: "*", action: "allow", source: "builtin" })
+      expect(builtin).toContainEqual({
+        permission: "external_directory",
+        pattern: Truncate.GLOB,
+        action: "allow",
+        source: "builtin",
+      })
+      for (const name of ["plan", "general", "explore", "compaction", "title", "summary"]) {
+        const agent = yield* load((svc) => svc.get(name))
+        expect(agent!.permission.filter((rule) => rule.source !== "builtin")).toEqual(user)
+      }
+    }),
+  {
+    config: {
+      permission: {
+        bash: { "git status *": "allow" },
+        webfetch: { "example.com": "deny" },
+      },
+    },
+  },
 )
 
 it.instance("plan agent denies edits except .opencode/plans/*", () =>
@@ -80,13 +143,19 @@ it.instance("plan agent denies edits except .opencode/plans/*", () =>
   }),
 )
 
-it.instance("plan agent denies the general subagent by default", () =>
+it.instance("plan agent no longer denies the general subagent", () =>
   Effect.gen(function* () {
     const plan = yield* load((svc) => svc.get("plan"))
     expect(plan).toBeDefined()
-    expect(Permission.evaluate("task", "general", plan!.permission).action).toBe("deny")
+    // Plan mode is inherited by subagents through the session chain, so general is read-only there already.
+    expect(plan!.permission.some((rule) => rule.permission === "task" && rule.action === "deny")).toBe(false)
+    expect(Permission.evaluate("task", "general", plan!.permission).action).toBe("allow")
     expect(Permission.evaluate("task", "explore", plan!.permission).action).toBe("allow")
     expect(Permission.evaluate("task", "custom", plan!.permission).action).toBe("allow")
+    expect(Permission.evaluate("edit", "src/a.ts", plan!.permission).action).toBe("deny")
+    expect(Permission.evaluate("edit", ".opencode/plans/x.md", plan!.permission).action).toBe("allow")
+    expect(Permission.evaluate("plan_exit", "*", plan!.permission).action).toBe("allow")
+    expect(Permission.evaluate("question", "*", plan!.permission).action).toBe("allow")
   }),
 )
 
@@ -117,6 +186,21 @@ it.instance("explore agent denies edit and write", () =>
     expect(evalPerm(explore, "edit")).toBe("deny")
     expect(evalPerm(explore, "write")).toBe("deny")
     expect(evalPerm(explore, "todowrite")).toBe("deny")
+  }),
+)
+
+it.instance("explore agent asks for bash and network instead of allowing them", () =>
+  Effect.gen(function* () {
+    const explore = yield* load((svc) => svc.get("explore"))
+    expect(explore).toBeDefined()
+    expect(explore!.permission).toContainEqual({ permission: "bash", pattern: "*", action: "ask", source: "builtin" })
+    expect(Permission.evaluate("bash", "npm test", explore!.permission).action).toBe("ask")
+    expect(Permission.evaluate("webfetch", "evil.com", explore!.permission).action).toBe("ask")
+    expect(Permission.evaluate("webfetch", "docs.github.com", explore!.permission).action).toBe("allow")
+    expect(evalPerm(explore, "websearch")).toBe("ask")
+    expect(evalPerm(explore, "read")).toBe("allow")
+    expect(evalPerm(explore, "grep")).toBe("allow")
+    expect(evalPerm(explore, "mcp_tool")).toBe("deny")
   }),
 )
 
@@ -263,8 +347,8 @@ it.instance(
       expect(build).toBeDefined()
       // Specific pattern is denied
       expect(Permission.evaluate("bash", "rm -rf *", build!.permission).action).toBe("deny")
-      // Edit still allowed
-      expect(evalPerm(build, "edit")).toBe("allow")
+      // Edit keeps the built-in ask
+      expect(evalPerm(build, "edit")).toBe("ask")
     }),
   {
     config: {
@@ -474,11 +558,35 @@ it.instance("default permission includes doom_loop and external_directory as ask
   }),
 )
 
-it.instance("webfetch is allowed by default", () =>
+it.instance("webfetch asks by default except for preapproved docs hosts", () =>
   Effect.gen(function* () {
     const build = yield* load((svc) => svc.get("build"))
-    expect(evalPerm(build, "webfetch")).toBe("allow")
+    expect(evalPerm(build, "webfetch")).toBe("ask")
+    expect(Permission.evaluate("webfetch", "docs.github.com", build!.permission).action).toBe("allow")
+    expect(Permission.evaluate("webfetch", "evil.com", build!.permission).action).toBe("ask")
   }),
+)
+
+it.instance(
+  "custom config agents start from the built-in defaults",
+  () =>
+    Effect.gen(function* () {
+      const custom = yield* load((svc) => svc.get("reviewer"))
+      expect(custom).toBeDefined()
+      expect(Permission.evaluate("bash", "npm test", custom!.permission).action).toBe("ask")
+      expect(Permission.evaluate("read", "src/a.ts", custom!.permission).action).toBe("allow")
+      expect(Permission.evaluate("edit", "src/a.ts", custom!.permission).action).toBe("deny")
+      expect(custom!.permission.filter((rule) => rule.source !== "builtin")).toEqual([
+        { permission: "edit", pattern: "*", action: "deny" },
+      ])
+    }),
+  {
+    config: {
+      agent: {
+        reviewer: { description: "Reviews code", permission: { edit: "deny" } },
+      },
+    },
+  },
 )
 
 it.instance(
@@ -528,6 +636,7 @@ it.instance(
   () =>
     Effect.gen(function* () {
       const build = yield* load((svc) => svc.get("build"))
+      // Truncated tool output stays readable; only a deny naming Truncate.GLOB exactly blocks it.
       expect(Permission.evaluate("external_directory", Truncate.GLOB, build!.permission).action).toBe("allow")
       expect(Permission.evaluate("external_directory", Truncate.DIR, build!.permission).action).toBe("deny")
       expect(Permission.evaluate("external_directory", "/some/other/path", build!.permission).action).toBe("deny")
@@ -552,7 +661,7 @@ it.instance("global tmp directory children are allowed for external_directory", 
 )
 
 it.instance(
-  "Truncate.GLOB is allowed even when user denies external_directory per-agent",
+  "Truncate.GLOB is allowed even when user denies external_directory per agent",
   () =>
     Effect.gen(function* () {
       const build = yield* load((svc) => svc.get("build"))
@@ -568,6 +677,25 @@ it.instance(
             external_directory: "deny",
           },
         },
+      },
+    },
+  },
+)
+
+it.instance(
+  "Truncate.GLOB is allowed silently when user asks for external_directory, also for explore",
+  () =>
+    Effect.gen(function* () {
+      for (const name of ["build", "plan", "general", "explore"]) {
+        const agent = yield* load((svc) => svc.get(name))
+        expect(Permission.evaluate("external_directory", Truncate.GLOB, agent!.permission).action).toBe("allow")
+        expect(Permission.evaluate("external_directory", "/some/other/path", agent!.permission).action).toBe("ask")
+      }
+    }),
+  {
+    config: {
+      permission: {
+        external_directory: "ask",
       },
     },
   },
@@ -752,4 +880,67 @@ it.instance(
       },
     },
   },
+)
+
+it.instance("subagent session permission carries parent asks and denies, and ignores built-in task/todowrite", () =>
+  Effect.gen(function* () {
+    const general = yield* load((svc) => svc.get("general"))
+    const build = yield* load((svc) => svc.get("build"))
+    expect(general).toBeDefined()
+    expect(build).toBeDefined()
+
+    const derived = deriveSubagentSessionPermission({
+      parentSessionPermission: [
+        { permission: "bash", pattern: "git push *", action: "ask" },
+        { permission: "edit", pattern: "*", action: "deny", source: "builtin" },
+        { permission: "external_directory", pattern: "/tmp/x/*", action: "allow" },
+        { permission: "bash", pattern: "ls *", action: "allow" },
+      ],
+      subagent: general!,
+    })
+    expect(derived).toEqual([
+      { permission: "bash", pattern: "git push *", action: "ask" },
+      { permission: "edit", pattern: "*", action: "deny" },
+      { permission: "external_directory", pattern: "/tmp/x/*", action: "allow" },
+      { permission: "todowrite", pattern: "*", action: "deny" },
+      { permission: "task", pattern: "*", action: "deny" },
+    ])
+
+    // build allows task and todowrite only through built-in rules, which are not an opt-in for a subagent
+    const fromBuild = deriveSubagentSessionPermission({ parentSessionPermission: [], subagent: build! })
+    expect(fromBuild).toEqual([
+      { permission: "todowrite", pattern: "*", action: "deny" },
+      { permission: "task", pattern: "*", action: "deny" },
+    ])
+  }),
+)
+
+it.instance(
+  "subagent with explicit task/todowrite config keeps them",
+  () =>
+    Effect.gen(function* () {
+      const worker = yield* load((svc) => svc.get("worker"))
+      expect(worker).toBeDefined()
+      expect(deriveSubagentSessionPermission({ parentSessionPermission: [], subagent: worker! })).toEqual([])
+    }),
+  {
+    config: {
+      agent: {
+        worker: { mode: "subagent", permission: { task: "allow", todowrite: "allow" } },
+      },
+    },
+  },
+)
+
+it.instance("explore asks before reading .env files like build does", () =>
+  Effect.gen(function* () {
+    const explore = yield* load((svc) => svc.get("explore"))
+    const build = yield* load((svc) => svc.get("build"))
+    for (const agent of [explore!, build!]) {
+      expect(Permission.evaluate("read", ".env", agent.permission).action).toBe("ask")
+      expect(Permission.evaluate("read", "config/.env.local", agent.permission).action).toBe("ask")
+      expect(Permission.evaluate("read", ".env.example", agent.permission).action).toBe("allow")
+      expect(Permission.evaluate("read", "src/index.ts", agent.permission).action).toBe("allow")
+    }
+  }),
 )

@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
-import { Effect, Layer } from "effect"
+import { Cause, Effect, Exit, Layer } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { Agent } from "../../src/agent/agent"
 import { Truncate } from "@/tool/truncate"
@@ -37,13 +37,71 @@ const withFetch = <A, E, R>(
     (server) => Effect.sync(() => server.stop(true)),
   )
 
-const exec = Effect.fn("WebFetchToolTest.exec")(function* (args: Tool.InferParameters<typeof WebFetchTool>) {
+const exec = Effect.fn("WebFetchToolTest.exec")(function* (
+  args: Tool.InferParameters<typeof WebFetchTool>,
+  next: Tool.Context = ctx,
+) {
   const info = yield* WebFetchTool
   const tool = yield* info.init()
-  return yield* tool.execute(args, ctx)
+  return yield* tool.execute(args, next)
+})
+
+type AskInput = Parameters<Tool.Context["ask"]>[0]
+
+// Records the permission request and stops before any network access.
+const asked = Effect.fn("WebFetchToolTest.asked")(function* (url: string) {
+  const requests: AskInput[] = []
+  const stop = new Error("stop after permission")
+  const exit = yield* exec(
+    { url, format: "markdown" },
+    {
+      ...ctx,
+      ask: (input: AskInput) =>
+        Effect.sync(() => {
+          requests.push(input)
+          throw stop
+        }),
+    },
+  ).pipe(Effect.exit)
+  expect(Exit.isFailure(exit)).toBe(true)
+  const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+  return { requests, error: error instanceof Error ? error : new Error(String(error)) }
 })
 
 describe("tool.webfetch", () => {
+  it.instance("asks per host, lowercased, with the full URL for deny and ask rules", () =>
+    Effect.gen(function* () {
+      const { requests } = yield* asked("https://Docs.GitHub.com/en/x?y")
+      expect(requests).toHaveLength(1)
+      expect(requests[0].permission).toBe("webfetch")
+      expect(requests[0].patterns).toEqual(["docs.github.com"])
+      expect(requests[0].always).toEqual(["docs.github.com"])
+      expect(requests[0].hints).toEqual([{ pattern: "docs.github.com", loose: "https://Docs.GitHub.com/en/x?y" }])
+      expect(requests[0].metadata.url).toBe("https://Docs.GitHub.com/en/x?y")
+    }),
+  )
+
+  it.instance("keeps a non-default port in the host pattern", () =>
+    Effect.gen(function* () {
+      const local = yield* asked("http://localhost:3000/x")
+      expect(local.requests[0].patterns).toEqual(["localhost:3000"])
+      expect(local.requests[0].always).toEqual(["localhost:3000"])
+      const standard = yield* asked("https://example.com:443/x")
+      expect(standard.requests[0].patterns).toEqual(["example.com"])
+    }),
+  )
+
+  it.instance("rejects an invalid URL before asking", () =>
+    Effect.gen(function* () {
+      const invalid = yield* asked("https://")
+      expect(invalid.requests).toHaveLength(0)
+      expect(invalid.error.message).toContain("Invalid URL")
+      const scheme = yield* asked("ftp://example.com/file")
+      expect(scheme.requests).toHaveLength(0)
+      expect(scheme.error.message).toContain("URL must start with http:// or https://")
+    }),
+  )
+
   it.instance("returns image responses as file attachments", () =>
     Effect.gen(function* () {
       const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
@@ -133,6 +191,58 @@ describe("tool.webfetch", () => {
           expect(result.output).toContain("hello")
           expect(agents).toHaveLength(2)
           expect(agents[1]).toBe("AgentCode")
+        }),
+    )
+  })
+
+  it.instance("asks again before following a redirect to another host, and not for a same-host redirect", () => {
+    const hits: string[] = []
+    return withFetch(
+      (req) => {
+        const url = new URL(req.url)
+        hits.push(`${url.hostname}${url.pathname}`)
+        if (url.pathname === "/same") return new Response(null, { status: 302, headers: { location: "/final" } })
+        if (url.pathname === "/away")
+          return new Response(null, {
+            status: 301,
+            headers: { location: `http://127.0.0.1:${url.port}/final` },
+          })
+        return new Response("landed", { status: 200, headers: { "content-type": "text/plain" } })
+      },
+      (url) =>
+        Effect.gen(function* () {
+          const local = (path: string) => `http://localhost:${url.port}${path}`
+          const requests: AskInput[] = []
+          const record: Tool.Context = {
+            ...ctx,
+            ask: (input: AskInput) => Effect.sync(() => void requests.push(input)),
+          }
+
+          const same = yield* exec({ url: local("/same"), format: "text" }, record)
+          expect(same.output).toBe("landed")
+          expect(requests.map((item) => item.patterns)).toEqual([[`localhost:${url.port}`]])
+
+          requests.length = 0
+          const away = yield* exec({ url: local("/away"), format: "text" }, record)
+          expect(away.output).toBe("landed")
+          expect(requests.map((item) => item.patterns)).toEqual([[`localhost:${url.port}`], [`127.0.0.1:${url.port}`]])
+          expect(requests[1].metadata.redirectedFrom).toBe(local("/away"))
+
+          // A rejected redirect never reaches the other host.
+          hits.length = 0
+          const stop = new Error("redirect rejected")
+          const exit = yield* exec(
+            { url: local("/away"), format: "text" },
+            {
+              ...ctx,
+              ask: (input: AskInput) =>
+                Effect.sync(() => {
+                  if (input.patterns[0]?.startsWith("127.0.0.1")) throw stop
+                }),
+            },
+          ).pipe(Effect.exit)
+          expect(Exit.isFailure(exit)).toBe(true)
+          expect(hits).toEqual(["localhost/away"])
         }),
     )
   })

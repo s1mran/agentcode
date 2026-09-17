@@ -26,6 +26,8 @@ import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { RemoteAuthError } from "@opencode-ai/core/v1/config/error"
 import { ConfigPermissionV1 } from "@opencode-ai/core/v1/config/permission"
 import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { PermissionLaunchMode } from "@opencode-ai/core/permission/launch-mode"
 import { ConfigAgent } from "./agent"
 import { ConfigCommand } from "./command"
 import { ConfigManaged } from "./managed"
@@ -59,6 +61,39 @@ function normalizeLoadedConfig(data: unknown) {
   delete copy.keybinds
   delete copy.tui
   return copy
+}
+
+// Warn about legacy `tools: { x: true }` entries once per process, not on every instance load.
+let warnedLegacyToolsEnabled = false
+
+// Config lint for permission shapes whose meaning changed with deny > ask > allow precedence and ask-by-default
+// built-ins. Log only; the config still loads as written.
+function lintPermission(permission: ConfigPermissionV1.Info | undefined, prefix = "permission") {
+  const warnings: { message: string; permission: string; patterns?: string[] }[] = []
+  const infos: { message: string; permission: string }[] = []
+  for (const [key, value] of Object.entries(permission ?? {})) {
+    if (key === "*") continue
+    if (typeof value === "string") {
+      if (value === "ask" && (key === "edit" || key === "bash")) {
+        infos.push({
+          permission: key,
+          message: `${prefix}.${key} "ask" is now the built-in default; as an explicit rule it keeps asking in Accept edits mode and for read-only commands`,
+        })
+      }
+      continue
+    }
+    if (value["*"] !== "deny") continue
+    const allows = Object.entries(value)
+      .filter(([pattern, action]) => pattern !== "*" && action === "allow")
+      .map(([pattern]) => pattern)
+    if (!allows.length) continue
+    warnings.push({
+      permission: key,
+      patterns: allows,
+      message: `${prefix}.${key} has "*": "deny"; denies are absolute, so its "allow" patterns never apply`,
+    })
+  }
+  return { warnings, infos }
 }
 
 async function substituteWellKnownRemoteConfig(input: {
@@ -300,7 +335,9 @@ const layer = Layer.effect(
         yield* fs
           .writeFileString(
             gitignore,
-            ["node_modules", "package.json", "package-lock.json", "bun.lock", ".gitignore"].join("\n"),
+            ["node_modules", "package.json", "package-lock.json", "bun.lock", ".gitignore", "settings.local.json"].join(
+              "\n",
+            ),
           )
           .pipe(
             Effect.catchIf(
@@ -348,10 +385,43 @@ const layer = Layer.effect(
           result.plugin_origins = plugins
         })
 
-        const merge = (source: string, next: Info, kind?: ConfigPlugin.Scope) => {
-          result = mergeConfigConcatArrays(result, next)
-          return mergePluginOrigins(source, next.plugin, kind)
+        // disable_bypass_permissions is sticky: once any scope (managed and MDM included) sets it, a later scope
+        // cannot turn it back off through the deep merge.
+        let bypassDisabled = false
+
+        // A source the opened project can ship: a config file inside the worktree/directory, a project config found
+        // walking up from the directory, or an ancestor .opencode folder of a non-git directory. Global, remote,
+        // managed and OPENCODE_CONFIG_CONTENT sources are not project sources.
+        const isProjectSource = (source: string, kind?: ConfigPlugin.Scope) => {
+          if (kind === "global") return false
+          if (source === "OPENCODE_CONFIG_CONTENT") return false
+          if (source.startsWith("http://") || source.startsWith("https://")) return false
+          const file = path.resolve(source)
+          const dir = path.dirname(file)
+          // The user's own config folders stay global even when the opened directory contains them (for example
+          // when the home folder itself is opened).
+          if (dir === path.join(Global.Path.home, ".opencode")) return false
+          if (Flag.OPENCODE_CONFIG_DIR && dir === path.resolve(Flag.OPENCODE_CONFIG_DIR)) return false
+          if (FSUtil.contains(Global.Path.config, file)) return false
+          if (kind === "local") return true
+          if (containsPath(file, ctx)) return true
+          return path.basename(dir) === ".opencode"
         }
+
+        const merge = Effect.fnUntraced(function* (source: string, loaded: Info, kind?: ConfigPlugin.Scope) {
+          let next = loaded
+          bypassDisabled ||= next.disable_bypass_permissions === true
+          // A repository must not be able to start sessions with every permission check switched off.
+          if (next.default_permission_mode === "bypassPermissions" && isProjectSource(source, kind)) {
+            next = { ...next }
+            delete next.default_permission_mode
+            yield* Effect.logWarning("default_permission_mode bypassPermissions ignored from project config", {
+              source,
+            })
+          }
+          result = mergeConfigConcatArrays(result, next)
+          yield* mergePluginOrigins(source, next.plugin, kind)
+        })
 
         for (const [key, value] of Object.entries(auth)) {
           if (value.type === "wellknown") {
@@ -513,6 +583,17 @@ const layer = Layer.effect(
           )
         }
 
+        // Global-scope default mode from the environment (the TUI's --permission-mode sets it). bypassPermissions is
+        // allowed here; the bypass gate still applies when the mode is resolved. Applied before managed config, so an
+        // administrator's default_permission_mode wins over the variable. The worker moves the variable out of its
+        // environment at startup (PermissionLaunchMode.claim) so child processes cannot inherit it; read() still has it.
+        const envMode = PermissionLaunchMode.read()
+        if (envMode) {
+          if (Schema.is(PermissionV1.Mode)(envMode)) result.default_permission_mode = envMode
+          else
+            yield* Effect.logWarning("OPENCODE_PERMISSION_MODE is not a permission mode, skipping", { value: envMode })
+        }
+
         const managedDir = ConfigManaged.managedConfigDir()
         if (existsSync(managedDir)) {
           for (const file of ["opencode.json", "opencode.jsonc"]) {
@@ -524,14 +605,15 @@ const layer = Layer.effect(
         // macOS managed preferences (.mobileconfig deployed via MDM) override everything
         const managed = yield* Effect.promise(() => ConfigManaged.readManagedPreferences())
         if (managed) {
-          result = mergeConfigConcatArrays(
-            result,
-            yield* loadConfig(managed.text, {
-              dir: path.dirname(managed.source),
-              source: managed.source,
-            }),
-          )
+          const next = yield* loadConfig(managed.text, {
+            dir: path.dirname(managed.source),
+            source: managed.source,
+          })
+          bypassDisabled ||= next.disable_bypass_permissions === true
+          result = mergeConfigConcatArrays(result, next)
         }
+        if (bypassDisabled) result.disable_bypass_permissions = true
+        else delete result.disable_bypass_permissions
 
         for (const [name, mode] of Object.entries(result.mode ?? {})) {
           result.agent = mergeDeep(result.agent ?? {}, {
@@ -552,15 +634,39 @@ const layer = Layer.effect(
 
         if (result.tools) {
           const perms: Record<string, ConfigPermissionV1.Action> = {}
-          for (const [tool, enabled] of Object.entries(result.tools)) {
-            const action: ConfigPermissionV1.Action = enabled ? "allow" : "deny"
-            if (tool === "write" || tool === "edit" || tool === "patch") {
-              perms.edit = action
+          const enabled: string[] = []
+          for (const [tool, on] of Object.entries(result.tools)) {
+            // Enabling a tool is not an approval: true only means "not disabled", so the built-in asks still apply.
+            if (on) {
+              enabled.push(tool)
               continue
             }
-            perms[tool] = action
+            if (tool === "write" || tool === "edit" || tool === "patch") {
+              perms.edit = "deny"
+              continue
+            }
+            perms[tool] = "deny"
           }
           result.permission = mergeDeep(perms, result.permission ?? {})
+          if (enabled.length && !warnedLegacyToolsEnabled) {
+            warnedLegacyToolsEnabled = true
+            yield* Effect.logWarning(
+              "legacy tools entries set to true no longer approve those tools; use permission rules to allow them",
+              { tools: enabled },
+            )
+          }
+        }
+
+        // Per-agent permissions (config and markdown agent files alike) are read with the same precedence.
+        const lints = [
+          lintPermission(result.permission),
+          ...Object.entries(result.agent ?? {}).map(([name, agent]) =>
+            lintPermission(agent?.permission, `agent.${name}.permission`),
+          ),
+        ]
+        for (const lint of lints) {
+          for (const { message, ...item } of lint.warnings) yield* Effect.logWarning(message, item)
+          for (const { message, ...item } of lint.infos) yield* Effect.logInfo(message, item)
         }
 
         if (!result.username) {

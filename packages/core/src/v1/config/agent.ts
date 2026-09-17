@@ -67,12 +67,13 @@ const normalize = (agent: Schema.Schema.Type<typeof AgentSchema>): Schema.Schema
 
   const permission: ConfigPermissionV1.Info = {}
   for (const [tool, enabled] of Object.entries(agent.tools ?? {})) {
-    const action = enabled ? "allow" : "deny"
+    // Enabling a tool is not an approval: true only means "not disabled", so the built-in asks still apply.
+    if (enabled) continue
     if (tool === "write" || tool === "edit" || tool === "patch") {
-      permission.edit = action
+      permission.edit = "deny"
       continue
     }
-    permission[tool] = action
+    permission[tool] = "deny"
   }
   globalThis.Object.assign(permission, agent.permission)
 

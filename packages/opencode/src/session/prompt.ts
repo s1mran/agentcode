@@ -71,6 +71,9 @@ const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
   "image/webp",
 ])
 
+// The agentcode gateway model that runs the local Claude CLI with its own tools instead of the engine's.
+const CLAUDE_ENGINE_MODEL = "agentcode-claude"
+
 const STRUCTURED_OUTPUT_DESCRIPTION = `Use this tool to return your final response in the requested structured format.
 
 IMPORTANT:
@@ -145,7 +148,8 @@ const layer = Layer.effect(
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
         resolvePromptParts: (template: string) => resolvePromptParts(template),
-        prompt: (input: PromptInput) => prompt(input).pipe(Effect.catch(Effect.die)),
+        // Subagent runs and background task results are not client requests: they never change the permission mode.
+        prompt: (input: PromptInput) => prompt(input, []).pipe(Effect.catch(Effect.die)),
       } satisfies TaskPromptOps
     })
 
@@ -259,6 +263,7 @@ const layer = Layer.effect(
       sessionID: SessionID
       session: Session.Info
       msgs: SessionV1.WithParts[]
+      mode: Permission.Mode
     }) {
       const { task, model, lastUser, sessionID, session, msgs } = input
       const ctx = yield* InstanceState.context
@@ -279,6 +284,7 @@ const layer = Layer.effect(
         modelID: taskModel.id,
         providerID: taskModel.providerID,
         time: { created: Date.now() },
+        permissionMode: input.mode,
       })
       let part: SessionV1.ToolPart = yield* sessions.updatePart({
         id: PartID.ascending(),
@@ -343,6 +349,7 @@ const layer = Layer.effect(
               .ask({
                 ...req,
                 sessionID,
+                agent: taskAgent.name,
                 ruleset: Permission.merge(taskAgent.permission, session.permission ?? []),
               })
               .pipe(Effect.orDie),
@@ -448,11 +455,71 @@ const layer = Layer.effect(
       } satisfies SessionV1.TextPart)
     })
 
+    /** Stores a session mode; a refused mode (bypassPermissions behind its gate) is reported and the old one kept. */
+    const applyMode = Effect.fnUntraced(function* (sessionID: SessionID, mode: Permission.Mode | null) {
+      yield* permission.setMode(sessionID, mode).pipe(
+        Effect.catch((error) =>
+          Effect.gen(function* () {
+            yield* Effect.logWarning("permission mode not changed", { "session.id": sessionID, mode, error })
+            yield* events.publish(Session.Event.Error, {
+              sessionID,
+              error: new NamedError.Unknown({ message: error.reason }).toObject(),
+            })
+          }),
+        ),
+      )
+    })
+
+    const applyModes = Effect.fnUntraced(function* (sessionID: SessionID, changes: ModeChanges) {
+      for (const mode of changes) yield* applyMode(sessionID, mode)
+    })
+
+    /**
+     * The mode changes a client request asks for. They are decided before its user message is written and applied
+     * only once that message exists, so a request that fails first leaves the mode alone. An explicit permissionMode
+     * wins. Clients without mode support switch agents instead: choosing the plan agent turns plan mode on, and going
+     * from the plan agent back to a native primary agent restores the mode the session had before plan. Internal
+     * prompts (subagent runs, background task results) pass no changes and never touch the mode.
+     */
+    const modeChanges = Effect.fn("SessionPrompt.modeChanges")(function* (
+      sessionID: SessionID,
+      input: { agent?: string; permissionMode?: Permission.Mode },
+    ) {
+      const none: ModeChanges = []
+      if (input.permissionMode) {
+        const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+        // Re-sending the stored mode is a no-op; bypassPermissions is always re-checked against its gate.
+        if (session.permissionMode === input.permissionMode && input.permissionMode !== "bypassPermissions") return none
+        return [input.permissionMode] satisfies ModeChanges
+      }
+      if (!input.agent) {
+        // A request without an agent runs the default agent; when that is plan, subagents it starts must inherit plan.
+        if ((yield* agents.defaultAgent()) === "plan" && (yield* permission.mode(sessionID)) !== "plan")
+          return ["plan"] satisfies ModeChanges
+        return none
+      }
+      const mode = yield* permission.mode(sessionID)
+      if (input.agent === "plan") return mode === "plan" ? none : (["plan"] satisfies ModeChanges)
+      if (mode !== "plan") return none
+      const native = (item: Agent.Info | undefined) => !!item?.native && item.mode === "primary" && !item.hidden
+      if (!native(yield* agents.get(input.agent))) return none
+      // The latest user message on a native primary agent decides, so custom agents used in between keep plan mode
+      // and plan -> custom agent -> build still leaves it.
+      const natives = new Set((yield* agents.list()).filter(native).map((item) => item.name))
+      const previous = yield* sessions
+        .findMessage(sessionID, (msg) => msg.info.role === "user" && natives.has(msg.info.agent))
+        .pipe(Effect.orDie)
+      if (Option.isNone(previous) || previous.value.info.role !== "user" || previous.value.info.agent !== "plan")
+        return none
+      return [(yield* permission.prePlan(sessionID)) ?? null] satisfies ModeChanges
+    })
+
     const shellImpl = Effect.fn("SessionPrompt.shellImpl")(function* (input: ShellInput, ready?: Latch.Latch) {
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           const markReady = ready ? ready.open.pipe(Effect.asVoid) : Effect.void
           const { msg, part, cwd } = yield* Effect.gen(function* () {
+            const changes = yield* modeChanges(input.sessionID, input)
             const ctx = yield* InstanceState.context
             const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
             if (session.revert) {
@@ -476,6 +543,7 @@ const layer = Layer.effect(
               model: { providerID: model.providerID, modelID: model.modelID },
             }
             yield* sessions.updateMessage(userMsg)
+            yield* applyModes(input.sessionID, changes)
             const userPart: SessionV1.Part = {
               type: "text",
               id: PartID.ascending(),
@@ -1049,26 +1117,29 @@ const layer = Layer.effect(
       return { info, parts }
     }, Effect.scoped)
 
-    const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
-      "SessionPrompt.prompt",
-    )(function* (input: PromptInput) {
-      const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
-      yield* revert.cleanup(session)
-      const message = yield* createUserMessage(input)
-      yield* sessions.touch(input.sessionID)
+    // Mode changes are decided from the client request unless the caller passes them: command() decides them from its
+    // own request, and internal prompts pass none.
+    const prompt: (input: PromptInput, pending?: ModeChanges) => Effect.Effect<SessionV1.WithParts, Image.Error> =
+      Effect.fn("SessionPrompt.prompt")(function* (input: PromptInput, pending?: ModeChanges) {
+        const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+        yield* revert.cleanup(session)
+        const changes = pending ?? (yield* modeChanges(input.sessionID, input))
+        const message = yield* createUserMessage(input)
+        yield* applyModes(input.sessionID, changes)
+        yield* sessions.touch(input.sessionID)
 
-      const permissions: PermissionV1.Rule[] = []
-      for (const [t, enabled] of Object.entries(input.tools ?? {})) {
-        permissions.push({ permission: t, action: enabled ? "allow" : "deny", pattern: "*" })
-      }
-      if (permissions.length > 0) {
-        session.permission = permissions
-        yield* sessions.setPermission({ sessionID: session.id, permission: permissions })
-      }
+        const permissions: PermissionV1.Rule[] = []
+        for (const [t, enabled] of Object.entries(input.tools ?? {})) {
+          permissions.push({ permission: t, action: enabled ? "allow" : "deny", pattern: "*" })
+        }
+        if (permissions.length > 0) {
+          session.permission = permissions
+          yield* sessions.setPermission({ sessionID: session.id, permission: permissions })
+        }
 
-      if (input.noReply === true) return message
-      return yield* loop({ sessionID: input.sessionID })
-    })
+        if (input.noReply === true) return message
+        return yield* loop({ sessionID: input.sessionID })
+      })
 
     const lastAssistant = Effect.fnUntraced(function* (sessionID: SessionID) {
       const match = yield* sessions.findMessage(sessionID, (m) => m.info.role !== "user").pipe(Effect.orDie)
@@ -1140,9 +1211,11 @@ const layer = Layer.effect(
 
           const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
           const task = tasks.pop()
+          // Resolved on every step, so a mode switched mid-turn applies from the next step.
+          const mode = yield* permission.mode(sessionID, lastUser.agent)
 
           if (task?.type === "subtask") {
-            yield* handleSubtask({ task, model, lastUser, sessionID, session, msgs })
+            yield* handleSubtask({ task, model, lastUser, sessionID, session, msgs, mode })
             continue
           }
 
@@ -1167,7 +1240,17 @@ const layer = Layer.effect(
             continue
           }
 
-          const agent = yield* agents.get(lastUser.agent)
+          // In plan mode the native build agent runs as the plan agent; other agents keep their persona.
+          const agent = yield* Effect.gen(function* () {
+            const own = yield* agents.get(lastUser.agent)
+            const plan = mode === "plan" && lastUser.agent === "build" ? yield* agents.get("plan") : undefined
+            if (!plan) return own
+            // The build agent's own configured denies and asks keep applying while it runs as plan; its allows do not.
+            const narrowing = (own?.permission ?? []).filter(
+              (rule) => rule.source !== "builtin" && rule.action !== "allow",
+            )
+            return { ...plan, permission: Permission.merge(plan.permission, narrowing) }
+          })
           if (!agent) {
             const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
             const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
@@ -1177,11 +1260,11 @@ const layer = Layer.effect(
           }
           const maxSteps = agent.steps ?? Infinity
           const isLastStep = step >= maxSteps
-          msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
-            Effect.provideService(RuntimeFlags.Service, flags),
-            Effect.provideService(FSUtil.Service, fsys),
-            Effect.provideService(Session.Service, sessions),
-          )
+          // The same mode rules SessionTools applies, so the model sees the tools the mode allows.
+          const streamPermission = [
+            ...(session.permission ?? []),
+            ...SessionTools.modeRules({ mode, child: !!session.parentID }),
+          ]
 
           const msg: SessionV1.Assistant = {
             id: MessageID.ascending(),
@@ -1197,6 +1280,7 @@ const layer = Layer.effect(
             providerID: model.providerID,
             time: { created: Date.now() },
             sessionID,
+            permissionMode: mode,
           }
           yield* sessions.updateMessage(msg)
 
@@ -1240,6 +1324,19 @@ const layer = Layer.effect(
               Effect.provideService(RuntimeFlags.Service, flags),
             )
 
+            // Reminders run after tool resolution: the plan reminder only points at plan_exit when the model has it.
+            // The local Claude engine runs its own tools and cannot call it, so it ends a plan in its reply instead.
+            const planExitAvailable =
+              "plan_exit" in tools &&
+              !(model.providerID === "agentcode" && model.api.id === CLAUDE_ENGINE_MODEL) &&
+              lastUser.tools?.plan_exit !== false &&
+              !Permission.disabled(["plan_exit"], Permission.merge(agent.permission, streamPermission)).has("plan_exit")
+            msgs = yield* SessionReminders.apply({ messages: msgs, agent, session, mode, planExitAvailable }).pipe(
+              Effect.provideService(RuntimeFlags.Service, flags),
+              Effect.provideService(FSUtil.Service, fsys),
+              Effect.provideService(Session.Service, sessions),
+            )
+
             if (lastUser.format?.type === "json_schema") {
               tools["StructuredOutput"] = createStructuredOutputTool({
                 schema: lastUser.format.schema,
@@ -1262,7 +1359,9 @@ const layer = Layer.effect(
               ruleset: Effect.succeed(ruleset),
               prompt: (filepath) =>
                 Instruction.check(
-                  { ask: (req) => permission.ask({ ...req, sessionID, ruleset }).pipe(Effect.orDie) },
+                  {
+                    ask: (req) => permission.ask({ ...req, sessionID, agent: agent.name, ruleset }).pipe(Effect.orDie),
+                  },
                   filepath,
                 ).pipe(Effect.catchDefect(() => Effect.succeed(false))),
             }
@@ -1285,7 +1384,8 @@ const layer = Layer.effect(
             const result = yield* handle.process({
               user: lastUser,
               agent,
-              permission: session.permission,
+              permission: streamPermission,
+              permissionMode: mode,
               sessionID,
               parentSessionID: session.parentID,
               system,
@@ -1380,7 +1480,15 @@ const layer = Layer.effect(
         yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
         throw error
       }
-      const agentName = cmd.agent ?? input.agent
+      const changes: Array<Permission.Mode | null> = [...(yield* modeChanges(input.sessionID, input))]
+      const builtinPlan = Command.isBuiltinPlan(cmd)
+      if (builtinPlan && (changes.length > 0 ? changes.at(-1) : yield* permission.mode(input.sessionID)) !== "plan")
+        changes.push("plan")
+      const cmdAgent = builtinPlan ? undefined : cmd.agent
+      // The built-in /plan turns plan mode on. Where plan_exit is offered it keeps the caller's agent, so the next
+      // prompt from a client without mode support keeps planning until the plan is approved. Clients without
+      // plan_exit (ACP) run it on the plan agent instead, so going back to a native agent is how they leave plan mode.
+      const agentName = builtinPlan && !ToolRegistry.questionToolEnabled(flags) ? "plan" : (cmdAgent ?? input.agent)
 
       const raw = input.arguments.match(argsRegex) ?? []
       const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
@@ -1406,6 +1514,7 @@ const layer = Layer.effect(
       if (placeholders.length === 0 && !usesArgumentsPlaceholder && input.arguments.trim()) {
         template = template + "\n\n" + input.arguments
       }
+      if (builtinPlan && !input.arguments.trim()) template = Command.PLAN_BLANK_PROMPT
 
       const shellMatches = ConfigMarkdown.shell(template)
       if (shellMatches.length > 0) {
@@ -1423,9 +1532,9 @@ const layer = Layer.effect(
 
       const taskModel = yield* Effect.gen(function* () {
         if (cmd.model) return Provider.parseModel(cmd.model)
-        if (cmd.agent) {
-          const cmdAgent = yield* agents.get(cmd.agent)
-          if (cmdAgent?.model) return cmdAgent.model
+        if (cmdAgent) {
+          const info = yield* agents.get(cmdAgent)
+          if (info?.model) return info.model
         }
         if (input.model) return Provider.parseModel(input.model)
         return yield* currentModel(input.sessionID)
@@ -1476,14 +1585,17 @@ const layer = Layer.effect(
         { parts },
       )
 
-      const result = yield* prompt({
-        sessionID: input.sessionID,
-        messageID: input.messageID,
-        model: userModel,
-        agent: userAgent,
-        parts,
-        variant: input.variant,
-      })
+      const result = yield* prompt(
+        {
+          sessionID: input.sessionID,
+          messageID: input.messageID,
+          model: userModel,
+          agent: userAgent,
+          parts,
+          variant: input.variant,
+        },
+        changes,
+      )
       yield* events.publish(Command.Event.Executed, {
         name: input.command,
         sessionID: input.sessionID,
@@ -1504,6 +1616,9 @@ const layer = Layer.effect(
   }),
 )
 
+/** Session mode changes a request applies once its user message is written, in order (null clears the mode). */
+type ModeChanges = ReadonlyArray<Permission.Mode | null>
+
 const ModelRef = Schema.Struct({
   providerID: ProviderV2.ID,
   modelID: ModelV2.ID,
@@ -1522,6 +1637,7 @@ export const PromptInput = Schema.Struct({
   format: Schema.optional(SessionV1.Format),
   system: Schema.optional(Schema.String),
   variant: Schema.optional(Schema.String),
+  permissionMode: Schema.optional(PermissionV1.Mode),
   parts: Schema.Array(
     Schema.Union([
       SessionV1.TextPartInput,
@@ -1543,6 +1659,7 @@ export const ShellInput = Schema.Struct({
   agent: Schema.String,
   model: Schema.optional(ModelRef),
   command: Schema.String,
+  permissionMode: Schema.optional(PermissionV1.Mode),
 })
 export type ShellInput = Schema.Schema.Type<typeof ShellInput>
 
@@ -1554,6 +1671,7 @@ export const CommandInput = Schema.Struct({
   arguments: Schema.String,
   command: Schema.String,
   variant: Schema.optional(Schema.String),
+  permissionMode: Schema.optional(PermissionV1.Mode),
   // Inlined (no identifier annotation) to keep the original SDK output — the
   // PromptInput call site below references FilePartInput by ref via the
   // Schema export in message-v2.ts.

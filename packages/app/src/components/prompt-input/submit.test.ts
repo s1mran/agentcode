@@ -11,8 +11,12 @@ const sessionCreateInputs: Array<{
   agent?: string
   model?: { id: string; providerID: string; variant?: string }
   location?: { directory: string }
+  permissionMode?: string
 }> = []
-const enabledAutoAccept: Array<{ server: string; sessionID: string; directory: string }> = []
+const sessionModeCalls: Array<{ server: string; sessionID: string; directory: string; mode: string }> = []
+const draftModeClears: Array<{ server: string; directory: string }> = []
+const events: string[] = []
+let sessionModeResult = true
 const optimistic: Array<{
   directory?: string
   sessionID?: string
@@ -31,7 +35,7 @@ const promotedDrafts: Array<{ draftID: string; server: string; sessionId: string
 const sentPrompts: string[] = []
 const promptInputs: unknown[] = []
 const sentCommands: unknown[] = []
-const commands: Array<{ name: string }> = []
+const commands: Array<{ name: string; agent?: string; template?: string }> = []
 let serverSessionSyncs = 0
 
 let params: { id?: string } = {}
@@ -80,6 +84,7 @@ const clientFor = (directory: string) => {
           const location = input.location?.directory ?? directory
           createdSessions.push(location)
           sessionCreateInputs.push(input)
+          events.push("create")
           return {
             id: `session-${createdSessions.length}`,
             projectID: "project",
@@ -95,6 +100,7 @@ const clientFor = (directory: string) => {
         prompt: async (input: unknown) => {
           sentPrompts.push(directory)
           promptInputs.push(input)
+          events.push("prompt")
           return { data: undefined }
         },
         command: async (input: unknown) => {
@@ -102,6 +108,7 @@ const clientFor = (directory: string) => {
         },
         shell: async (input: { sessionID: string; id?: string; command: string }) => {
           sentShell.push(input)
+          events.push("shell")
         },
       },
     },
@@ -135,6 +142,7 @@ beforeAll(async () => {
   mock.module("@opencode-ai/ui/toast", () => ({
     Toast: { Region: () => null },
     showToast: () => 0,
+    toaster: { dismiss: () => undefined },
   }))
 
   mock.module("@opencode-ai/core/util/encode", () => ({
@@ -160,8 +168,13 @@ beforeAll(async () => {
 
   mock.module("@/context/permission", () => {
     const state = (server: string) => ({
-      enableAutoAccept(sessionID: string, directory: string) {
-        enabledAutoAccept.push({ server, sessionID, directory })
+      async setSessionMode(sessionID: string, directory: string, mode: string) {
+        sessionModeCalls.push({ server, sessionID, directory, mode })
+        events.push(`setSessionMode:${mode}`)
+        return sessionModeResult
+      },
+      setDraftMode(directory: string, mode: string | undefined) {
+        if (mode === undefined) draftModeClears.push({ server, directory })
       },
     })
     return { usePermission: () => ({ currentServerState: () => state(permissionServer) }) }
@@ -282,7 +295,10 @@ beforeEach(() => {
   createdClients.length = 0
   createdSessions.length = 0
   sessionCreateInputs.length = 0
-  enabledAutoAccept.length = 0
+  sessionModeCalls.length = 0
+  draftModeClears.length = 0
+  events.length = 0
+  sessionModeResult = true
   optimistic.length = 0
   optimisticSeeded.length = 0
   promoted.length = 0
@@ -304,6 +320,23 @@ beforeEach(() => {
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
+const baseInput = () => ({
+  prompt,
+  info: () => undefined as { id: string } | undefined,
+  imageAttachments: () => [],
+  commentCount: () => 0,
+  working: () => false,
+  editor: () => undefined,
+  queueScroll: () => undefined,
+  promptLength: (value: Prompt) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+  addToHistory: () => undefined,
+  resetHistoryNavigation: () => undefined,
+  setMode: () => undefined,
+  setPopover: () => undefined,
+  onNewSessionWorktreeReset: () => undefined,
+  onSubmit: () => undefined,
+})
+
 describe("prompt submit worktree selection", () => {
   test("reads the latest worktree accessor value per submit", async () => {
     const submit = createPromptSubmit({
@@ -311,7 +344,6 @@ describe("prompt submit worktree selection", () => {
       info: () => undefined,
       imageAttachments: () => [],
       commentCount: () => 0,
-      autoAccept: () => false,
       mode: () => "shell",
       working: () => false,
       editor: () => undefined,
@@ -359,57 +391,81 @@ describe("prompt submit worktree selection", () => {
     expect(syncedDirectories).toEqual(["/repo/worktree-a", "/repo/worktree-a", "/repo/worktree-b", "/repo/worktree-b"])
   })
 
-  test("applies auto-accept to newly created sessions", async () => {
+  test("creates new sessions in the draft's permission mode", async () => {
     const submit = createPromptSubmit({
-      prompt,
-      info: () => undefined,
-      imageAttachments: () => [],
-      commentCount: () => 0,
-      autoAccept: () => true,
+      ...baseInput(),
+      permissionMode: () => "acceptEdits",
+      permissionModesSupported: () => true,
       mode: () => "shell",
-      working: () => false,
-      editor: () => undefined,
-      queueScroll: () => undefined,
-      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
-      addToHistory: () => undefined,
-      resetHistoryNavigation: () => undefined,
-      setMode: () => undefined,
-      setPopover: () => undefined,
       newSessionWorktree: () => selected,
-      onNewSessionWorktreeReset: () => undefined,
-      onSubmit: () => undefined,
     })
 
-    const event = { preventDefault: () => undefined } as unknown as Event
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
 
-    await submit.handleSubmit(event)
-
-    expect(enabledAutoAccept).toEqual([{ server: "server-a", sessionID: "session-1", directory: "/repo/worktree-a" }])
+    expect(sessionCreateInputs).toEqual([
+      {
+        agent: "agent",
+        model: { id: "model", providerID: "provider", variant: undefined },
+        location: { directory: "/repo/worktree-a" },
+        permissionMode: "acceptEdits",
+      },
+    ])
+    expect(sessionModeCalls).toEqual([])
+    expect(storedSessions["/repo/worktree-a"]?.[0]).toMatchObject({ id: "session-1", permissionMode: "acceptEdits" })
+    expect(sentShell).toEqual([expect.objectContaining({ sessionID: "session-1", permissionMode: "acceptEdits" })])
+    expect(draftModeClears).toEqual([{ server: "server-a", directory: "/repo/main" }])
   })
 
-  test("keeps auto-accept bound to the submission server", async () => {
+  test("creates a bypass draft without a mode, then switches it through the engine gate", async () => {
+    const submit = createPromptSubmit({
+      ...baseInput(),
+      permissionMode: () => "bypassPermissions",
+      permissionModesSupported: () => true,
+      mode: () => "normal",
+      newSessionWorktree: () => selected,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await Bun.sleep(0)
+
+    expect(sessionCreateInputs).toHaveLength(1)
+    expect(sessionCreateInputs[0]).not.toHaveProperty("permissionMode")
+    expect(sessionModeCalls).toEqual([
+      { server: "server-a", sessionID: "session-1", directory: "/repo/worktree-a", mode: "bypassPermissions" },
+    ])
+    expect(events).toEqual(["create", "setSessionMode:bypassPermissions", "prompt"])
+    expect(promptInputs[0]).toMatchObject({ sessionID: "session-1", permissionMode: "bypassPermissions" })
+  })
+
+  test("does not send bypass with the first prompt when the engine refuses it", async () => {
+    sessionModeResult = false
+    const submit = createPromptSubmit({
+      ...baseInput(),
+      permissionMode: () => "bypassPermissions",
+      permissionModesSupported: () => true,
+      mode: () => "normal",
+      newSessionWorktree: () => selected,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await Bun.sleep(0)
+
+    expect(sessionModeCalls).toHaveLength(1)
+    expect(promptInputs).toHaveLength(1)
+    expect((promptInputs[0] as { permissionMode?: string }).permissionMode).toBeUndefined()
+  })
+
+  test("keeps the bypass switch bound to the submission server", async () => {
     let release = () => {}
     createSessionGate = new Promise<void>((resolve) => {
       release = resolve
     })
     const submit = createPromptSubmit({
-      prompt,
-      info: () => undefined,
-      imageAttachments: () => [],
-      commentCount: () => 0,
-      autoAccept: () => true,
+      ...baseInput(),
+      permissionMode: () => "bypassPermissions",
+      permissionModesSupported: () => true,
       mode: () => "shell",
-      working: () => false,
-      editor: () => undefined,
-      queueScroll: () => undefined,
-      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
-      addToHistory: () => undefined,
-      resetHistoryNavigation: () => undefined,
-      setMode: () => undefined,
-      setPopover: () => undefined,
       newSessionWorktree: () => selected,
-      onNewSessionWorktreeReset: () => undefined,
-      onSubmit: () => undefined,
     })
 
     const result = submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
@@ -417,7 +473,151 @@ describe("prompt submit worktree selection", () => {
     release()
     await result
 
-    expect(enabledAutoAccept).toEqual([{ server: "server-a", sessionID: "session-1", directory: "/repo/worktree-a" }])
+    expect(sessionModeCalls).toEqual([
+      { server: "server-a", sessionID: "session-1", directory: "/repo/worktree-a", mode: "bypassPermissions" },
+    ])
+  })
+
+  test("includes the permission mode in prompts to existing sessions", async () => {
+    params = { id: "session-1" }
+    const submit = createPromptSubmit({
+      ...baseInput(),
+      info: () => ({ id: "session-1" }),
+      permissionMode: () => "plan",
+      permissionModesSupported: () => true,
+      mode: () => "normal",
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await Bun.sleep(0)
+
+    expect(sessionCreateInputs).toEqual([])
+    expect(sessionModeCalls).toEqual([])
+    expect(promptInputs[0]).toMatchObject({ sessionID: "session-1", permissionMode: "plan" })
+  })
+
+  test("sends no mode when the composer has none", async () => {
+    params = { id: "session-1" }
+    commands.push({ name: "review" })
+    promptValue = [{ type: "text", content: "/review", start: 0, end: 7 }]
+    const submit = createPromptSubmit({
+      ...baseInput(),
+      info: () => ({ id: "session-1" }),
+      mode: () => "normal",
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(sentCommands).toHaveLength(1)
+    expect((sentCommands[0] as { permissionMode?: string }).permissionMode).toBeUndefined()
+  })
+
+  test("leaves the mode out of queued follow-ups", async () => {
+    params = { id: "session-1" }
+    const queued: Array<{ permissionMode?: string }> = []
+    const submit = createPromptSubmit({
+      ...baseInput(),
+      info: () => ({ id: "session-1" }),
+      permissionMode: () => "acceptEdits",
+      permissionModesSupported: () => true,
+      mode: () => "normal",
+      shouldQueue: () => true,
+      onQueue: (draft) => queued.push(draft),
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(queued).toHaveLength(1)
+    expect(queued[0]?.permissionMode).toBeUndefined()
+    expect(promptInputs).toEqual([])
+  })
+
+  test("bare /plan switches the composer to Plan mode without sending anything", async () => {
+    params = { id: "session-1" }
+    commands.push({ name: "plan", agent: "plan", template: "$ARGUMENTS\n" })
+    promptValue = [{ type: "text", content: "/plan", start: 0, end: 5 }]
+    const selectedModes: string[] = []
+    const submit = createPromptSubmit({
+      ...baseInput(),
+      info: () => ({ id: "session-1" }),
+      permissionMode: () => "default",
+      permissionModesSupported: () => true,
+      selectPermissionMode: (mode) => selectedModes.push(mode),
+      mode: () => "normal",
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(selectedModes).toEqual(["plan"])
+    expect(sentCommands).toEqual([])
+    expect(promptInputs).toEqual([])
+  })
+
+  test("/plan with a task runs the built-in plan command in Plan mode", async () => {
+    params = { id: "session-1" }
+    commands.push({ name: "plan", agent: "plan", template: "$ARGUMENTS\n" })
+    promptValue = [{ type: "text", content: "/plan fix the login bug", start: 0, end: 23 }]
+    const selectedModes: string[] = []
+    const submit = createPromptSubmit({
+      ...baseInput(),
+      info: () => ({ id: "session-1" }),
+      permissionMode: () => "acceptEdits",
+      permissionModesSupported: () => true,
+      selectPermissionMode: (mode) => selectedModes.push(mode),
+      mode: () => "normal",
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(selectedModes).toEqual(["plan"])
+    expect(sentCommands).toEqual([
+      expect.objectContaining({ command: "plan", arguments: "fix the login bug", permissionMode: "plan" }),
+    ])
+  })
+
+  test("a queued /plan task does not switch the running turn to Plan mode", async () => {
+    params = { id: "session-1" }
+    commands.push({ name: "plan", agent: "plan", template: "$ARGUMENTS\n" })
+    promptValue = [{ type: "text", content: "/plan refactor auth next", start: 0, end: 24 }]
+    const selectedModes: string[] = []
+    const queued: Array<{ permissionMode?: string }> = []
+    const submit = createPromptSubmit({
+      ...baseInput(),
+      info: () => ({ id: "session-1" }),
+      permissionMode: () => "acceptEdits",
+      permissionModesSupported: () => true,
+      selectPermissionMode: (mode) => selectedModes.push(mode),
+      mode: () => "normal",
+      shouldQueue: () => true,
+      onQueue: (draft) => queued.push(draft),
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(selectedModes).toEqual([])
+    expect(sentCommands).toEqual([])
+    expect(queued).toHaveLength(1)
+    expect(queued[0]?.permissionMode).toBe("plan")
+  })
+
+  test("a user command named plan is not treated as Plan mode", async () => {
+    params = { id: "session-1" }
+    commands.push({ name: "plan", template: "Write a plan for $ARGUMENTS" })
+    promptValue = [{ type: "text", content: "/plan x", start: 0, end: 7 }]
+    const selectedModes: string[] = []
+    const submit = createPromptSubmit({
+      ...baseInput(),
+      info: () => ({ id: "session-1" }),
+      permissionMode: () => "acceptEdits",
+      permissionModesSupported: () => true,
+      selectPermissionMode: (mode) => selectedModes.push(mode),
+      mode: () => "normal",
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+
+    expect(selectedModes).toEqual([])
+    expect(sentCommands).toEqual([expect.objectContaining({ command: "plan", permissionMode: "acceptEdits" })])
   })
 
   test("promotes drafts using the selected project's server", async () => {
@@ -427,7 +627,6 @@ describe("prompt submit worktree selection", () => {
       info: () => undefined,
       imageAttachments: () => [],
       commentCount: () => 0,
-      autoAccept: () => false,
       mode: () => "normal",
       working: () => false,
       editor: () => undefined,
@@ -456,7 +655,6 @@ describe("prompt submit worktree selection", () => {
       info: () => ({ id: "session-1" }),
       imageAttachments: () => [],
       commentCount: () => 0,
-      autoAccept: () => false,
       mode: () => "normal",
       working: () => false,
       editor: () => undefined,
@@ -505,7 +703,6 @@ describe("prompt submit worktree selection", () => {
       info: () => ({ id: "session-1" }),
       imageAttachments: () => [],
       commentCount: () => 0,
-      autoAccept: () => false,
       mode: () => "normal",
       working: () => false,
       editor: () => undefined,
@@ -544,7 +741,6 @@ describe("prompt submit worktree selection", () => {
       info: () => ({ id: "session-1" }),
       imageAttachments: () => [],
       commentCount: () => 0,
-      autoAccept: () => false,
       mode: () => "normal",
       working: () => false,
       editor: () => undefined,
@@ -572,7 +768,6 @@ describe("prompt submit worktree selection", () => {
       info: () => undefined,
       imageAttachments: () => [],
       commentCount: () => 0,
-      autoAccept: () => false,
       mode: () => "normal",
       working: () => false,
       editor: () => undefined,

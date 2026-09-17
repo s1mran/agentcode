@@ -105,6 +105,9 @@ function permissionAsked(
     permission?: string
     metadata?: Record<string, unknown>
     tool?: { messageID: string; callID: string }
+    always?: string[]
+    guard?: { level: "floor" | "guard"; category: string; reason: string }
+    alwaysScope?: "project" | "session" | "acceptEdits"
   } = {},
 ) {
   return {
@@ -116,8 +119,10 @@ function permissionAsked(
       permission: input.permission ?? "bash",
       patterns: ["*"],
       metadata: input.metadata ?? { command: "printf hello" },
-      always: [],
+      always: input.always ?? [],
       ...(input.tool ? { tool: input.tool } : {}),
+      ...(input.guard ? { guard: input.guard } : {}),
+      ...(input.alwaysScope ? { alwaysScope: input.alwaysScope } : {}),
     },
   } as PermissionEvent
 }
@@ -160,7 +165,9 @@ describe("acp permissions", () => {
     const harness = createHarness()
     await createSession(harness.session, "ses_a")
 
-    harness.subscription.handle(permissionAsked("ses_a", "perm_1", { tool: { messageID: "msg_1", callID: "call_1" } }))
+    harness.subscription.handle(
+      permissionAsked("ses_a", "perm_1", { tool: { messageID: "msg_1", callID: "call_1" }, always: ["printf *"] }),
+    )
 
     await pollUntil(() => harness.replies.length === 1, "permission was never replied")
 
@@ -329,6 +336,102 @@ describe("acp permissions", () => {
     })
   })
 
+  it("offers only allow once and reject for a guarded request and sends always as once", async () => {
+    const harness = createHarness(() => Promise.resolve({ outcome: { outcome: "selected", optionId: "always" } }))
+    await createSession(harness.session, "ses_a")
+
+    harness.subscription.handle(
+      permissionAsked("ses_a", "perm_guard", {
+        metadata: { command: "git push --force origin main" },
+        always: ["git push *"],
+        alwaysScope: "project",
+        guard: { level: "guard", category: "destructive_git", reason: "force push rewrites remote history" },
+        tool: { messageID: "msg_1", callID: "call_1" },
+      }),
+    )
+
+    await pollUntil(() => harness.replies.length === 1, "guarded permission was never replied")
+
+    expect(harness.requests[0]?.options).toEqual([
+      { optionId: "once", kind: "allow_once", name: "Allow once" },
+      { optionId: "reject", kind: "reject_once", name: "Reject" },
+    ])
+    expect(harness.requests[0]?.toolCall.title).toBe("Needs review: git push --force origin main")
+    expect(harness.replies).toEqual([{ requestID: "perm_guard", reply: "once", directory: "/workspace" }])
+  })
+
+  it("prefixes floor requests as protected and never offers always", async () => {
+    const harness = createHarness()
+    await createSession(harness.session, "ses_a")
+
+    harness.subscription.handle(
+      permissionAsked("ses_a", "perm_floor", {
+        metadata: { command: "printf x > .git/config" },
+        always: [],
+        guard: { level: "floor", category: "protected_path", reason: "writes to .git/config" },
+      }),
+    )
+
+    await pollUntil(() => harness.replies.length === 1, "floor permission was never replied")
+
+    expect(harness.requests[0]?.options.map((option) => option.kind)).toEqual(["allow_once", "reject_once"])
+    expect(harness.requests[0]?.toolCall.title).toBe("Protected: printf x > .git/config")
+  })
+
+  it("does not offer always for a request without always patterns", async () => {
+    const harness = createHarness()
+    await createSession(harness.session, "ses_a")
+
+    harness.subscription.handle(permissionAsked("ses_a", "perm_none"))
+
+    await pollUntil(() => harness.replies.length === 1, "permission without always patterns was never replied")
+
+    expect(harness.requests[0]?.options.map((option) => option.optionId)).toEqual(["once", "reject"])
+    expect(harness.requests[0]?.toolCall.title).toBe("printf hello")
+  })
+
+  it("names the always option after the scope it grants", async () => {
+    const harness = createHarness(() => Promise.resolve({ outcome: { outcome: "selected", optionId: "always" } }))
+    await createSession(harness.session, "ses_a")
+
+    harness.subscription.handle(
+      permissionAsked("ses_a", "perm_project", {
+        metadata: { command: "git checkout main" },
+        always: ["git checkout *"],
+        alwaysScope: "project",
+      }),
+    )
+    harness.subscription.handle(
+      permissionAsked("ses_a", "perm_session", {
+        permission: "read",
+        metadata: { filePath: "/workspace/.env" },
+        always: ["/workspace/.env"],
+        alwaysScope: "session",
+      }),
+    )
+    harness.subscription.handle(
+      permissionAsked("ses_a", "perm_edits", {
+        permission: "edit",
+        metadata: { filepath: "/workspace/missing.ts" },
+        always: ["missing.ts"],
+        alwaysScope: "acceptEdits",
+      }),
+    )
+
+    await pollUntil(() => harness.replies.length === 3, "scoped permissions were never replied")
+
+    expect(harness.requests.map((request) => request.options.find((option) => option.optionId === "always"))).toEqual([
+      { optionId: "always", kind: "allow_always", name: "Always allow in this project" },
+      { optionId: "always", kind: "allow_always", name: "Allow for this session" },
+      { optionId: "always", kind: "allow_always", name: "Allow all edits (Accept edits)" },
+    ])
+    expect(harness.replies.map((reply) => [reply.requestID, reply.reply])).toEqual([
+      ["perm_project", "always"],
+      ["perm_session", "always"],
+      ["perm_edits", "always"],
+    ])
+  })
+
   it("rejects non-selected outcomes", async () => {
     const harness = createHarness(() => Promise.resolve({ outcome: { outcome: "cancelled" } }))
     await createSession(harness.session, "ses_a")
@@ -384,7 +487,7 @@ describe("acp permissions", () => {
     await createSession(harness.session, "ses_a")
 
     harness.subscription.handle(permissionAsked("ses_a", "perm_1"))
-    harness.subscription.handle(permissionAsked("ses_a", "perm_2"))
+    harness.subscription.handle(permissionAsked("ses_a", "perm_2", { always: ["printf *"] }))
 
     await pollUntil(() => harness.requests.length === 1, "first permission was never requested")
     expect(harness.requests.map((request) => request.toolCall.toolCallId)).toEqual(["perm_1"])

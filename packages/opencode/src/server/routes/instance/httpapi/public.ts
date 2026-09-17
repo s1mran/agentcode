@@ -137,6 +137,11 @@ function matchLegacyOpenApi(input: Record<string, unknown>) {
             : operation.requestBody.content?.["application/json"]?.schema?.properties
           if (properties?.id) properties.id = { anyOf: [properties.id, { type: "null" }] }
         }
+        if (path === "/session/{sessionID}" && method === "patch") {
+          // `permissionMode` is Schema.NullOr: null clears the session mode so it inherits again.
+          const properties = operation.requestBody.content?.["application/json"]?.schema?.properties
+          if (properties?.permissionMode) properties.permissionMode = nullable(properties.permissionMode)
+        }
       }
       for (const response of Object.values(operation.responses ?? {})) {
         for (const content of Object.values(response.content ?? {})) {

@@ -178,6 +178,10 @@ export const dict = {
   "command.prompt.mode.normal": "Запит",
   "command.permissions.autoaccept.enable": "Автоматично приймати дозволи",
   "command.permissions.autoaccept.disable": "Зупинити автоматичне прийняття дозволів",
+  "command.permissionMode.cycle": "Перемкнути режим дозволів",
+  "command.permissionMode.set": "Режим дозволів: {{mode}}",
+  "command.permissionMode.bypass": "Обійти дозволи…",
+  "command.plan": "Режим планування",
   "command.workspace.toggle": "Перемкнути робочі області",
   "command.workspace.toggle.description": "Увімкнути або вимкнути декілька робочих областей на бічній панелі",
   "command.session.undo": "Скасувати",
@@ -357,6 +361,18 @@ export const dict = {
   "prompt.mode.shell": "Команда",
   "prompt.mode.normal": "Запит",
   "prompt.mode.shell.exit": "esc для виходу",
+  "prompt.permissionMode.label": "Режим дозволів",
+  "prompt.permissionMode.default": "Запитувати дозволи",
+  "prompt.permissionMode.default.description": "Запитує перед командами, змінами та доступом до вебу",
+  "prompt.permissionMode.acceptEdits": "Приймати зміни",
+  "prompt.permissionMode.acceptEdits.description": "Зміни в цьому проєкті схвалюються; для команд і далі запитує",
+  "prompt.permissionMode.plan": "Режим планування",
+  "prompt.permissionMode.plan.description": "Дослідження лише для читання; редагувати можна лише файл плану",
+  "prompt.permissionMode.bypassPermissions": "Обхід дозволів",
+  "prompt.permissionMode.bypassPermissions.description":
+    "Працює без запитів, окрім захищених шляхів, критичних видалень і ваших правил «Запитувати»",
+  "prompt.permissionMode.dontAsk": "Не запитувати",
+  "prompt.permissionMode.dontAsk.description": "Усе, що потребувало б запиту, забороняється",
   "session.child.promptDisabled": "Сесії підагентів не можна надсилати запити.",
   "session.child.backToParent": "Назад до основної сесії.",
 
@@ -418,6 +434,22 @@ export const dict = {
   "prompt.toast.commandSendFailed.title": "Не вдалося надіслати команду",
   "prompt.toast.promptSendFailed.title": "Не вдалося надіслати запит",
   "prompt.toast.promptSendFailed.description": "Не вдалося отримати сесію",
+
+  "dialog.bypassPermissions.title": "Обійти дозволи?",
+  "dialog.bypassPermissions.body":
+    "Агент виконуватиме команди, редагуватиме файли й отримуватиме доступ до вебу без запитів. Для захищених шляхів (.git, конфігурація агента, файли запуску оболонки), критичних видалень і ваших власних правил «Запитувати» запит і далі з'являтиметься; правила «Заборонити» і далі діють. Використовуйте цей режим лише в проєкті, якому довіряєте.",
+  "dialog.bypassPermissions.confirm": "Обійти дозволи",
+  "dialog.bypassPermissions.cancel": "Скасувати",
+
+  "ui.permission.always.project": "Завжди дозволяти в цьому проєкті",
+  "ui.permission.always.session": "Дозволити для цієї сесії",
+  "ui.permission.always.acceptEdits": "Дозволити всі зміни (Приймати зміни)",
+  "ui.permission.always.everything": "усе для цього інструмента",
+  "ui.permission.guard.floor.title": "Захищена дія",
+  "ui.permission.guard.guard.title": "Потребує перевірки",
+  "ui.permission.guard.noAlways": "Це можна схвалити лише один раз",
+  "ui.permission.writes": "Записує в",
+  "ui.question.planFeedback.placeholder": "Напишіть агенту, що змінити в плані",
 
   "dialog.mcp.title": "MCP",
   "dialog.mcp.description": "{{enabled}} з {{total}} увімкнено",
@@ -654,6 +686,15 @@ export const dict = {
   "toast.permissions.autoaccept.on.description": "Запити дозволів будуть автоматично схвалюватися",
   "toast.permissions.autoaccept.off.title": "Автоматичне прийняття дозволів зупинено",
   "toast.permissions.autoaccept.off.description": "Запити дозволів вимагатимуть схвалення",
+  "toast.permissions.modeMigrated.title": "Автоматичне прийняття тепер — «Приймати зміни»",
+  "toast.permissions.modeMigrated.description":
+    "Зміни в цій папці схвалюються автоматично; для команд і далі запитує. Для повної автономії виберіть «Обхід дозволів» у редакторі запиту.",
+  "toast.permissions.autoAcceptRemoved.title": "Автоматичне прийняття вимкнено",
+  "toast.permissions.autoAcceptRemoved.modes":
+    "Запити дозволів знову з'являються. Щоб автоматично схвалювати зміни, виберіть «Приймати зміни» в меню режиму поруч із полем запиту або натисніть Shift+Tab.",
+  "toast.permissions.autoAcceptRemoved.rules":
+    "Запити дозволів знову з'являються. Щоб пропускати їх, дозвольте ці інструменти в конфігурації дозволів цього сервера.",
+  "toast.permissions.mode.error.title": "Не вдалося змінити режим дозволів",
 
   "toast.model.none.title": "Модель не вибрано",
   "toast.model.none.description": "Підключіть провайдера, щоб підсумувати цю сесію",
@@ -1019,6 +1060,8 @@ export const dict = {
 
   "settings.general.row.language.title": "Мова",
   "settings.general.row.language.description": "Змінити мову інтерфейсу AgentCode",
+  "settings.general.permissionMode.title": "Типовий режим дозволів",
+  "settings.general.permissionMode.description": "Використовується для нових сесій у цій папці",
   "settings.general.row.shell.title": "Командна оболонка термінала",
   "settings.general.row.shell.description":
     "Виберіть оболонку для термінала. Сумісні оболонки також використовуються для викликів інструментів агента.",

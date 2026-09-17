@@ -1,9 +1,11 @@
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Agent } from "@/agent/agent"
+import { Config } from "@/config/config"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Command } from "@/command"
 import { Permission } from "@/permission"
+import { PermissionMode } from "@/permission/mode"
 import { SessionShare } from "@/share/session"
 import { Session } from "@/session/session"
 import { SessionCompaction } from "@/session/compaction"
@@ -25,6 +27,7 @@ import { InstanceHttpApi } from "../api"
 import {
   CommandPayload,
   DiffQuery,
+  ApiPermissionModeError,
   ForkPayload,
   InitPayload,
   ListQuery,
@@ -45,6 +48,10 @@ const tryParseJson = (text: string) =>
     catch: () => new HttpApiError.BadRequest({}),
   })
 
+// A refused mode change is a client error that needs its reason, so it answers with the legacy BadRequestError body
+// (`{ name, data: { message } }`) that the SDK already surfaces, instead of the empty built-in 400.
+const modeRejected = (message: string) => new ApiPermissionModeError({ name: "BadRequest", data: { message } })
+
 export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* Session.Service
@@ -59,6 +66,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const todoSvc = yield* Todo.Service
     const summary = yield* SessionSummary.Service
     const events = yield* EventV2Bridge.Service
+    const config = yield* Config.Service
     const scope = yield* Scope.Scope
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
@@ -152,8 +160,27 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       )
     })
 
+    // Returns the ModeError when the permission service refuses the mode, so callers can answer 400 with its reason.
+    const trySetMode = (sessionID: SessionID, mode: PermissionV1.Mode | null) =>
+      permissionSvc.setMode(sessionID, mode).pipe(
+        Effect.as(undefined),
+        Effect.catchTag("PermissionModeError", (error) => Effect.succeed(error)),
+      )
+
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {
-      return yield* shareSvc.create(ctx.payload)
+      if (ctx.payload?.permissionMode !== "bypassPermissions") return yield* shareSvc.create(ctx.payload)
+      // bypassPermissions is only ever entered through the gated Permission.setMode, never stored by create. The gate
+      // is checked before anything is created, so a refused create leaves no session behind.
+      const reason = PermissionMode.gate(yield* config.get())
+      if (reason) return yield* modeRejected(new Permission.ModeError({ reason }).message)
+      const created = yield* shareSvc.create({ ...ctx.payload, permissionMode: undefined })
+      const refused = yield* trySetMode(created.id, "bypassPermissions")
+      if (refused) {
+        // Only reachable when the configuration changed in between; undo the create rather than leave an orphan.
+        yield* session.remove(created.id).pipe(Effect.ignore)
+        return yield* modeRejected(refused.message)
+      }
+      return yield* session.get(created.id).pipe(Effect.orDie)
     })
 
     const createRaw = Effect.fn("SessionHttpApi.createRaw")(function* (ctx: {
@@ -185,6 +212,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof UpdatePayload.Type
     }) {
       const current = yield* requireSession(ctx.params.sessionID)
+      // The mode goes first: a refused mode rejects the whole update before anything else is written.
+      if (ctx.payload.permissionMode !== undefined) {
+        const refused = yield* trySetMode(ctx.params.sessionID, ctx.payload.permissionMode)
+        if (refused) return yield* modeRejected(refused.message)
+      }
       if (ctx.payload.title !== undefined) {
         yield* session.setTitle({ sessionID: ctx.params.sessionID, title: ctx.payload.title })
       }
@@ -194,7 +226,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       if (ctx.payload.permission !== undefined) {
         yield* session.setPermission({
           sessionID: ctx.params.sessionID,
-          permission: Permission.merge(current.permission ?? [], ctx.payload.permission),
+          // Clients may not mark rules as built-in.
+          permission: Permission.merge(
+            Session.stripRuleSource(current.permission ?? []),
+            Session.stripRuleSource(ctx.payload.permission),
+          ),
         })
       }
       if (ctx.payload.time?.archived !== undefined) {

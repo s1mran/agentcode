@@ -129,6 +129,7 @@ export const dict: Record<string, string> = {
   "ui.promptInput.attachments": "Vaizdai ir failai",
   "ui.promptInput.context": "Kontekstas",
   "ui.promptInput.shell": "Apvalkalo komanda",
+  "ui.promptInput.chooseMode": "Leidimų veiksena",
   "ui.promptInput.chooseAgent": "Pasirinkite agentą",
   "ui.promptInput.chooseModel": "Pasirinkite modelį",
   "ui.promptInput.chooseVariant": "Pasirinkite modelio variantą",

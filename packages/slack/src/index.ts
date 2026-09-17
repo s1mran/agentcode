@@ -23,6 +23,23 @@ const sessions = new Map<string, { client: any; server: any; sessionId: string; 
 void (async () => {
   const events = await opencode.client.event.subscribe()
   for await (const event of events.stream) {
+    // Nobody can answer a permission prompt from Slack, so the prompt would wait forever: approve each request once,
+    // except a safety-floor request (protected path or critical removal), which is rejected.
+    const raw = event as unknown as {
+      type: string
+      properties: { id: string; sessionID: string; guard?: { level?: string; reason?: string } }
+    }
+    if (raw.type === "permission.asked") {
+      const floor = raw.properties.guard?.level === "floor"
+      if (floor) console.log(`blocked: ${raw.properties.guard?.reason} needs interactive approval`)
+      void opencode.client
+        .postSessionIdPermissionsPermissionId({
+          path: { id: raw.properties.sessionID, permissionID: raw.properties.id },
+          body: { response: floor ? "reject" : "once" },
+        })
+        .catch(() => {})
+      continue
+    }
     if (event.type === "message.part.updated") {
       const part = event.properties.part
       if (part.type === "tool") {

@@ -1,7 +1,7 @@
 export function prefix(tokens: string[]) {
   for (let len = tokens.length; len > 0; len--) {
     const prefix = tokens.slice(0, len).join(" ")
-    const arity = ARITY[prefix]
+    const arity = Object.hasOwn(ARITY, prefix) ? ARITY[prefix] : undefined
     if (arity !== undefined) return tokens.slice(0, arity)
   }
   if (tokens.length === 0) return []
@@ -149,6 +149,8 @@ const ARITY: Record<string, number> = {
   tmux: 2, // tmux new -s dev
   turbo: 2, // turbo run build
   ufw: 2, // ufw allow 22
+  uv: 2, // uv sync
+  "uv run": 3, // uv run pytest
   vault: 2, // vault login
   "vault auth": 3, // vault auth list
   "vault kv": 3, // vault kv get secret/api

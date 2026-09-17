@@ -102,6 +102,7 @@ export const dict = {
   "ui.promptInput.attachments": "이미지 및 파일",
   "ui.promptInput.context": "컨텍스트",
   "ui.promptInput.shell": "셸 명령",
+  "ui.promptInput.chooseMode": "권한 모드",
   "ui.promptInput.chooseAgent": "에이전트 선택",
   "ui.promptInput.chooseModel": "모델 선택",
   "ui.promptInput.chooseVariant": "모델 변형 선택",

@@ -121,6 +121,7 @@ export const dict: Record<string, string> = {
   "ui.promptInput.attachments": "පින්තූර සහ ගොනු",
   "ui.promptInput.context": "සන්දර්භය",
   "ui.promptInput.shell": "ෂෙල් විධානය",
+  "ui.promptInput.chooseMode": "අවසර ප්‍රකාරය",
   "ui.promptInput.chooseAgent": "නියෝජිතයා තෝරන්න",
   "ui.promptInput.chooseModel": "ආකෘතිය තෝරන්න",
   "ui.promptInput.chooseVariant": "ආකෘති ප්රභේදය තෝරන්න",

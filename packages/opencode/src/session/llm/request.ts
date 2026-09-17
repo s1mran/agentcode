@@ -16,6 +16,7 @@ import type { Plugin } from "@/plugin"
 import { mergeDeep } from "remeda"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
+const PERMISSION_MODE_HEADER = "x-agentcode-permission-mode"
 
 type PrepareInput = {
   readonly user: SessionV1.User
@@ -24,6 +25,7 @@ type PrepareInput = {
   readonly model: Provider.Model
   readonly agent: Agent.Info
   readonly permission?: PermissionV1.Ruleset
+  readonly permissionMode?: PermissionV1.Mode
   readonly system: string[]
   readonly messages: ModelMessage[]
   readonly small?: boolean
@@ -184,7 +186,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     tools: Object.fromEntries(Object.entries(tools).toSorted(([a], [b]) => a.localeCompare(b))),
     params,
     messageTransformOptions: options,
-    headers: {
+    headers: withPermissionMode(input, {
       ...(input.model.providerID.startsWith("opencode")
         ? {
             ...(opencodeProjectID ? { "x-opencode-project": opencodeProjectID } : {}),
@@ -201,9 +203,23 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
           }),
       ...input.model.headers,
       ...headers,
-    },
+    }),
   }
 })
+
+/**
+ * The local Claude engine (provider agentcode) runs its own tools, so the gateway narrows them to the session mode.
+ * The header is set after the model headers and the chat.headers hook, and any other spelling of it is dropped, so a
+ * plugin or config value cannot override it. Requests made outside a session turn (compaction, titles, summaries)
+ * carry no mode; the gateway reads a missing header as its widest setting, so they are sent as "default".
+ */
+function withPermissionMode(input: Pick<PrepareInput, "model" | "permissionMode">, headers: Record<string, string>) {
+  if (input.model.providerID !== "agentcode") return headers
+  return {
+    ...Object.fromEntries(Object.entries(headers).filter(([key]) => key.toLowerCase() !== PERMISSION_MODE_HEADER)),
+    [PERMISSION_MODE_HEADER]: input.permissionMode ?? "default",
+  }
+}
 
 function resolveTools(input: Pick<PrepareInput, "tools" | "agent" | "permission" | "user">) {
   const disabled = Permission.disabled(

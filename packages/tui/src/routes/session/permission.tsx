@@ -4,7 +4,8 @@ import { createMemo, For, Match, Show, Switch } from "solid-js"
 import { Portal, useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { TextareaRenderable } from "@opentui/core"
 import { useTheme, selectedForeground } from "../../context/theme"
-import type { PermissionRequest } from "@opencode-ai/sdk/v2"
+import type { PermissionRequest as SdkPermissionRequest } from "@opencode-ai/sdk/v2"
+import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../ui/border"
 import { useSync } from "../../context/sync"
@@ -18,6 +19,23 @@ import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut } from "../../keyma
 import { usePathFormatter } from "../../context/path-format"
 
 type PermissionStage = "permission" | "always" | "reject"
+
+// guard and alwaysScope are optional on the wire: servers without the permission floor never send them.
+type PermissionRequest = SdkPermissionRequest & {
+  guard?: PermissionV1.Guard
+  alwaysScope?: PermissionV1.AlwaysScope
+}
+
+/** Floor and guard requests, and requests with nothing to remember, never offer "Allow always". */
+function alwaysAvailable(request: PermissionRequest) {
+  return request.always.length > 0 && !request.guard
+}
+
+function alwaysScopeText(scope: PermissionV1.AlwaysScope | undefined) {
+  if (scope === "project") return "saved for this project"
+  if (scope === "acceptEdits") return "switches this session to Accept edits"
+  return "for this session"
+}
 
 function EditBody(props: { request: PermissionRequest }) {
   const themeState = useTheme()
@@ -135,17 +153,30 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
 
   return (
     <Switch>
-      <Match when={store.stage === "always"}>
+      <Match when={store.stage === "always" && alwaysAvailable(props.request)}>
         <Prompt
           title="Always allow"
           body={
             <Switch>
+              <Match when={props.request.alwaysScope === "acceptEdits"}>
+                <TextBody title="This allows all edits inside the project and switches this session to Accept edits." />
+              </Match>
               <Match when={props.request.always.length === 1 && props.request.always[0] === "*"}>
-                <TextBody title={"This will allow " + props.request.permission + " until OpenCode is restarted."} />
+                <TextBody
+                  title={
+                    "This will allow " +
+                    props.request.permission +
+                    " (" +
+                    alwaysScopeText(props.request.alwaysScope) +
+                    ")."
+                  }
+                />
               </Match>
               <Match when={true}>
                 <box paddingLeft={1} gap={1}>
-                  <text fg={theme.textMuted}>This will allow the following patterns until OpenCode is restarted</text>
+                  <text fg={theme.textMuted}>
+                    {"This will allow the following patterns (" + alwaysScopeText(props.request.alwaysScope) + ")"}
+                  </text>
                   <box>
                     <For each={props.request.always}>
                       {(pattern) => (
@@ -190,7 +221,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           }}
         />
       </Match>
-      <Match when={store.stage === "permission"}>
+      <Match when={store.stage === "permission" || (store.stage === "always" && !alwaysAvailable(props.request))}>
         {(() => {
           const info = () => {
             const permission = props.request.permission
@@ -381,6 +412,10 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           }
 
           const current = info()
+          const guard = props.request.guard
+          const options: Record<string, string> = alwaysAvailable(props.request)
+            ? { once: "Allow once", always: "Allow always", reject: "Reject" }
+            : { once: "Allow once", reject: "Reject" }
 
           const header = () => (
             <box flexDirection="column" gap={0}>
@@ -388,6 +423,16 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
                 <text fg={theme.warning}>{"△"}</text>
                 <text fg={theme.text}>Permission required</text>
               </box>
+              <Show when={guard}>
+                {(item) => (
+                  <box flexDirection="row" gap={1} paddingLeft={2} flexShrink={0}>
+                    <text fg={theme.warning} flexShrink={0}>
+                      {item().level === "floor" ? "Protected:" : "Needs review:"}
+                    </text>
+                    <text fg={theme.text}>{item().reason}</text>
+                  </box>
+                )}
+              </Show>
               <box flexDirection="row" gap={1} paddingLeft={2} flexShrink={0}>
                 <text fg={theme.textMuted} flexShrink={0}>
                   {current.icon}
@@ -402,12 +447,12 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               title="Permission required"
               header={header()}
               body={current.body}
-              options={{ once: "Allow once", always: "Allow always", reject: "Reject" }}
+              options={options}
               escapeKey="reject"
               fullscreen
               onSelect={(option) => {
                 if (option === "always") {
-                  setStore("stage", "always")
+                  if (alwaysAvailable(props.request)) setStore("stage", "always")
                   return
                 }
                 if (option === "reject") {

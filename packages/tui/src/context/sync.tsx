@@ -32,6 +32,7 @@ import { batch, onMount } from "solid-js"
 import path from "path"
 import { useKV } from "./kv"
 import { usePermission } from "./permission"
+import { autoReplyAllowed, autoReplyTracker } from "./permission-auto"
 
 const emptyConsoleState: ConsoleState = {
   consoleManagedProviders: [],
@@ -173,12 +174,35 @@ export const {
         .then((x) => (x.data ?? []).toSorted((a, b) => a.id.localeCompare(b.id)))
     }
 
+    const autoReplies = autoReplyTracker()
+
+    function queuePermission(request: PermissionRequest) {
+      const requests = store.permission[request.sessionID]
+      if (!requests) {
+        setStore("permission", request.sessionID, [request])
+        return
+      }
+      const match = search(requests, request.id, (r) => r.id)
+      if (match.found) {
+        setStore("permission", request.sessionID, match.index, reconcile(request))
+        return
+      }
+      setStore(
+        "permission",
+        request.sessionID,
+        produce((draft) => {
+          draft.splice(match.index, 0, request)
+        }),
+      )
+    }
+
     event.subscribe((event, { directory, workspace }) => {
       switch (event.type) {
         case "server.instance.disposed":
           void bootstrap()
           break
         case "permission.replied": {
+          autoReplies.replied(event.properties.requestID)
           const requests = store.permission[event.properties.sessionID]
           if (!requests) break
           const match = search(requests, event.properties.requestID, (r) => r.id)
@@ -195,31 +219,30 @@ export const {
 
         case "permission.asked": {
           const request = event.properties
-          if (permission.mode === "auto") {
-            void sdk.client.permission.reply({
-              requestID: request.id,
-              reply: "once",
-              directory,
-              workspace,
-            })
+          if (permission.mode !== "auto") {
+            queuePermission(request)
             break
           }
-          const requests = store.permission[request.sessionID]
-          if (!requests) {
-            setStore("permission", request.sessionID, [request])
-            break
-          }
-          const match = search(requests, request.id, (r) => r.id)
-          if (match.found) {
-            setStore("permission", request.sessionID, match.index, reconcile(request))
-            break
-          }
-          setStore(
-            "permission",
-            request.sessionID,
-            produce((draft) => {
-              draft.splice(match.index, 0, request)
+          // Floor requests (protected paths, critical removals) and plan-mode requests always need a person, so auto
+          // mode queues them; anything else is approved once. A request answered while its lookup runs is dropped.
+          void autoReplies.decide(
+            request.id,
+            autoReplyAllowed(request, {
+              cached: (sessionID, messageID) => store.message[sessionID]?.find((item) => item.id === messageID),
+              fetch: (sessionID, messageID) =>
+                sdk.client.session
+                  .message({ sessionID, messageID, directory, workspace })
+                  .then((result) => result.data?.info),
             }),
+            (allowed) => {
+              if (!allowed) return queuePermission(request)
+              void sdk.client.permission.reply({
+                requestID: request.id,
+                reply: "once",
+                directory,
+                workspace,
+              })
+            },
           )
           break
         }

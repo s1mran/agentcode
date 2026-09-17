@@ -37,6 +37,15 @@ describe("normalizeSessionInfo", () => {
     })
   })
 
+  test("keeps the permission mode of a legacy session passed through the current shape", () => {
+    const result = normalizeSessionInfo({
+      ...currentSession("session-1"),
+      permissionMode: "plan",
+    })
+    expect(result.permissionMode).toBe("plan")
+    expect("permissionMode" in normalizeSessionInfo(currentSession("session-2"))).toBe(false)
+  })
+
   test("supplies timestamped titles for untitled current sessions", () => {
     const root = currentSession("session-1")
     const child = currentSession("session-2", "session-1")

@@ -47,7 +47,6 @@ import { ModelSelectorPopover, ModelSelectorPopoverV2 } from "@/components/dialo
 import { DialogSelectModelUnpaid } from "@/components/dialog-select-model-unpaid"
 import { DialogSelectModelUnpaidV2 } from "@/components/dialog-select-model-unpaid-v2"
 import { useCommand } from "@/context/command"
-import { usePermission } from "@/context/permission"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { createSessionTabs } from "@/pages/session/helpers"
@@ -73,6 +72,9 @@ import {
   type PromptInputSubmission,
 } from "./prompt-input/contracts"
 import { createPromptSubmit } from "./prompt-input/submit"
+import { PermissionModePill } from "./prompt-input/permission-mode-pill"
+import { shouldCycleModeOnKey } from "./prompt-input/permission-mode-controls"
+import { resolveModeSelection } from "@/context/permission-mode"
 import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/slash-popover"
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
@@ -125,7 +127,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const comments = useComments()
   const dialog = useDialog()
   const command = useCommand()
-  const permission = usePermission()
   const language = useLanguage()
   const platform = usePlatform()
   const tabs = () => props.controls.session.tabs
@@ -709,6 +710,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         type: "builtin" as const,
       }))
 
+    // The engine's plan command stays listed so picking it inserts `/plan `; submit turns it into Plan mode.
     const custom = sync().data.command.map((cmd) => ({
       id: `custom.${cmd.name}`,
       trigger: cmd.name,
@@ -1198,12 +1200,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const variants = createMemo(() => ["default", ...props.controls.model.selection.variant.list()])
   // Check provider variants directly: `variants` also includes the UI-only default option.
   const showVariantControl = createMemo(() => props.controls.model.selection.variant.list().length > 0)
-  const accepting = createMemo(() => {
-    const id = props.controls.session.id
-    if (!id) return permission.isAutoAcceptingDirectory(sdk().directory)
-    return permission.isAutoAccepting(id, sdk().directory)
-  })
-
   const { abort, handleSubmit } =
     props.submission ??
     createPromptSubmit({
@@ -1211,7 +1207,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       info,
       imageAttachments,
       commentCount,
-      autoAccept: () => accepting(),
+      permissionMode: () => props.controls.permissionMode?.submit,
+      permissionModesSupported: () => !!props.controls.permissionMode?.supported,
+      selectPermissionMode: (mode) => props.controls.permissionMode?.select(mode),
       mode: () => store.mode,
       working,
       editor: () => editorRef,
@@ -1236,6 +1234,17 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    const permissionMode = props.controls.permissionMode
+    if (
+      permissionMode?.supported &&
+      !permissionMode.disabled &&
+      shouldCycleModeOnKey(event, { popoverOpen: !!store.popover, composing: composing() })
+    ) {
+      event.preventDefault()
+      permissionMode.cycle()
+      return
+    }
+
     if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "u") {
       event.preventDefault()
       if (store.mode !== "normal") return
@@ -1624,19 +1633,19 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 </Button>
               </TooltipKeybind>
               <Button
-                  data-action="prompt-voice"
-                  type="button"
-                  variant="ghost"
-                  class="size-8 p-0"
-                  style={buttons()}
-                  onClick={voiceInput.toggle}
-                  disabled={store.mode !== "normal"}
-                  tabIndex={store.mode === "normal" ? undefined : -1}
-                  aria-label="Voice input"
-                  classList={{ "text-red-500!": voiceInput.recording() }}
-                >
-                  <Icon name={voiceInput.recording() ? "mic-active" : "mic"} class="size-4.5" />
-                </Button>
+                data-action="prompt-voice"
+                type="button"
+                variant="ghost"
+                class="size-8 p-0"
+                style={buttons()}
+                onClick={voiceInput.toggle}
+                disabled={store.mode !== "normal"}
+                tabIndex={store.mode === "normal" ? undefined : -1}
+                aria-label="Voice input"
+                classList={{ "text-red-500!": voiceInput.recording() }}
+              >
+                <Icon name={voiceInput.recording() ? "mic-active" : "mic"} class="size-4.5" />
+              </Button>
             </div>
           </div>
         </div>
@@ -1666,6 +1675,19 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 </Button>
               </div>
               <div class="flex items-center gap-1.5 min-w-0 flex-1 h-7">
+                <Show when={props.controls.permissionMode?.supported}>
+                  <PermissionModePill
+                    mode={props.controls.permissionMode!.current}
+                    options={props.controls.permissionMode!.options}
+                    disabled={props.controls.permissionMode!.disabled}
+                    triggerStyle={control()}
+                    onSelect={(mode) => {
+                      props.controls.permissionMode?.select(mode)
+                      // The bypass confirmation takes focus; everything else returns to the editor.
+                      if (resolveModeSelection(mode) === "apply") restoreFocus()
+                    }}
+                  />
+                </Show>
                 <Show when={!agentsLoading()}>
                   <div
                     data-component="prompt-agent-control"

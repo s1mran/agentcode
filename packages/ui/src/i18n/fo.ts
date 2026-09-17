@@ -121,6 +121,7 @@ export const dict: Record<string, string> = {
   "ui.promptInput.attachments": "Myndir og fílur",
   "ui.promptInput.context": "Samanhangur",
   "ui.promptInput.shell": "Shell-skipan",
+  "ui.promptInput.chooseMode": "Permission mode",
   "ui.promptInput.chooseAgent": "Vel agent",
   "ui.promptInput.chooseModel": "Vel modell",
   "ui.promptInput.chooseVariant": "Vel modellvariant",

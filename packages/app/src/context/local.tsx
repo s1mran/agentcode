@@ -1,7 +1,7 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { useParams } from "@solidjs/router"
-import { batch, createEffect, createMemo, startTransition } from "solid-js"
+import { batch, createEffect, createMemo, createSignal, startTransition } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useModels } from "@/context/models"
 import { useSettings } from "@/context/settings"
@@ -14,6 +14,7 @@ import { useSDK } from "./sdk"
 import { useSync } from "./sync"
 import { useServerSDK } from "./server-sdk"
 import { ScopedKey, type ServerScope } from "@/utils/server-scope"
+import { serverPermissionModes } from "@/utils/permission-modes"
 
 export type ModelKey = { providerID: string; modelID: string; variant?: string }
 
@@ -68,7 +69,22 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const settings = useSettings()
 
     const id = createMemo(() => params.id || undefined)
-    const list = createMemo(() => sync().data.agent.filter((item) => item.mode !== "subagent" && !item.hidden))
+    // Servers with permission modes replace the native plan agent with the composer's Plan mode.
+    const [modesSupported, setModesSupported] = createSignal(false)
+    createEffect(() => {
+      const current = serverSDK()
+      void serverPermissionModes(current).then((value) => {
+        if (serverSDK() === current) setModesSupported(value)
+      })
+    })
+    const list = createMemo(() =>
+      sync().data.agent.filter(
+        (item) =>
+          item.mode !== "subagent" &&
+          !item.hidden &&
+          !(modesSupported() && item.name === "plan" && item.native !== false),
+      ),
+    )
     const agentsVisible = createMemo(() => settings.visibility.customAgents() || hasCustomAgent(list()))
     const connected = createMemo(() => new Set(providers.connected().map((item) => item.id)))
 
@@ -183,7 +199,9 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       list,
       visible: agentsVisible,
       current() {
-        return pickAgent(agentsVisible() ? (scope()?.agent ?? store.current) : "build")
+        const name = agentsVisible() ? (scope()?.agent ?? store.current) : "build"
+        // A saved plan selection now means build in Plan mode.
+        return pickAgent(modesSupported() && name === "plan" ? "build" : name)
       },
       set(name: string | undefined) {
         const item = pickAgent(name)

@@ -14,6 +14,8 @@ import { writeHeapSnapshot } from "v8"
 import { ServerAuth } from "@/server/auth"
 import { validateSession } from "../tui/validate-session"
 import { win32InstallCtrlCGuard } from "@opencode-ai/tui/terminal-win32"
+import { PERMISSION_MODE_DESCRIBE, resolvePermissionModeArgs } from "./run"
+import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -47,6 +49,21 @@ function createEventSource(client: RpcClient): EventSource {
       })
     },
   }
+}
+
+/**
+ * The worker's environment. The worker reads OPENCODE_PERMISSION_MODE as the global-scope default_permission_mode, so
+ * sessions without a stored mode start in an explicit --permission-mode (a resumed session gets it stored by the app).
+ * Only the worker gets the variable: this process's own environment is left alone, so nothing else it starts inherits
+ * the launch mode, and --auto never sets it (it is the client's reply policy, not a mode). The worker then moves it out
+ * of its own environment at startup (PermissionLaunchMode.claim), so nothing the worker spawns inherits it either.
+ */
+export function workerEnv(env: NodeJS.ProcessEnv, mode: PermissionV1.Mode | undefined): Record<string, string> {
+  const result = Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  )
+  if (mode) result.OPENCODE_PERMISSION_MODE = mode
+  return result
 }
 
 async function target() {
@@ -120,6 +137,11 @@ export const TuiThreadCommand = cmd({
         hidden: true,
         default: false,
       })
+      .option("permission-mode", {
+        type: "string",
+        // The mode reaches the server this command starts. `opencode attach` to a remote server does not carry it.
+        describe: PERMISSION_MODE_DESCRIBE,
+      })
       .option("mini", {
         type: "boolean",
         describe: "start the minimal interactive interface",
@@ -149,6 +171,13 @@ export const TuiThreadCommand = cmd({
     }
     const noReplay = args.replay === false || args.noReplay === true
 
+    const permission = resolvePermissionModeArgs(args)
+    if (permission.error !== undefined) {
+      UI.error(permission.error)
+      process.exitCode = 1
+      return
+    }
+
     if (args.mini) {
       const network = ["--port", "--hostname", "--mdns", "--no-mdns", "--mdns-domain", "--cors"].find((option) =>
         process.argv.some((arg) => arg === option || arg.startsWith(option + "=")),
@@ -171,6 +200,8 @@ export const TuiThreadCommand = cmd({
         replay: noReplay ? false : undefined,
         replayLimit: args.replayLimit,
         demo: args.demo,
+        auto: permission.auto,
+        permissionMode: permission.mode,
       })
       return
     }
@@ -208,9 +239,7 @@ export const TuiThreadCommand = cmd({
       const cwd = Filesystem.resolve(process.cwd())
 
       const worker = new Worker(file, {
-        env: Object.fromEntries(
-          Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-        ),
+        env: workerEnv(process.env, permission.mode),
       })
       const client = Rpc.client<typeof rpc>(worker)
       const reload = () => {
@@ -291,7 +320,8 @@ export const TuiThreadCommand = cmd({
               model: args.model,
               prompt,
               fork: args.fork,
-              auto: args.auto || args.yolo || args["dangerously-skip-permissions"],
+              auto: permission.auto,
+              permissionMode: permission.mode,
             },
           }),
         )
@@ -306,4 +336,3 @@ export const TuiThreadCommand = cmd({
     process.exit(0)
   },
 })
-// scratch

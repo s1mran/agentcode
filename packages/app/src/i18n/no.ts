@@ -176,6 +176,10 @@ export const dict = {
   "command.prompt.mode.normal": "Prompt",
   "command.permissions.autoaccept.enable": "Aksepter tillatelser automatisk",
   "command.permissions.autoaccept.disable": "Stopp automatisk akseptering av tillatelser",
+  "command.permissionMode.cycle": "Bytt tillatelsesmodus",
+  "command.permissionMode.set": "Tillatelsesmodus: {{mode}}",
+  "command.permissionMode.bypass": "Omgå tillatelser…",
+  "command.plan": "Planmodus",
   "command.workspace.toggle": "Veksle arbeidsområder",
   "command.workspace.toggle.description": "Aktiver eller deaktiver flere arbeidsområder i sidefeltet",
   "command.session.undo": "Angre",
@@ -348,6 +352,19 @@ export const dict = {
   "prompt.mode.shell": "Shell",
   "prompt.mode.normal": "Prompt",
   "prompt.mode.shell.exit": "ESC for å avslutte",
+  "prompt.permissionMode.label": "Tillatelsesmodus",
+  "prompt.permissionMode.default": "Be om tillatelse",
+  "prompt.permissionMode.default.description": "Spør før kommandoer, redigeringer og nettilgang",
+  "prompt.permissionMode.acceptEdits": "Godta redigeringer",
+  "prompt.permissionMode.acceptEdits.description":
+    "Redigeringer i dette prosjektet godkjennes; for kommandoer spørres det fortsatt",
+  "prompt.permissionMode.plan": "Planmodus",
+  "prompt.permissionMode.plan.description": "Skrivebeskyttet undersøkelse; bare planfilen kan redigeres",
+  "prompt.permissionMode.bypassPermissions": "Omgå tillatelser",
+  "prompt.permissionMode.bypassPermissions.description":
+    "Kjører uten å spørre, bortsett fra beskyttede baner, kritiske slettinger og dine spørreregler",
+  "prompt.permissionMode.dontAsk": "Ikke spør",
+  "prompt.permissionMode.dontAsk.description": "Alt som ville krevd spørsmål, avslås",
 
   "prompt.example.1": "Fiks en TODO i kodebasen",
   "prompt.example.2": "Hva er teknologistabelen i dette prosjektet?",
@@ -407,6 +424,21 @@ export const dict = {
   "prompt.toast.commandSendFailed.title": "Kunne ikke sende kommando",
   "prompt.toast.promptSendFailed.title": "Kunne ikke sende forespørsel",
   "prompt.toast.promptSendFailed.description": "Kunne ikke hente sesjon",
+
+  "dialog.bypassPermissions.title": "Omgå tillatelser?",
+  "dialog.bypassPermissions.body":
+    "Agenten kjører kommandoer, redigerer filer og bruker nettet uten å spørre. For beskyttede baner (.git, agentkonfigurasjon, oppstartsfiler for skallet), kritiske slettinger og dine egne spørreregler spørres det fortsatt; avslagsregler gjelder fortsatt. Bruk dette bare i et prosjekt du stoler på.",
+  "dialog.bypassPermissions.confirm": "Omgå tillatelser",
+  "dialog.bypassPermissions.cancel": "Avbryt",
+  "ui.permission.always.project": "Tillat alltid i dette prosjektet",
+  "ui.permission.always.session": "Tillat for denne sesjonen",
+  "ui.permission.always.acceptEdits": "Tillat alle redigeringer (Godta redigeringer)",
+  "ui.permission.always.everything": "alt for dette verktøyet",
+  "ui.permission.guard.floor.title": "Beskyttet handling",
+  "ui.permission.guard.guard.title": "Krever gjennomgang",
+  "ui.permission.guard.noAlways": "Dette kan bare godkjennes én gang",
+  "ui.permission.writes": "Skriver til",
+  "ui.question.planFeedback.placeholder": "Fortell agenten hva som skal endres i planen",
 
   "dialog.mcp.title": "MCP-er",
   "dialog.mcp.description": "{{enabled}} av {{total}} aktivert",
@@ -545,6 +577,15 @@ export const dict = {
   "toast.permissions.autoaccept.on.description": "Forespørsler om tillatelse vil bli godkjent automatisk",
   "toast.permissions.autoaccept.off.title": "Stoppet automatisk akseptering av tillatelser",
   "toast.permissions.autoaccept.off.description": "Forespørsler om tillatelse vil kreve godkjenning",
+  "toast.permissions.modeMigrated.title": "Automatisk akseptering er nå Godta redigeringer",
+  "toast.permissions.modeMigrated.description":
+    "Redigeringer i denne mappen godkjennes automatisk; for kommandoer spørres det fortsatt. Velg Omgå tillatelser i skrivefeltet for full autonomi.",
+  "toast.permissions.autoAcceptRemoved.title": "Automatisk akseptering ble slått av",
+  "toast.permissions.autoAcceptRemoved.modes":
+    "Du blir spurt om tillatelse igjen. For å godkjenne redigeringer automatisk, velg Godta redigeringer i modusmenyen ved siden av prompten eller trykk Shift+Tab.",
+  "toast.permissions.autoAcceptRemoved.rules":
+    "Du blir spurt om tillatelse igjen. For å hoppe over dette, tillat disse verktøyene i serverens tillatelseskonfigurasjon.",
+  "toast.permissions.mode.error.title": "Kunne ikke endre tillatelsesmodus",
 
   "toast.model.none.title": "Ingen modell valgt",
   "toast.model.none.description": "Koble til en leverandør for å oppsummere denne sesjonen",
@@ -774,6 +815,8 @@ export const dict = {
 
   "settings.general.row.language.title": "Språk",
   "settings.general.row.language.description": "Endre visningsspråket for AgentCode",
+  "settings.general.permissionMode.title": "Standard tillatelsesmodus",
+  "settings.general.permissionMode.description": "Brukes for nye sesjoner i denne mappen",
   "settings.general.row.appearance.title": "Utseende",
   "settings.general.row.appearance.description": "Tilpass hvordan AgentCode ser ut på enheten din",
   "settings.general.row.colorScheme.title": "Fargevalg",

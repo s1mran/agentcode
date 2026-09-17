@@ -120,6 +120,7 @@ export const dict: Record<string, string> = {
   "ui.promptInput.attachments": "ምስሎች እና ፋይሎች",
   "ui.promptInput.context": "አውድ",
   "ui.promptInput.shell": "የሼል ትዕዛዝ",
+  "ui.promptInput.chooseMode": "የፈቃድ ሁነታ",
   "ui.promptInput.chooseAgent": "ወኪሉን ይምረጡ",
   "ui.promptInput.chooseModel": "ሞዴል ምረጥ",
   "ui.promptInput.chooseVariant": "የሞዴል ልዩነትን ምረጥ",

@@ -9,10 +9,19 @@ import { showToast } from "@/utils/toast"
 import type { QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2"
 import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
+import { useSync } from "@/context/sync"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useServerSDK } from "@/context/server-sdk"
 import { ScopedKey } from "@/utils/server-scope"
+import {
+  allowedAnswers,
+  findToolPart,
+  isPlanApproval,
+  opensPlanFeedback,
+  planPath,
+  showCustomRow,
+} from "./session-dock-logic"
 
 const cache = new Map<string, { tab: number; answers: QuestionAnswer[]; custom: string[]; customOn: boolean[] }>()
 
@@ -63,6 +72,7 @@ function Option(props: {
 
 export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit: () => void }> = (props) => {
   const sdk = useSDK()
+  const sync = useSync()
   const serverSDK = useServerSDK()
   const language = useLanguage()
   const cacheKey = ScopedKey.from(serverSDK().scope, props.request.id)
@@ -94,14 +104,24 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const input = createMemo(() => store.custom[store.tab] ?? "")
   const on = createMemo(() => store.customOn[store.tab] === true)
   const multi = createMemo(() => question()?.multiple === true)
-  const count = createMemo(() => options().length + 1)
+  const showCustom = createMemo(() => showCustomRow(question()))
+  const count = createMemo(() => options().length + (showCustom() ? 1 : 0))
+
+  const toolPart = createMemo(() => {
+    const tool = props.request.tool
+    if (!tool) return undefined
+    return findToolPart(sync().data.part[tool.messageID], tool)
+  })
+  const planApproval = createMemo(() => isPlanApproval(props.request, toolPart()))
+  const plan = createMemo(() => (planApproval() ? planPath(toolPart()) : undefined))
 
   const summary = createMemo(() => {
     const n = Math.min(store.tab + 1, total())
     return language.t("session.question.progress", { current: n, total: total() })
   })
   const customLabel = () => language.t("ui.messagePart.option.typeOwnAnswer")
-  const customPlaceholder = () => language.t("ui.question.custom.placeholder")
+  const customPlaceholder = () =>
+    language.t(planApproval() ? "ui.question.planFeedback.placeholder" : "ui.question.custom.placeholder")
 
   const last = createMemo(() => store.tab >= total() - 1)
   const collapse = useSpring(() => (store.minimized ? 1 : 0), { visualDuration: 0.3, bounce: 0 })
@@ -109,6 +129,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   const optionsOff = createMemo(() => hidden() > 0.98)
 
   const customUpdate = (value: string, selected: boolean = on()) => {
+    if (!showCustom()) return
     const prev = input().trim()
     const next = value.trim()
 
@@ -154,7 +175,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
 
   const pickFocus = (tab: number = store.tab) => {
     const list = questions()[tab]?.options ?? []
-    if (store.customOn[tab] === true) return list.length
+    if (store.customOn[tab] === true && showCustomRow(questions()[tab])) return list.length
     return Math.max(
       0,
       list.findIndex((item) => store.answers[tab]?.includes(item.label) ?? false),
@@ -168,7 +189,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     if (focusFrame !== undefined) cancelAnimationFrame(focusFrame)
     focusFrame = requestAnimationFrame(() => {
       focusFrame = undefined
-      const el = next === options().length ? customRef : optsRef[next]
+      const el = next === options().length && showCustom() ? customRef : optsRef[next]
       el?.focus()
     })
   }
@@ -259,10 +280,12 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     await rejectMutation.mutateAsync()
   }
 
-  const submit = () => void reply(questions().map((_, i) => store.answers[i] ?? []))
+  // A question without a custom row never sends free text, even if a cached draft holds some.
+  const submit = () => void reply(questions().map((item, i) => allowedAnswers(item, store.answers[i] ?? [])))
 
   const answered = (i: number) => {
-    if ((store.answers[i]?.length ?? 0) > 0) return true
+    if (allowedAnswers(questions()[i], store.answers[i] ?? []).length > 0) return true
+    if (!showCustomRow(questions()[i])) return false
     return store.customOn[i] === true && (store.custom[i] ?? "").trim().length > 0
   }
 
@@ -283,7 +306,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }
 
   const customToggle = () => {
-    if (sending()) return
+    if (sending() || !showCustom()) return
     setStore("focus", options().length)
 
     if (!multi()) {
@@ -308,7 +331,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
   }
 
   const customOpen = () => {
-    if (sending()) return
+    if (sending() || !showCustom()) return
     setStore("focus", options().length)
     if (!on()) setStore("customOn", store.tab, true)
     setStore("editing", true)
@@ -370,12 +393,17 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
     if (sending()) return
 
     if (optIndex === options().length) {
-      customOpen()
+      if (showCustom()) customOpen()
       return
     }
 
     const opt = options()[optIndex]
     if (!opt) return
+    // "No, keep planning" asks what to change: open the feedback field, whose text replaces the bare label.
+    if (!multi() && showCustom() && opensPlanFeedback(planApproval(), opt.label)) {
+      customOpen()
+      return
+    }
     if (multi()) {
       setStore("editing", false)
       toggle(opt.label)
@@ -386,6 +414,7 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
 
   const commitCustom = () => {
     setStore("editing", false)
+    if (!showCustom()) return
     customUpdate(input())
     focus(options().length)
   }
@@ -518,6 +547,13 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
           </>
         }
       >
+        <Show when={store.minimized ? undefined : plan()}>
+          {(path) => (
+            <div data-slot="question-hint" data-plan-path="true" class="break-all">
+              <code class="font-mono text-text-base">{path()}</code>
+            </div>
+          )}
+        </Show>
         <div
           data-slot="question-text"
           style={{
@@ -560,78 +596,80 @@ export const SessionQuestionDock: Component<{ request: QuestionRequest; onSubmit
             )}
           </For>
 
-          <Show
-            when={store.editing}
-            fallback={
-              <button
-                type="button"
-                ref={customRef}
+          <Show when={showCustom()}>
+            <Show
+              when={store.editing}
+              fallback={
+                <button
+                  type="button"
+                  ref={customRef}
+                  data-slot="question-option"
+                  data-custom="true"
+                  data-picked={on()}
+                  role={multi() ? "checkbox" : "radio"}
+                  aria-checked={on()}
+                  disabled={sending()}
+                  onFocus={() => setStore("focus", options().length)}
+                  onClick={customOpen}
+                >
+                  <Mark multi={multi()} picked={on()} onClick={toggleCustomMark} />
+                  <span data-slot="question-option-main">
+                    <span data-slot="option-label">{customLabel()}</span>
+                    <span data-slot="option-description">{input() || customPlaceholder()}</span>
+                  </span>
+                </button>
+              }
+            >
+              <form
                 data-slot="question-option"
                 data-custom="true"
                 data-picked={on()}
                 role={multi() ? "checkbox" : "radio"}
                 aria-checked={on()}
-                disabled={sending()}
-                onFocus={() => setStore("focus", options().length)}
-                onClick={customOpen}
+                onMouseDown={(e) => {
+                  if (sending()) {
+                    e.preventDefault()
+                    return
+                  }
+                  if (e.target instanceof HTMLTextAreaElement) return
+                  const input = e.currentTarget.querySelector('[data-slot="question-custom-input"]')
+                  if (input instanceof HTMLTextAreaElement) input.focus()
+                }}
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  commitCustom()
+                }}
               >
                 <Mark multi={multi()} picked={on()} onClick={toggleCustomMark} />
                 <span data-slot="question-option-main">
                   <span data-slot="option-label">{customLabel()}</span>
-                  <span data-slot="option-description">{input() || customPlaceholder()}</span>
-                </span>
-              </button>
-            }
-          >
-            <form
-              data-slot="question-option"
-              data-custom="true"
-              data-picked={on()}
-              role={multi() ? "checkbox" : "radio"}
-              aria-checked={on()}
-              onMouseDown={(e) => {
-                if (sending()) {
-                  e.preventDefault()
-                  return
-                }
-                if (e.target instanceof HTMLTextAreaElement) return
-                const input = e.currentTarget.querySelector('[data-slot="question-custom-input"]')
-                if (input instanceof HTMLTextAreaElement) input.focus()
-              }}
-              onSubmit={(e) => {
-                e.preventDefault()
-                commitCustom()
-              }}
-            >
-              <Mark multi={multi()} picked={on()} onClick={toggleCustomMark} />
-              <span data-slot="question-option-main">
-                <span data-slot="option-label">{customLabel()}</span>
-                <textarea
-                  ref={focusCustom}
-                  data-slot="question-custom-input"
-                  placeholder={customPlaceholder()}
-                  value={input()}
-                  rows={1}
-                  disabled={sending()}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") {
+                  <textarea
+                    ref={focusCustom}
+                    data-slot="question-custom-input"
+                    placeholder={customPlaceholder()}
+                    value={input()}
+                    rows={1}
+                    disabled={sending()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        e.preventDefault()
+                        setStore("editing", false)
+                        focus(options().length)
+                        return
+                      }
+                      if ((e.metaKey || e.ctrlKey) && !e.altKey) return
+                      if (e.key !== "Enter" || e.shiftKey) return
                       e.preventDefault()
-                      setStore("editing", false)
-                      focus(options().length)
-                      return
-                    }
-                    if ((e.metaKey || e.ctrlKey) && !e.altKey) return
-                    if (e.key !== "Enter" || e.shiftKey) return
-                    e.preventDefault()
-                    commitCustom()
-                  }}
-                  onInput={(e) => {
-                    customUpdate(e.currentTarget.value)
-                    resizeInput(e.currentTarget)
-                  }}
-                />
-              </span>
-            </form>
+                      commitCustom()
+                    }}
+                    onInput={(e) => {
+                      customUpdate(e.currentTarget.value)
+                      resizeInput(e.currentTarget)
+                    }}
+                  />
+                </span>
+              </form>
+            </Show>
           </Show>
         </div>
       </DockPrompt>

@@ -1,6 +1,16 @@
-Use this tool when you have completed the planning phase and are ready to exit plan agent.
+Use this tool in plan mode when you have finished planning and want the user to approve the plan.
 
-This tool will ask the user if they want to switch to build agent to start implementing the plan.
+Write the complete plan to the plan file before calling this tool. The tool reads the plan from that file and fails if the file is missing or empty.
+
+The user answers with one of these outcomes:
+- "Yes, and accept edits": plan mode ends and the plan is implemented; edits inside the project are approved automatically, commands still ask.
+- "Yes, manually approve edits": plan mode ends and the plan is implemented; every edit and command asks for approval.
+- "No, keep planning": plan mode stays on and your turn ends.
+- "Yes, and bypass permissions" (offered only when plan mode was entered from bypass permissions): plan mode ends and the plan is implemented without asking, except for protected paths and critical deletes.
+
+If the user types an answer instead of choosing one, it is feedback and the plan is NOT approved: stay in plan mode, revise the plan file to address the feedback, then call this tool again.
+
+After an approval, end your turn; the implementation starts from a new message.
 
 Call this tool:
 - After you have written a complete plan to the plan file
@@ -11,3 +21,5 @@ Do NOT call this tool:
 - Before you have created or finalized the plan
 - If you still have unanswered questions about the implementation
 - If the user has indicated they want to continue planning
+
+Do NOT use the question tool to ask whether the plan is okay; this tool is the approval step.

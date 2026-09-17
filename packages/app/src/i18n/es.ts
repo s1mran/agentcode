@@ -178,6 +178,10 @@ export const dict = {
   "command.prompt.mode.normal": "Prompt",
   "command.permissions.autoaccept.enable": "Aceptar permisos automáticamente",
   "command.permissions.autoaccept.disable": "Dejar de aceptar permisos automáticamente",
+  "command.permissionMode.cycle": "Cambiar de modo de permisos",
+  "command.permissionMode.set": "Modo de permisos: {{mode}}",
+  "command.permissionMode.bypass": "Omitir permisos…",
+  "command.plan": "Modo plan",
   "command.workspace.toggle": "Activar o desactivar espacios de trabajo",
   "command.workspace.toggle.description": "Habilitar o deshabilitar múltiples espacios de trabajo en la barra lateral",
   "command.session.undo": "Deshacer",
@@ -356,6 +360,19 @@ export const dict = {
   "prompt.mode.shell": "Shell",
   "prompt.mode.normal": "Prompt",
   "prompt.mode.shell.exit": "esc para salir",
+  "prompt.permissionMode.label": "Modo de permisos",
+  "prompt.permissionMode.default": "Pedir permisos",
+  "prompt.permissionMode.default.description": "Pregunta antes de ejecutar comandos, editar y acceder a la web",
+  "prompt.permissionMode.acceptEdits": "Aceptar ediciones",
+  "prompt.permissionMode.acceptEdits.description":
+    "Las ediciones en este proyecto se aprueban; los comandos siguen preguntando",
+  "prompt.permissionMode.plan": "Modo plan",
+  "prompt.permissionMode.plan.description": "Investigación de solo lectura; solo se puede editar el archivo del plan",
+  "prompt.permissionMode.bypassPermissions": "Omitir permisos",
+  "prompt.permissionMode.bypassPermissions.description":
+    "Se ejecuta sin preguntar, salvo rutas protegidas, eliminaciones críticas y tus reglas de preguntar",
+  "prompt.permissionMode.dontAsk": "No preguntar",
+  "prompt.permissionMode.dontAsk.description": "Se deniega todo lo que requeriría preguntar",
   "session.child.promptDisabled": "No se pueden enviar prompts a las sesiones de subagentes.",
   "session.child.backToParent": "Volver a la sesión principal.",
 
@@ -418,6 +435,20 @@ export const dict = {
   "prompt.toast.commandSendFailed.title": "Fallo al enviar comando",
   "prompt.toast.promptSendFailed.title": "Fallo al enviar prompt",
   "prompt.toast.promptSendFailed.description": "No se pudo recuperar la sesión",
+  "dialog.bypassPermissions.title": "¿Omitir permisos?",
+  "dialog.bypassPermissions.body":
+    "El agente ejecutará comandos, editará archivos y accederá a la web sin preguntar. Las rutas protegidas (.git, configuración del agente, archivos de inicio del shell), las eliminaciones críticas y tus propias reglas de preguntar siguen preguntando; las reglas de denegar siguen aplicándose. Úsalo solo en un proyecto en el que confíes.",
+  "dialog.bypassPermissions.confirm": "Omitir permisos",
+  "dialog.bypassPermissions.cancel": "Cancelar",
+  "ui.permission.always.project": "Permitir siempre en este proyecto",
+  "ui.permission.always.session": "Permitir en esta sesión",
+  "ui.permission.always.acceptEdits": "Permitir todas las ediciones (Aceptar ediciones)",
+  "ui.permission.always.everything": "todo para esta herramienta",
+  "ui.permission.guard.floor.title": "Acción protegida",
+  "ui.permission.guard.guard.title": "Requiere revisión",
+  "ui.permission.guard.noAlways": "Esto solo se puede aprobar una vez",
+  "ui.permission.writes": "Escribe en",
+  "ui.question.planFeedback.placeholder": "Dile al agente qué cambiar en el plan",
 
   "dialog.mcp.title": "Servidores MCP",
   "dialog.mcp.description": "{{enabled}} de {{total}} habilitados",
@@ -643,6 +674,15 @@ export const dict = {
   "toast.permissions.autoaccept.on.description": "Las solicitudes de permisos se aprobarán automáticamente",
   "toast.permissions.autoaccept.off.title": "Se dejó de aceptar permisos automáticamente",
   "toast.permissions.autoaccept.off.description": "Las solicitudes de permisos requerirán aprobación",
+  "toast.permissions.modeMigrated.title": "La aceptación automática ahora es “Aceptar ediciones”",
+  "toast.permissions.modeMigrated.description":
+    "Las ediciones en esta carpeta se aprueban automáticamente; los comandos siguen preguntando. Elige “Omitir permisos” en el editor para tener autonomía total.",
+  "toast.permissions.autoAcceptRemoved.title": "Se desactivó la aceptación automática",
+  "toast.permissions.autoAcceptRemoved.modes":
+    "Las solicitudes de permisos vuelven a mostrarse. Para aprobar ediciones automáticamente, elige “Aceptar ediciones” en el menú de modos junto al prompt o pulsa Shift+Tab.",
+  "toast.permissions.autoAcceptRemoved.rules":
+    "Las solicitudes de permisos vuelven a mostrarse. Para omitirlas, permite esas herramientas en la configuración de permisos de este servidor.",
+  "toast.permissions.mode.error.title": "No se pudo cambiar el modo de permisos",
 
   "toast.model.none.title": "Ningún modelo seleccionado",
   "toast.model.none.description": "Conecta un proveedor para resumir esta sesión",
@@ -917,6 +957,8 @@ export const dict = {
 
   "settings.general.row.language.title": "Idioma",
   "settings.general.row.language.description": "Cambiar el idioma de visualización para AgentCode",
+  "settings.general.permissionMode.title": "Modo de permisos predeterminado",
+  "settings.general.permissionMode.description": "Se usa para las sesiones nuevas en esta carpeta",
   "settings.general.row.shell.title": "Shell del terminal",
   "settings.general.row.shell.description": "Shell que usan el terminal y las herramientas del agente",
   "settings.general.row.shell.autoDefault": "Automático (predeterminado)",

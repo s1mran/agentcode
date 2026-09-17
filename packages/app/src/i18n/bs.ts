@@ -178,6 +178,10 @@ export const dict = {
   "command.prompt.mode.normal": "Prompt",
   "command.permissions.autoaccept.enable": "Automatski prihvati dozvole",
   "command.permissions.autoaccept.disable": "Zaustavi automatsko prihvatanje dozvola",
+  "command.permissionMode.cycle": "Promijeni način dozvola",
+  "command.permissionMode.set": "Način dozvola: {{mode}}",
+  "command.permissionMode.bypass": "Zaobiđi dozvole…",
+  "command.plan": "Način planiranja",
   "command.workspace.toggle": "Prikaži/sakrij radne prostore",
   "command.workspace.toggle.description": "Omogući ili onemogući više radnih prostora u bočnoj traci",
   "command.session.undo": "Poništi",
@@ -356,6 +360,18 @@ export const dict = {
   "prompt.mode.shell": "Shell",
   "prompt.mode.normal": "Prompt",
   "prompt.mode.shell.exit": "esc za izlaz",
+  "prompt.permissionMode.label": "Način dozvola",
+  "prompt.permissionMode.default": "Traži dozvole",
+  "prompt.permissionMode.default.description": "Pita prije komandi, izmjena i pristupa webu",
+  "prompt.permissionMode.acceptEdits": "Prihvati izmjene",
+  "prompt.permissionMode.acceptEdits.description": "Izmjene u ovom projektu se odobravaju; za komande se i dalje pita",
+  "prompt.permissionMode.plan": "Način planiranja",
+  "prompt.permissionMode.plan.description": "Istraživanje samo za čitanje; može se uređivati samo datoteka plana",
+  "prompt.permissionMode.bypassPermissions": "Zaobiđi dozvole",
+  "prompt.permissionMode.bypassPermissions.description":
+    "Radi bez pitanja, osim za zaštićene putanje, kritična brisanja i tvoja pravila za pitanje",
+  "prompt.permissionMode.dontAsk": "Ne pitaj",
+  "prompt.permissionMode.dontAsk.description": "Sve za šta bi se pitalo se odbija",
   "session.child.promptDisabled": "Sesijama podagenta nije moguće slati upite.",
   "session.child.backToParent": "Nazad na glavnu sesiju.",
 
@@ -417,6 +433,20 @@ export const dict = {
   "prompt.toast.commandSendFailed.title": "Neuspješno slanje komande",
   "prompt.toast.promptSendFailed.title": "Neuspješno slanje upita",
   "prompt.toast.promptSendFailed.description": "Nije moguće dohvatiti sesiju",
+  "dialog.bypassPermissions.title": "Zaobići dozvole?",
+  "dialog.bypassPermissions.body":
+    "Agent će pokretati komande, uređivati datoteke i pristupati webu bez pitanja. Za zaštićene putanje (.git, konfiguracija agenta, datoteke za pokretanje shella), kritična brisanja i tvoja vlastita pravila za pitanje i dalje se pita; pravila zabrane i dalje važe. Koristi ovo samo u projektu kojem vjeruješ.",
+  "dialog.bypassPermissions.confirm": "Zaobiđi dozvole",
+  "dialog.bypassPermissions.cancel": "Otkaži",
+  "ui.permission.always.project": "Uvijek dozvoli u ovom projektu",
+  "ui.permission.always.session": "Dozvoli za ovu sesiju",
+  "ui.permission.always.acceptEdits": "Dozvoli sve izmjene (Prihvati izmjene)",
+  "ui.permission.always.everything": "sve za ovaj alat",
+  "ui.permission.guard.floor.title": "Zaštićena radnja",
+  "ui.permission.guard.guard.title": "Potreban pregled",
+  "ui.permission.guard.noAlways": "Ovo se može odobriti samo jednom",
+  "ui.permission.writes": "Piše u",
+  "ui.question.planFeedback.placeholder": "Reci agentu šta da promijeni u planu",
 
   "dialog.mcp.title": "MCP-ovi",
   "dialog.mcp.description": "{{enabled}} od {{total}} omogućeno",
@@ -641,6 +671,15 @@ export const dict = {
   "toast.permissions.autoaccept.on.description": "Zahtjevi za dozvole će biti automatski odobreni",
   "toast.permissions.autoaccept.off.title": "Zaustavljeno automatsko prihvatanje dozvola",
   "toast.permissions.autoaccept.off.description": "Zahtjevi za dozvole će zahtijevati odobrenje",
+  "toast.permissions.modeMigrated.title": "Automatsko prihvatanje je sada „Prihvati izmjene“",
+  "toast.permissions.modeMigrated.description":
+    "Izmjene u ovoj fascikli se automatski odobravaju; za komande se i dalje pita. Za punu autonomiju odaberi „Zaobiđi dozvole“ u uređivaču poruke.",
+  "toast.permissions.autoAcceptRemoved.title": "Automatsko prihvatanje je isključeno",
+  "toast.permissions.autoAcceptRemoved.modes":
+    "Zahtjevi za dozvole ponovo se prikazuju. Da automatski odobravaš izmjene, odaberi „Prihvati izmjene“ u meniju načina pored upita ili pritisni Shift+Tab.",
+  "toast.permissions.autoAcceptRemoved.rules":
+    "Zahtjevi za dozvole ponovo se prikazuju. Da ih preskočiš, dozvoli te alate u konfiguraciji dozvola ovog servera.",
+  "toast.permissions.mode.error.title": "Nije moguće promijeniti način dozvola",
 
   "toast.model.none.title": "Nije odabran model",
   "toast.model.none.description": "Poveži provajdera da sažmeš ovu sesiju",
@@ -912,6 +951,8 @@ export const dict = {
 
   "settings.general.row.language.title": "Jezik",
   "settings.general.row.language.description": "Promijeni jezik prikaza u AgentCode-u",
+  "settings.general.permissionMode.title": "Zadani način dozvola",
+  "settings.general.permissionMode.description": "Koristi se za nove sesije u ovoj fascikli",
   "settings.general.row.shell.title": "Shell terminala",
   "settings.general.row.shell.description":
     "Odaberi shell koji se koristi za terminal. Kompatibilni shellovi koriste se i za pozive alata agenta.",

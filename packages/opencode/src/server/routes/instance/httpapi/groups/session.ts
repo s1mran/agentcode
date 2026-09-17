@@ -50,12 +50,26 @@ export const UpdatePayload = Schema.Struct({
   title: Schema.optional(Schema.String),
   metadata: Schema.optional(Session.Metadata),
   permission: Schema.optional(PermissionV1.Ruleset),
+  // null clears the session mode so it inherits again (parent chain, then config default).
+  permissionMode: Schema.optional(Schema.NullOr(PermissionV1.Mode)),
   time: Schema.optional(
     Schema.Struct({
       archived: Schema.optional(Session.ArchivedTimestamp),
     }),
   ),
 })
+
+// A refused permission mode (for example bypassPermissions while it is disabled). It keeps the legacy BadRequest body,
+// so clients read the reason from data.message as they do for every other 400.
+export class ApiPermissionModeError extends Schema.ErrorClass<ApiPermissionModeError>("PermissionModeRejectedError")(
+  {
+    name: Schema.Literal("BadRequest"),
+    data: Schema.Struct({
+      message: Schema.String,
+    }),
+  },
+  { httpApiStatus: 400 },
+) {}
 export const ForkPayload = Schema.Struct(Struct.omit(Session.ForkInput.fields, ["sessionID"]))
 export const InitPayload = Schema.Struct({
   modelID: ModelV2.ID,
@@ -204,7 +218,7 @@ export const SessionApi = HttpApi.make("session")
           query: WorkspaceRoutingQuery,
           payload: [HttpApiSchema.NoContent, Session.CreateInput],
           success: described(Session.Info, "Successfully created session"),
-          error: HttpApiError.BadRequest,
+          error: [HttpApiError.BadRequest, ApiPermissionModeError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.create",
@@ -229,7 +243,7 @@ export const SessionApi = HttpApi.make("session")
           query: WorkspaceRoutingQuery,
           payload: UpdatePayload,
           success: described(Session.Info, "Successfully updated session"),
-          error: [HttpApiError.BadRequest, ApiNotFoundError],
+          error: [HttpApiError.BadRequest, ApiPermissionModeError, ApiNotFoundError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.update",

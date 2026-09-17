@@ -105,6 +105,7 @@ export const dict: Record<Keys, string> = {
   "ui.promptInput.attachments": "Bilder og filer",
   "ui.promptInput.context": "Kontekst",
   "ui.promptInput.shell": "Shell-kommando",
+  "ui.promptInput.chooseMode": "Tillatelsesmodus",
   "ui.promptInput.chooseAgent": "Velg agent",
   "ui.promptInput.chooseModel": "Velg modell",
   "ui.promptInput.chooseVariant": "Velg modellvariant",

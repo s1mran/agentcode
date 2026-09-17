@@ -132,6 +132,7 @@ export const dict: Record<string, string> = {
   "ui.promptInput.attachments": "Gambar dan berkas",
   "ui.promptInput.context": "Konteks",
   "ui.promptInput.shell": "Perintah shell",
+  "ui.promptInput.chooseMode": "Mode izin",
   "ui.promptInput.chooseAgent": "Pilih agen",
   "ui.promptInput.chooseModel": "Pilih model",
   "ui.promptInput.chooseVariant": "Pilih varian model",

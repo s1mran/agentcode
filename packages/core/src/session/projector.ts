@@ -66,7 +66,12 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     tokens_cache_read: (info.tokens ?? { cache: { read: 0 } }).cache.read,
     tokens_cache_write: (info.tokens ?? { cache: { write: 0 } }).cache.write,
     revert: info.revert ? { ...info.revert, messageID: SessionMessage.ID.make(info.revert.messageID) } : null,
-    permission: info.permission ? [...info.permission] : undefined,
+    // Session rules never carry the built-in tag, including sessions replayed from another device.
+    permission: info.permission
+      ? info.permission.map(({ permission, pattern, action }) => ({ permission, pattern, action }))
+      : undefined,
+    // null (not undefined) so a session.updated without a mode clears the column.
+    permission_mode: info.permissionMode ?? null,
     time_created: info.time.created,
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,

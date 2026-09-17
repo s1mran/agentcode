@@ -125,6 +125,7 @@ export const dict: Record<string, string> = {
   "ui.promptInput.attachments": "Imagini și fișiere",
   "ui.promptInput.context": "Context",
   "ui.promptInput.shell": "Comandă shell",
+  "ui.promptInput.chooseMode": "Mod permisiuni",
   "ui.promptInput.chooseAgent": "Alege agentul",
   "ui.promptInput.chooseModel": "Alege modelul",
   "ui.promptInput.chooseVariant": "Alege varianta modelului",

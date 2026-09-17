@@ -61,6 +61,19 @@ describe("tool.assertExternalDirectory", () => {
     }),
   )
 
+  it.instance("marks read-only lookups with access read", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const { requests, ctx } = makeCtx()
+
+      const target = path.join(path.dirname(test.directory), "outside", "file.txt")
+      yield* assertExternalDirectoryEffect(ctx, target)
+      yield* assertExternalDirectoryEffect(ctx, target, { access: "read" })
+
+      expect(requests.map((req) => req.metadata.access)).toEqual([undefined, "read"])
+    }),
+  )
+
   it.instance("asks with a single canonical glob", () =>
     Effect.gen(function* () {
       const test = yield* TestInstance

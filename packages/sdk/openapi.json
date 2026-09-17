@@ -291,6 +291,10 @@
                     },
                     "version": {
                       "type": "string"
+                    },
+                    "permissionModes": {
+                      "type": "boolean",
+                      "enum": [true]
                     }
                   },
                   "required": ["healthy", "version"],
@@ -4670,13 +4674,16 @@
             }
           },
           "400": {
-            "description": "BadRequest | InvalidRequestError",
+            "description": "BadRequest | QuestionInvalidAnswerError | InvalidRequestError",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QuestionInvalidAnswerError"
                     },
                     {
                       "$ref": "#/components/schemas/InvalidRequestError"
@@ -5434,13 +5441,16 @@
             }
           },
           "400": {
-            "description": "BadRequest | InvalidRequestError",
+            "description": "BadRequest | PermissionModeRejectedError | InvalidRequestError",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionModeRejectedError"
                     },
                     {
                       "$ref": "#/components/schemas/InvalidRequestError"
@@ -5490,6 +5500,9 @@
                   },
                   "permission": {
                     "$ref": "#/components/schemas/PermissionRuleset"
+                  },
+                  "permissionMode": {
+                    "$ref": "#/components/schemas/PermissionMode"
                   },
                   "workspaceID": {
                     "type": "string",
@@ -5774,13 +5787,16 @@
             }
           },
           "400": {
-            "description": "BadRequest | InvalidRequestError",
+            "description": "BadRequest | PermissionModeRejectedError | InvalidRequestError",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/effect_HttpApiError_BadRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PermissionModeRejectedError"
                     },
                     {
                       "$ref": "#/components/schemas/InvalidRequestError"
@@ -5817,6 +5833,16 @@
                   },
                   "permission": {
                     "$ref": "#/components/schemas/PermissionRuleset"
+                  },
+                  "permissionMode": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/PermissionMode"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "time": {
                     "type": "object",
@@ -6325,6 +6351,9 @@
                   },
                   "variant": {
                     "type": "string"
+                  },
+                  "permissionMode": {
+                    "$ref": "#/components/schemas/PermissionMode"
                   },
                   "parts": {
                     "type": "array",
@@ -7208,6 +7237,9 @@
                   "variant": {
                     "type": "string"
                   },
+                  "permissionMode": {
+                    "$ref": "#/components/schemas/PermissionMode"
+                  },
                   "parts": {
                     "type": "array",
                     "items": {
@@ -7350,6 +7382,9 @@
                   },
                   "variant": {
                     "type": "string"
+                  },
+                  "permissionMode": {
+                    "$ref": "#/components/schemas/PermissionMode"
                   },
                   "parts": {
                     "type": "array",
@@ -7520,6 +7555,9 @@
                   },
                   "command": {
                     "type": "string"
+                  },
+                  "permissionMode": {
+                    "$ref": "#/components/schemas/PermissionMode"
                   }
                 },
                 "required": ["agent", "command"],
@@ -15731,6 +15769,10 @@
           },
           "action": {
             "$ref": "#/components/schemas/PermissionAction"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["builtin"]
           }
         },
         "required": ["permission", "pattern", "action"],
@@ -15741,6 +15783,10 @@
         "items": {
           "$ref": "#/components/schemas/PermissionRule"
         }
+      },
+      "PermissionMode": {
+        "type": "string",
+        "enum": ["default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"]
       },
       "Session": {
         "type": "object",
@@ -15885,6 +15931,9 @@
           },
           "permission": {
             "$ref": "#/components/schemas/PermissionRuleset"
+          },
+          "permissionMode": {
+            "$ref": "#/components/schemas/PermissionMode"
           },
           "revert": {
             "type": "object",
@@ -16361,6 +16410,9 @@
           },
           "finish": {
             "type": "string"
+          },
+          "permissionMode": {
+            "$ref": "#/components/schemas/PermissionMode"
           }
         },
         "required": [
@@ -17262,6 +17314,34 @@
         },
         "required": ["content", "status", "priority"],
         "additionalProperties": false
+      },
+      "PermissionGuard": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": ["floor", "guard"]
+          },
+          "category": {
+            "type": "string",
+            "enum": ["protected_path", "critical_rm", "destructive_git", "secret"]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["level", "category", "reason"],
+        "additionalProperties": false
+      },
+      "PermissionAlwaysScope": {
+        "type": "string",
+        "enum": ["project", "session", "acceptEdits"]
       },
       "SessionStatus": {
         "anyOf": [
@@ -19714,6 +19794,12 @@
                         },
                         "required": ["messageID", "callID"],
                         "additionalProperties": false
+                      },
+                      "guard": {
+                        "$ref": "#/components/schemas/PermissionGuard"
+                      },
+                      "alwaysScope": {
+                        "$ref": "#/components/schemas/PermissionAlwaysScope"
                       }
                     },
                     "required": ["id", "sessionID", "permission", "patterns", "metadata", "always"],
@@ -20619,10 +20705,10 @@
                 "$ref": "#/components/schemas/PermissionActionConfig"
               },
               "webfetch": {
-                "$ref": "#/components/schemas/PermissionActionConfig"
+                "$ref": "#/components/schemas/PermissionRuleConfig"
               },
               "websearch": {
-                "$ref": "#/components/schemas/PermissionActionConfig"
+                "$ref": "#/components/schemas/PermissionRuleConfig"
               },
               "lsp": {
                 "$ref": "#/components/schemas/PermissionRuleConfig"
@@ -21462,6 +21548,12 @@
           "permission": {
             "$ref": "#/components/schemas/PermissionConfig"
           },
+          "default_permission_mode": {
+            "$ref": "#/components/schemas/PermissionMode"
+          },
+          "disable_bypass_permissions": {
+            "type": "boolean"
+          },
           "tools": {
             "type": "object",
             "additionalProperties": {
@@ -22163,6 +22255,9 @@
           "permission": {
             "$ref": "#/components/schemas/PermissionRuleset"
           },
+          "permissionMode": {
+            "$ref": "#/components/schemas/PermissionMode"
+          },
           "revert": {
             "type": "object",
             "properties": {
@@ -22820,6 +22915,23 @@
         "required": ["id", "sessionID", "questions"],
         "additionalProperties": false
       },
+      "QuestionInvalidAnswerError": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["QuestionInvalidAnswerError"]
+          },
+          "requestID": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["_tag", "requestID", "message"],
+        "additionalProperties": false
+      },
       "QuestionNotFoundError": {
         "type": "object",
         "properties": {
@@ -22878,6 +22990,12 @@
             },
             "required": ["messageID", "callID"],
             "additionalProperties": false
+          },
+          "guard": {
+            "$ref": "#/components/schemas/PermissionGuard"
+          },
+          "alwaysScope": {
+            "$ref": "#/components/schemas/PermissionAlwaysScope"
           }
         },
         "required": ["id", "sessionID", "permission", "patterns", "metadata", "always"],
@@ -23081,6 +23199,27 @@
             }
           }
         }
+      },
+      "PermissionModeRejectedError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["BadRequest"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
       },
       "TextPartInput": {
         "type": "object",
@@ -32654,6 +32793,12 @@
                 },
                 "required": ["messageID", "callID"],
                 "additionalProperties": false
+              },
+              "guard": {
+                "$ref": "#/components/schemas/PermissionGuard"
+              },
+              "alwaysScope": {
+                "$ref": "#/components/schemas/PermissionAlwaysScope"
               }
             },
             "required": ["id", "sessionID", "permission", "patterns", "metadata", "always"],
@@ -36117,6 +36262,12 @@
                 },
                 "required": ["messageID", "callID"],
                 "additionalProperties": false
+              },
+              "guard": {
+                "$ref": "#/components/schemas/PermissionGuard"
+              },
+              "alwaysScope": {
+                "$ref": "#/components/schemas/PermissionAlwaysScope"
               }
             },
             "required": ["id", "sessionID", "permission", "patterns", "metadata", "always"],

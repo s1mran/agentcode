@@ -121,6 +121,7 @@ export const dict = {
   "ui.promptInput.attachments": "Зураг болон файлууд",
   "ui.promptInput.context": "Контекст",
   "ui.promptInput.shell": "Shell тушаал",
+  "ui.promptInput.chooseMode": "Зөвшөөрлийн горим",
   "ui.promptInput.chooseAgent": "Агент сонгох",
   "ui.promptInput.chooseModel": "Загвар сонгох",
   "ui.promptInput.chooseVariant": "Загварын хувилбарыг сонгоно уу",
